@@ -9,6 +9,9 @@ import Foundation
 import Vision
 import CoreML
 import CoreImage
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum CaptchaError: Error {
     case modelNotFound
@@ -87,7 +90,7 @@ final class CaptchaRecognizer {
         for key in candidateInputKeys {
             do {
                 let input = try MLDictionaryFeatureProvider(dictionary: [key: inputArray])
-                predictionOutput = try model.prediction(from: input)
+                predictionOutput = try await model.prediction(from: input)
                 print("[CaptchaRecognizer] ✅ 模型接受输入 key='\(key)'，已执行推理")
                 break
             } catch {
