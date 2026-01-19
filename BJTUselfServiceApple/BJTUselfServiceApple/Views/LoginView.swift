@@ -90,11 +90,22 @@ struct LoginView: View {
                                 .frame(width: 100, height: 40)
                             if authViewModel.isFetchingCaptcha {
                                 ProgressView()
-                            } else if let data = authViewModel.captchaImageData, let uiImage = UIImage(data: data) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 100, height: 40)
+                            } else if let data = authViewModel.captchaImageData {
+                                #if os(iOS)
+                                if let uiImage = UIImage(data: data) {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 100, height: 40)
+                                }
+                                #else
+                                if let nsImage = NSImage(data: data) {
+                                    Image(nsImage: nsImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 100, height: 40)
+                                }
+                                #endif
                             } else {
                                 Text("验证码")
                                     .font(.caption)
