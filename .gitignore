@@ -14,3 +14,29 @@
 .cxx
 local.properties
 /.idea/
+
+# Android 源码归档（不追踪）
+/AndroidOrigin/
+/app/
+/gradle/
+gradlew
+gradlew.bat
+build.gradle.kts
+settings.gradle.kts
+gradle.properties
+
+# Python 虚拟环境
+.venv/
+venv/
+*.pyc
+__pycache__/
+
+# Xcode
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+BJTUselfServiceApple/BJTUselfServiceApple.xcodeproj/xcuserdata/
+BJTUselfServiceApple/BJTUselfServiceApple.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Core ML 模型（生成文件）
+*.mlmodelc
+*.mlpackage
