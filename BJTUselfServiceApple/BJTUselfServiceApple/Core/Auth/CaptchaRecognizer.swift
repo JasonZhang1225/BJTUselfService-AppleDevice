@@ -45,8 +45,14 @@ final class CaptchaRecognizer {
         for (name, ext) in possibleNames {
             if let url = Bundle.main.url(forResource: name, withExtension: ext) {
                 do {
-                    mlModel = try MLModel(contentsOf: url)
+                    let model = try MLModel(contentsOf: url)
+                    mlModel = model
+                    // 打印模型输入输出描述以便调试
+                    let inputs = model.modelDescription.inputDescriptionsByName.keys.sorted()
+                    let outputs = model.modelDescription.outputDescriptionsByName.keys.sorted()
                     print("[CaptchaRecognizer] ✅ 成功加载模型: \(name).\(ext)")
+                    print("[CaptchaRecognizer] model inputs: \(inputs)")
+                    print("[CaptchaRecognizer] model outputs: \(outputs)")
                     return
                 } catch {
                     print("[CaptchaRecognizer] ⚠️ 无法加载 \(name).\(ext): \(error)")
@@ -55,7 +61,7 @@ final class CaptchaRecognizer {
         }
         
         print("[CaptchaRecognizer] ❌ 未找到任何可用的模型文件")
-        print("[CaptchaRecognizer] 💡 请运行 convert_captcha_model.py 转换模型")
+        print("[CaptchaRecognizer] 💡 请运行 convert_captcha_model.py 转换模型，并将生成的 CaptchaModel.mlpackage 拖入 Xcode 项目，确保 Target Membership 已选中")
         mlModel = nil
     }
     
@@ -73,15 +79,32 @@ final class CaptchaRecognizer {
         
         // 1. 将图片数据转为 MLMultiArray (匹配 Android 的预处理)
         let inputArray = try preprocessImage(imageData)
+        print("[CaptchaRecognizer] preprocessed MLMultiArray shape: \(inputArray.shape.map { Int(truncating: $0) })")
         
-        // 2. 创建模型输入
-        let input = try MLDictionaryFeatureProvider(dictionary: ["image": inputArray])
+        // 2. 创建模型输入（尝试多个可能的输入 key）
+        let candidateInputKeys = ["image", "input", "input1"]
+        var predictionOutput: MLFeatureProvider? = nil
+        for key in candidateInputKeys {
+            do {
+                let input = try MLDictionaryFeatureProvider(dictionary: [key: inputArray])
+                predictionOutput = try model.prediction(from: input)
+                print("[CaptchaRecognizer] ✅ 模型接受输入 key='\(key)'，已执行推理")
+                break
+            } catch {
+                print("[CaptchaRecognizer] ℹ️ 模型未接受输入 key='\(key)': \(error)")
+            }
+        }
         
-        // 3. 执行推理
-        let output = try await model.prediction(from: input)
+        guard let output = predictionOutput else {
+            // 输出更多的模型期望信息
+            if let desc = model.modelDescription as MLModelDescription? {
+                print("[CaptchaRecognizer] ❌ 推理失败；模型输入期望：\(desc.inputDescriptionsByName.keys)")
+            }
+            throw CaptchaError.inferenceFailed
+        }
         
-        // 4. 尝试多种可能的输出名称
-        let possibleOutputNames = ["output", "logits", "var_580"]
+        // 3. 尝试多种可能的输出名称
+        let possibleOutputNames = ["output", "logits", "var_580", "logit", "probabilities"]
         for name in possibleOutputNames {
             if let logits = output.featureValue(for: name)?.multiArrayValue {
                 print("[CaptchaRecognizer] ✅ 找到输出: \(name)")
@@ -110,45 +133,62 @@ final class CaptchaRecognizer {
         let targetWidth = 130
         let targetHeight = 42
         
-        // 缩放到目标尺寸
+        // 缩放到目标尺寸并绘制到带有已知像素布局的 CGContext（RGBA8888）以避免字节序问题
         let scaleX = CGFloat(targetWidth) / ciImage.extent.width
         let scaleY = CGFloat(targetHeight) / ciImage.extent.height
         let scaledImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-        
-        // 创建 CGContext 提取像素
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(scaledImage, from: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight)) else {
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * targetWidth
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue))
+
+        guard let contextRef = CGContext(data: nil,
+                                         width: targetWidth,
+                                         height: targetHeight,
+                                         bitsPerComponent: 8,
+                                         bytesPerRow: bytesPerRow,
+                                         space: colorSpace,
+                                         bitmapInfo: bitmapInfo.rawValue) else {
             throw CaptchaError.imageProcessingFailed
         }
-        
+
+        let drawRect = CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight)
+        let uiImage = UIImage(ciImage: scaledImage)
+        UIGraphicsPushContext(contextRef)
+        uiImage.draw(in: drawRect)
+        UIGraphicsPopContext()
+
+        guard let cgImage = contextRef.makeImage() else {
+            throw CaptchaError.imageProcessingFailed
+        }
+
         // 创建 MLMultiArray: [1, 3, 42, 130]
         guard let array = try? MLMultiArray(shape: [1, 3, 42, 130], dataType: .float32) else {
             throw CaptchaError.imageProcessingFailed
         }
-        
-        // 提取像素数据
-        let pixelData = cgImage.dataProvider?.data
-        guard let data = pixelData, let bytes = CFDataGetBytePtr(data) else {
+
+        // 提取像素数据（确保为 RGBA）
+        guard let data = cgImage.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else {
             throw CaptchaError.imageProcessingFailed
         }
-        
-        let bytesPerPixel = 4  // RGBA
-        
-        // 填充数组 (匹配 Android: R/255, G/255, B/255)
+
+        // 检查像素字节序：我们使用 byteOrder32Big + premultipliedLast -> RGBA
         for y in 0..<targetHeight {
             for x in 0..<targetWidth {
-                let offset = (y * targetWidth + x) * bytesPerPixel
+                let offset = y * bytesPerRow + x * bytesPerPixel
+                // RGBA 顺序
                 let r = Float(bytes[offset]) / 255.0
                 let g = Float(bytes[offset + 1]) / 255.0
                 let b = Float(bytes[offset + 2]) / 255.0
-                
+
                 // 通道优先布局: [batch, channel, height, width]
                 array[[0, 0, y as NSNumber, x as NSNumber] as [NSNumber]] = NSNumber(value: r)
                 array[[0, 1, y as NSNumber, x as NSNumber] as [NSNumber]] = NSNumber(value: g)
                 array[[0, 2, y as NSNumber, x as NSNumber] as [NSNumber]] = NSNumber(value: b)
             }
         }
-        
+
         return array
     }
     
