@@ -190,7 +190,24 @@ class AuthService: ObservableObject {
                 response: response,
                 html: String(data: response.data, encoding: .utf8)
             )
+            // 打印完整响应头以便诊断
+            print("[AuthDebug] login response headers: \(response.headers)")
             logCookies()
+
+            // 某些情况下服务器会有短暂延迟才写入 MIS session cookie（导致我们立刻检查时未检到），
+            // 在判断失败之前做一次短轮询：最多重试 3 次，每次等待 500ms
+            var cookieAppearedAfterRetry = false
+            if !hasAuthCookie() {
+                for attempt in 1...3 {
+                    try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+                    logCookies()
+                    if hasAuthCookie() {
+                        cookieAppearedAfterRetry = true
+                        print("[AuthDebug] Cookie detected after \(attempt) retry")
+                        break
+                    }
+                }
+            }
 
             // 1. 尝试直接判断响应是否已成功
             if isAuthenticatedResponse(response, html: String(data: response.data, encoding: .utf8)) {
@@ -201,14 +218,32 @@ class AuthService: ObservableObject {
                     parsedStudent = parseStudentInfo(from: html)
                 }
 
-                // 若未直接解析到学生信息，且服务器已设置了 MIS 会话 Cookie，则再主动请求 /home/ 以解析
+                // 若未直接解析到学生信息，且服务器已设置了 CAS 会话 Cookie，则尝试触发 authorize -> callback 流程以促成 MIS 会话
                 if parsedStudent == nil && hasAuthCookie() {
-                    if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
-                        let homeResponse = try await networkService.get(url: homeURL)
-                        let homeHTML = String(data: homeResponse.data, encoding: .utf8)
-                        logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
-                        if let html = homeHTML {
-                            parsedStudent = parseStudentInfo(from: html)
+                    // 1) 尝试访问 next (authorize) 链接以触发回调
+                    if let authorizeURL = URL(string: challenge.nextPath, relativeTo: URL(string: "https://\(casHost)")) {
+                        print("[AuthDebug] Attempting authorize GET to: \(authorizeURL.absoluteString)")
+                        let authResp = try await networkService.get(url: authorizeURL)
+                        let authHTML = String(data: authResp.data, encoding: .utf8)
+                        logAuthDebug(prefix: "authorize_call", response: authResp, html: authHTML)
+
+                        // 如果 authorize 请求最终落在 mis 回调或首页，尝试解析用户信息
+                        if isAuthenticatedResponse(authResp, html: authHTML) {
+                            if let html = authHTML {
+                                parsedStudent = parseStudentInfo(from: html)
+                            }
+                        }
+                    }
+
+                    // 2) 若仍未解析到用户信息，则最后退回到直接请求 /home/ 作为兜底
+                    if parsedStudent == nil {
+                        if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
+                            let homeResponse = try await networkService.get(url: homeURL)
+                            let homeHTML = String(data: homeResponse.data, encoding: .utf8)
+                            logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
+                            if let html = homeHTML {
+                                parsedStudent = parseStudentInfo(from: html)
+                            }
                         }
                     }
                 }
