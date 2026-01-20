@@ -368,14 +368,28 @@ class AuthService: ObservableObject {
             return LoginResult(success: false, message: "登录未生效（未检测到会话 Cookie）")
         }
 
-        isAuthenticated = true
-        if let s = student {
-            currentStudent = s
+        // 合并解析结果并确保 studentId 是账号或一个数字ID（优先选择页面学号，其次回退到登录用户名）
+        var finalStudent: StudentInfo
+        if var s = student {
+            // 如果解析到的 studentId 为空或看起来像“本科生”（非数字），用登录名做后备
+            let numericMatch = s.studentId.range(of: "[0-9]{5,12}", options: .regularExpression) != nil
+            if !numericMatch {
+                // 把原始身份信息迁移到 major（若 major 为空）
+                if !s.studentId.isEmpty && (s.major == nil || s.major?.isEmpty == true) {
+                    s.major = s.studentId
+                }
+                // 使用 username（通常为学号）作为 studentId
+                s = StudentInfo(name: s.name, studentId: username, major: s.major, college: s.college)
+            }
+            finalStudent = s
         } else {
-            currentStudent = StudentInfo(name: "", studentId: username)
+            finalStudent = StudentInfo(name: "", studentId: username)
         }
+
+        isAuthenticated = true
+        currentStudent = finalStudent
         cachedChallenge = nil
-        print("[AuthDebug] finalizeAuthentication: authenticated as \(currentStudent?.name ?? currentStudent?.studentId ?? "<unknown>")")
+        print("[AuthDebug] finalizeAuthentication: authenticated as \(currentStudent?.name ?? currentStudent?.studentId ?? "<unknown>") (studentId=\(currentStudent?.studentId ?? "<none>"), major=\(currentStudent?.major ?? "<none>"))")
         return LoginResult(success: true, message: "登录成功")
     }
     
@@ -468,36 +482,79 @@ class AuthService: ObservableObject {
     }
 
     /// 从 MIS 首页 HTML 中解析学生信息（name / 学号 / 部门）
+    /// 提取页面中可能的学号：优先匹配“学号: xxxx”，否则查找 6-12 位数字
+    private func extractStudentId(from html: String) -> String? {
+        if let id = extract(html: html, pattern: "学号[:：]\\s*([0-9]{5,12})") {
+            return id.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // 全文搜索 6-12 位数字，优先返回第一个匹配项
+        if let regex = try? NSRegularExpression(pattern: "([0-9]{6,12})", options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            if let match = regex.firstMatch(in: html, range: range), match.numberOfRanges > 1 {
+                let mr = match.range(at: 1)
+                if let r = Range(mr, in: html) {
+                    return String(html[r])
+                }
+            }
+        }
+        return nil
+    }
+
     private func parseStudentInfo(from html: String) -> StudentInfo? {
         // 优先匹配 `.name_right > h3 > a`（与 Android Jsoup 选择器一致）
         if let nameRaw = extract(html: html, pattern: "<div[^>]*class=[\"']name_right[\"'][^>]*>[\\s\\S]*?<h3[^>]*>\\s*<a[^>]*>([^<]+)</a>") {
             // 名称通常形如 "张三，..."，取逗号前部分
             let name = nameRaw.split(separator: "，").map(String.init).first ?? nameRaw
-            let id = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let identity = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let dept = extract(html: html, pattern: "部门：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return StudentInfo(name: name, studentId: id, major: nil, college: dept)
+
+            // 尝试提取学号（优先）
+            let sid = extractStudentId(from: html)
+            if let sid = sid {
+                print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                return StudentInfo(name: name, studentId: sid, major: dept, college: nil)
+            }
+
+            // 若没有学号，则把 identity（如 本科生）放到 major 字段，并保留空 studentId
+            return StudentInfo(name: name, studentId: "", major: identity, college: dept)
         }
 
         // 兜底：尝试更宽松的匹配（例如直接匹配 h3 > a）
         if let nameRaw = extract(html: html, pattern: "<h3[^>]*>\\s*<a[^>]*>([^<]+)</a>") {
             let name = nameRaw.split(separator: "，").map(String.init).first ?? nameRaw
-            let id = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let identity = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let dept = extract(html: html, pattern: "部门：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return StudentInfo(name: name, studentId: id, major: nil, college: dept)
+
+            if let sid = extractStudentId(from: html) {
+                print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                return StudentInfo(name: name, studentId: sid, major: dept, college: nil)
+            }
+            return StudentInfo(name: name, studentId: "", major: identity, college: dept)
         }
 
         // 再次尝试：匹配欢迎关键字，例如 "欢迎 张三"
         if let welcome = extract(html: html, pattern: "欢迎[，,：:\\s]*([^<，,]{2,10})") {
             let name = welcome.trimmingCharacters(in: .whitespacesAndNewlines)
-            let id = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return StudentInfo(name: name, studentId: id, major: nil, college: nil)
+            let identity = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if let sid = extractStudentId(from: html) {
+                print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+            }
+            return StudentInfo(name: name, studentId: "", major: identity, college: nil)
         }
 
         // 宽松匹配任意 h3 内的 a 文本或其他可能位置的用户名
         if let generic = extract(html: html, pattern: "<a[^>]*>([\\u4e00-\\u9fa5]{2,10})</a>") {
             let name = generic.trimmingCharacters(in: .whitespacesAndNewlines)
-            let id = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return StudentInfo(name: name, studentId: id, major: nil, college: nil)
+            if isBlacklistedName(name) {
+                print("[AuthDebug] parseStudentInfo: generic match '\(name)' rejected by blacklist")
+                return nil
+            }
+            if let sid = extractStudentId(from: html) {
+                print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+            }
+            return StudentInfo(name: name, studentId: "", major: nil, college: nil)
         }
 
         return nil
