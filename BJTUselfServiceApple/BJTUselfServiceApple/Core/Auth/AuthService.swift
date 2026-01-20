@@ -383,11 +383,14 @@ class AuthService: ObservableObject {
         if let s = student {
             // 优先策略：如果登录名本身就是一个数字学号，则以登录名为权威学号（覆盖页面解析的学号），以避免页面解析到其他账号的学号导致混淆
             if usernameIsNumeric {
-                let displayName = s.name.isEmpty ? username : s.name
+                // 若登录名为数字学号，则使用登录名作为权威学号；但不要用登录名填充“姓名”字段，保持 name 为空以免与真实姓名混淆
                 if !s.studentId.isEmpty && s.studentId != username {
                     print("[AuthDebug] finalizeAuthentication: overriding parsed studentId '\(s.studentId)' with username '\(username)'")
                 }
-                finalStudent = StudentInfo(name: displayName, studentId: username, major: s.major, college: s.college)
+                if s.name.isEmpty {
+                    print("[AuthDebug] finalizeAuthentication: name not found on page; leaving name empty and using studentId for display")
+                }
+                finalStudent = StudentInfo(name: s.name, studentId: username, major: s.major, college: s.college)
             } else {
                 // 旧逻辑：若页面解析出的 studentId 不是数字（例如“本科生”标签），则回退使用用户名作为学号并把原始身份放到 major
                 let numericMatch = s.studentId.range(of: "[0-9]{5,12}", options: .regularExpression) != nil
@@ -398,16 +401,20 @@ class AuthService: ObservableObject {
                     } else {
                         computedMajor = s.major
                     }
-                    let displayName = s.name.isEmpty ? username : s.name
-                    finalStudent = StudentInfo(name: displayName, studentId: username, major: computedMajor, college: s.college)
+                    // 保持 name 不被登录名覆盖
+                    if s.name.isEmpty {
+                        print("[AuthDebug] finalizeAuthentication: name not found on page; leaving name empty and using studentId for display")
+                    }
+                    finalStudent = StudentInfo(name: s.name, studentId: username, major: computedMajor, college: s.college)
                 } else {
-                    let displayName = s.name.isEmpty ? username : s.name
-                    finalStudent = StudentInfo(name: displayName, studentId: s.studentId, major: s.major, college: s.college)
+                    // 保持 name 不被登录名覆盖
+                    finalStudent = StudentInfo(name: s.name, studentId: s.studentId, major: s.major, college: s.college)
                 }
             }
         } else {
-            // 无解析结果时，使用用户名作为学号与展示名
-            finalStudent = StudentInfo(name: username, studentId: username)
+            // 无解析结果时，仅使用用户名作为学号，姓名保持为空
+            print("[AuthDebug] finalizeAuthentication: no student info parsed; using username as studentId and leaving name empty")
+            finalStudent = StudentInfo(name: "", studentId: username)
         }
 
         isAuthenticated = true
