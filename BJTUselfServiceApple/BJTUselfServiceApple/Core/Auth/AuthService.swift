@@ -447,6 +447,20 @@ class AuthService: ObservableObject {
             return StudentInfo(name: name, studentId: id, major: nil, college: dept)
         }
 
+        // 再次尝试：匹配欢迎关键字，例如 "欢迎 张三"
+        if let welcome = extract(html: html, pattern: "欢迎[，,：:\\s]*([^<，,]{2,10})") {
+            let name = welcome.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return StudentInfo(name: name, studentId: id, major: nil, college: nil)
+        }
+
+        // 宽松匹配任意 h3 内的 a 文本或其他可能位置的用户名
+        if let generic = extract(html: html, pattern: "<a[^>]*>([\\u4e00-\\u9fa5]{2,10})</a>") {
+            let name = generic.trimmingCharacters(in: .whitespacesAndNewlines)
+            let id = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return StudentInfo(name: name, studentId: id, major: nil, college: nil)
+        }
+
         return nil
     }
 

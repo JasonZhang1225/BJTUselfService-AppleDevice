@@ -111,9 +111,24 @@ final class CaptchaRecognizer {
         for name in possibleOutputNames {
             if let logits = output.featureValue(for: name)?.multiArrayValue {
                 print("[CaptchaRecognizer] ✅ 找到输出: \(name)")
-                if let decoded = decodeLogits(logits) {
-                    print("[CaptchaRecognizer] 识别结果: \(decoded)")
-                    return decoded
+                        if let decoded = decodeLogits(logits) {
+                    print("[CaptchaRecognizer] decoded expression: \(decoded)")
+                    // 尝试计算表达式的数值结果（与 Android 的 Utils.calculate 行为一致）
+                    if let answer = evaluateExpression(decoded) {
+                        print("[CaptchaRecognizer] evaluated answer: \(answer)")
+                        return answer
+                    } else {
+                        print("[CaptchaRecognizer] ⚠️ 无法计算表达式，尝试使用 beam search 回退并再试一次")
+                        if let alt = beamSearchDecode(logits: logits, beamWidth: 100, topK: 4) {
+                            print("[CaptchaRecognizer] beam alt decoded expression: \(alt)")
+                            if let answer2 = evaluateExpression(alt) {
+                                print("[CaptchaRecognizer] beam evaluated answer: \(answer2)")
+                                return answer2
+                            }
+                        }
+                        print("[CaptchaRecognizer] ⚠️ 返回原始解码值: \(decoded)")
+                        return decoded
+                    }
                 }
             }
         }
@@ -254,15 +269,87 @@ final class CaptchaRecognizer {
         }
         
         print("[CaptchaRecognizer] Argmax: \(argmaxIndices)")
-        return ctcDecode(indices: argmaxIndices)
+        let basic = ctcDecode(indices: argmaxIndices)
+        // 若基础解码看起来有问题（短或没有数字），尝试使用简单的 beam search 回退策略
+        if basic.trimmingCharacters(in: .whitespacesAndNewlines).count < 3 || basic.rangeOfCharacter(from: CharacterSet.decimalDigits) == nil {
+            if let beam = beamSearchDecode(logits: logits, beamWidth: 30, topK: 3) {
+                print("[CaptchaRecognizer] beam decoded: \(beam)")
+                return beam
+            }
+        }
+        return basic
     }
     
+    /// 简单 beam search：对每个位置取 topK 候选，然后在 beamWidth 内合并选择最优序列
+    private func beamSearchDecode(logits: MLMultiArray, beamWidth: Int, topK: Int) -> String? {
+        let shape = logits.shape.map { Int(truncating: $0) }
+        var posCount = positions
+        var clsCount = numClasses
+        var isPositionFirst = false
+
+        if shape.count == 3 {
+            if shape[0] == 8 && shape[2] == 15 {
+                posCount = shape[0]
+                clsCount = shape[2]
+                isPositionFirst = true
+            } else if shape[1] == 15 && shape[2] == 8 {
+                clsCount = shape[1]
+                posCount = shape[2]
+            }
+        }
+
+        // 获取每个位置的 topK 索引与得分
+        var candidatesPerPos: [[(Int, Float)]] = Array(repeating: [], count: posCount)
+        for pos in 0..<posCount {
+            var arr: [(Int, Float)] = []
+            for cls in 0..<clsCount {
+                let index: Int
+                if isPositionFirst {
+                    index = pos * clsCount + cls
+                } else {
+                    index = cls * posCount + pos
+                }
+                if index < logits.count {
+                    arr.append((cls, logits[index].floatValue))
+                }
+            }
+            // 取 topK
+            arr.sort { $0.1 > $1.1 }
+            candidatesPerPos[pos] = Array(arr.prefix(topK))
+        }
+
+        // beam 聚合
+        var beams: [([Int], Float)] = [([], 0.0)]
+        for pos in 0..<posCount {
+            var nextBeams: [([Int], Float)] = []
+            for (seq, score) in beams {
+                for (cls, sc) in candidatesPerPos[pos] {
+                    var s = seq
+                    s.append(cls)
+                    nextBeams.append((s, score + sc))
+                }
+            }
+            // 保留 top beamWidth
+            nextBeams.sort { $0.1 > $1.1 }
+            if nextBeams.count > beamWidth { nextBeams = Array(nextBeams.prefix(beamWidth)) }
+            beams = nextBeams
+        }
+
+        // 选择最佳并进行 CTC 解码
+        if let best = beams.first {
+            let indices = best.0
+            print("[CaptchaRecognizer] beam best indices: \(indices) score=\(best.1)")
+            return ctcDecode(indices: indices)
+        }
+        return nil
+    }
+
     /// CTC 解码（匹配 Android 的 decode 方法）
     /// 规则：去除连续重复的字符，空格(index=0)不输出
     private func ctcDecode(indices: [Int]) -> String {
         var result = ""
         var lastIndex = -1
-        
+
         for index in indices {
             // 跳过连续重复
             if index == lastIndex {
@@ -274,7 +361,29 @@ final class CaptchaRecognizer {
             }
             lastIndex = index
         }
-        
+
         return result
+    }
+
+    /// 计算解码表达式的数值答案，返回数字字符串
+    private func evaluateExpression(_ expr: String) -> String? {
+        // 去掉等号与空白
+        var s = expr.replacingOccurrences(of: "=", with: "")
+        s = s.replacingOccurrences(of: " ", with: "")
+        // 只允许数字和 +-*/ 运算符
+        let allowed = CharacterSet(charactersIn: "0123456789+-*/")
+        if s.rangeOfCharacter(from: allowed.inverted) != nil || s.isEmpty {
+            return nil
+        }
+
+        // 使用 NSExpression 来计算（简洁），结果转为整数字符串（若为整数）
+        let sanitized = s
+        let expression = NSExpression(format: sanitized)
+        if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
+            let dbl = value.doubleValue
+            let intVal = Int(dbl.rounded())
+            return String(intVal)
+        }
+        return nil
     }
 }
