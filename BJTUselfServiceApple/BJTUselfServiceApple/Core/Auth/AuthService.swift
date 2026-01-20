@@ -741,6 +741,155 @@ class AuthService: ObservableObject {
             }
         }
 
+        // 未从显式 profile 页面获取到信息，尝试从页面内嵌脚本/JS 发起的 API 端点发现用户信息
+        if let fromScripts = try await discoverUserFromScripts(basedOn: html) {
+            return fromScripts
+        }
+
+        return nil
+    }
+
+    // 尝试从页面内嵌脚本中发现 API 端点（fetch/axios/url/"/api/..." 等），并请求这些端点以获取 JSON 中可能的姓名/学号字段
+    private func discoverUserFromScripts(basedOn html: String) async throws -> StudentInfo? {
+        let host = URL(string: "https://mis.bjtu.edu.cn")!
+        var endpoints = Set<String>()
+
+        // 1) fetch('...')
+        if let regex = try? NSRegularExpression(pattern: #"fetch\(['\"]([^'\"]+)['\"]"#, options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            regex.enumerateMatches(in: html, options: [], range: range) { m, _, _ in
+                guard let m = m, m.numberOfRanges > 1 else { return }
+                let r = m.range(at: 1)
+                if let rr = Range(r, in: html) { endpoints.insert(String(html[rr])) }
+            }
+        }
+
+        // 2) axios.get('...') 或 axios.post
+        if let regex = try? NSRegularExpression(pattern: #"axios\.(?:get|post)\(['\"]([^'\"]+)['\"]"#, options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            regex.enumerateMatches(in: html, options: [], range: range) { m, _, _ in
+                guard let m = m, m.numberOfRanges > 1 else { return }
+                let r = m.range(at: 1)
+                if let rr = Range(r, in: html) { endpoints.insert(String(html[rr])) }
+            }
+        }
+
+        // 3) 查找形如 "/api/..." 或 "/user/..." 的字符串
+        if let regex = try? NSRegularExpression(pattern: #"(/(?:api|user|accounts|student|profile)[^'"\s\)\]\}]+)"#, options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            regex.enumerateMatches(in: html, options: [], range: range) { m, _, _ in
+                guard let m = m, m.numberOfRanges > 1 else { return }
+                let r = m.range(at: 1)
+                if let rr = Range(r, in: html) { endpoints.insert(String(html[rr])) }
+            }
+        }
+
+        // 4) JSON 内的 url: '...' 或 "url":"..."
+        if let regex = try? NSRegularExpression(pattern: #"["']url["']\s*[:=]\s*["']([^'"\s]+)["']"#, options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            regex.enumerateMatches(in: html, options: [], range: range) { m, _, _ in
+                guard let m = m, m.numberOfRanges > 1 else { return }
+                let r = m.range(at: 1)
+                if let rr = Range(r, in: html) { endpoints.insert(String(html[rr])) }
+            }
+        }
+
+        // 两个常见的兜底 API
+        let guesses = ["/api/v1/user/", "/api/me/", "/api/profile/me/", "/api/profile/", "/auth/userinfo/", "/user/info/", "/accounts/profile/", "/users/me/"]
+        for g in guesses { endpoints.insert(g) }
+
+        // 构造完整 URL 列表并去重
+        var urls: [URL] = []
+        for e in endpoints {
+            if e.hasPrefix("http://") || e.hasPrefix("https://") {
+                if let u = URL(string: e) { urls.append(u) }
+            } else if e.hasPrefix("//") {
+                if let u = URL(string: "https:" + e) { urls.append(u) }
+            } else {
+                if let u = URL(string: e, relativeTo: host)?.absoluteURL { urls.append(u) }
+            }
+        }
+
+        var tried = Set<String>()
+        for url in urls {
+            if tried.contains(url.absoluteString) { continue }
+            tried.insert(url.absoluteString)
+            do {
+                print("[AuthDebug] Attempting script-discovered endpoint -> \(url.absoluteString)")
+                let resp = try await networkService.get(url: url)
+                logAuthDebug(prefix: "script_endpoint", response: resp, html: String(data: resp.data, encoding: .utf8))
+
+                // 若返回 JSON，解析并查找姓名/学号字段
+                let ct = resp.headers["Content-Type"] ?? resp.headers["content-type"] ?? ""
+                if ct.lowercased().contains("application/json") || String(data: resp.data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines).first == "{" {
+                    if let obj = try? JSONSerialization.jsonObject(with: resp.data, options: []) {
+                        if let name = findNameInJSON(obj) {
+                            let sid = findStudentIdInJSON(obj)
+                            print("[AuthDebug] discoverUserFromScripts: found name \(name) from \(url.absoluteString)")
+                            return StudentInfo(name: name, studentId: sid ?? "")
+                        }
+                    }
+                }
+
+                // 若返回 HTML，则尝试从 HTML 中直接提取姓名
+                if let htmlResp = String(data: resp.data, encoding: .utf8) {
+                    if let lbl = extract(html: htmlResp, pattern: #"姓名[:：]\s*([^<，,\s]{2,10})"#) {
+                        let name = lbl.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !isBlacklistedName(name) { print("[AuthDebug] discoverUserFromScripts: found name \(name) in HTML at \(url.absoluteString)"); return StudentInfo(name: name, studentId: findStudentIdInHTML(htmlResp) ?? "") }
+                    }
+                    // 继续尝试 parseStudentInfo 作为兜底（但不要无限递归）
+                    if let parsed = parseStudentInfo(from: htmlResp) { return parsed }
+                }
+            } catch {
+                print("[AuthDebug] script endpoint request failed for \(url): \(error)")
+            }
+        }
+
+        return nil
+    }
+
+    // 在 JSON 中递归查找姓名字段
+    private func findNameInJSON(_ obj: Any) -> String? {
+        if let dict = obj as? [String: Any] {
+            let nameKeys = ["realname", "realName", "name", "xm", "displayName", "nick", "nickname", "username", "姓名"]
+            for k in nameKeys {
+                if let v = dict[k] as? String, v.range(of: "[\u4e00-\u9fa5]{2,20}", options: .regularExpression) != nil {
+                    return v
+                }
+            }
+            for (_, v) in dict {
+                if let found = findNameInJSON(v) { return found }
+            }
+        } else if let arr = obj as? [Any] {
+            for v in arr { if let found = findNameInJSON(v) { return found } }
+        }
+        return nil
+    }
+
+    // 在 JSON 中查找学号字段
+    private func findStudentIdInJSON(_ obj: Any) -> String? {
+        if let dict = obj as? [String: Any] {
+            let idKeys = ["studentId", "student_id", "学号", "id", "sid", "userId"]
+            for k in idKeys {
+                if let v = dict[k] as? String { return v }
+                if let v = dict[k] as? Int { return String(v) }
+            }
+            for (_, v) in dict { if let found = findStudentIdInJSON(v) { return found } }
+        } else if let arr = obj as? [Any] {
+            for v in arr { if let found = findStudentIdInJSON(v) { return found } }
+        }
+        return nil
+    }
+
+    private func findStudentIdInHTML(_ html: String) -> String? {
+        if let id = extract(html: html, pattern: "学号[:：]\\s*([0-9]{5,12})") { return id }
+        if let regex = try? NSRegularExpression(pattern: "([0-9]{6,12})", options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            if let match = regex.firstMatch(in: html, range: range), match.numberOfRanges > 1 {
+                let mr = match.range(at: 1)
+                if let r = Range(mr, in: html) { return String(html[r]) }
+            }
+        }
         return nil
     }
 
