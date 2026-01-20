@@ -892,41 +892,8 @@ class AuthService: ObservableObject {
                     }
 
                     // 常规路径：若 authorize 返回了可直接包含用户信息的页面，解析之
-                }
-            }
-
-            // 2) request home
-            do {
-                let homeResp = try await networkService.get(url: homeURL)
-                let homeHTML = String(data: homeResp.data, encoding: .utf8)
-                logAuthDebug(prefix: "home_attempt_\(attempt)", response: homeResp, html: homeHTML)
-                if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
-                    return parsed
-                }
-            } catch {
-                print("[AuthDebug] home attempt \(attempt) failed: \(error)")
-            }
-
-            // 3) try module/10
-            var moduleHTML: String? = nil
-            do {
-                let moduleResp = try await networkService.get(url: moduleURL)
-                moduleHTML = String(data: moduleResp.data, encoding: .utf8)
-                logAuthDebug(prefix: "module_attempt_\(attempt)", response: moduleResp, html: moduleHTML)
-                if let html = moduleHTML, let parsed = parseStudentInfo(from: html) {
-                    return parsed
-                }
-                // attempt profile fallback on module html
-                if let html = moduleHTML {
-                    if let parsed = try await attemptProfileFallback(basedOn: html) {
-                        return parsed
-                    }
-                }
-            } catch {
-                print("[AuthDebug] module attempt \(attempt) failed: \(error)")
-            }
-
-            // 4) attempt to discover script endpoints from the last module/home HTML
+                } catch {
+                    print("[AuthDebug] authorize attempt \(attempt) failed: \(error)")
             do {
                 if let html = moduleHTML {
                     if let parsed = try await discoverUserFromScripts(basedOn: html) {
