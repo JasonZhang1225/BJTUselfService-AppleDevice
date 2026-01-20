@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var authViewModel: AuthViewModel
+    @ObservedObject private var authService = AuthService.shared
     @State private var showLogoutAlert = false
     
     var body: some View {
@@ -16,12 +17,30 @@ struct SettingsView: View {
             List {
                 // 账号信息
                 Section("账号信息") {
-                    if let student = AuthService.shared.currentStudent {
+                    if let student = authService.currentStudent {
                         HStack {
                             Text("姓名")
                             Spacer()
-                            Text(student.name)
-                                .foregroundStyle(.secondary)
+                            if student.name.isEmpty || authService.needsUserInfoRefresh {
+                                VStack(alignment: .trailing) {
+                                    Text("学号: \(student.studentId)（未获取姓名）")
+                                        .foregroundStyle(.secondary)
+                                        .font(.caption)
+                                    if authViewModel.isRefreshingUserInfo {
+                                        ProgressView()
+                                            .scaleEffect(0.6)
+                                    } else {
+                                        Button("刷新用户信息") {
+                                            Task { await authViewModel.refreshUserInfo() }
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                    }
+                                }
+                            } else {
+                                Text(student.name)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         
                         HStack {

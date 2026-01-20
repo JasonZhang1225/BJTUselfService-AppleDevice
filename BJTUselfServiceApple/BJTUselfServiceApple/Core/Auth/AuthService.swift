@@ -22,6 +22,8 @@ class AuthService: ObservableObject {
     
     @Published var isAuthenticated: Bool = false
     @Published var currentStudent: StudentInfo?
+    /// 当会话存在但无法解析到姓名时，UI 可依据此标志展示占位并提供“刷新用户信息”操作
+    @Published var needsUserInfoRefresh: Bool = false
     private var cachedChallenge: CaptchaChallenge?
     
     private let networkService = NetworkService.shared
@@ -137,7 +139,9 @@ class AuthService: ObservableObject {
             } else if let auto = await recognizeCaptcha(challenge: challenge) {
                 captchaToUse = auto
             } else {
-                loginFailureCleanup(reason: "验证码识别失败，请手动输入")
+                let msg = "验证码识别失败，请手动输入"
+                loginFailureCleanup(reason: msg)
+                return LoginResult(success: false, message: msg)
             }
 
             // Match Android: `next` 仅在 URL 查询中，不放在 form body。
@@ -224,44 +228,46 @@ class AuthService: ObservableObject {
                     parsedStudent = parseStudentInfo(from: html)
                 }
 
-                // 若未直接解析到学生信息，且服务器已设置了 CAS 会话 Cookie，则尝试触发 authorize -> callback 流程以促成 MIS 会话
-                if parsedStudent == nil && hasAuthCookie() {
-                    // 1) 尝试访问 next (authorize) 链接以触发回调
-                    if let authorizeURL = URL(string: challenge.nextPath, relativeTo: URL(string: "https://\(casHost)")) {
-                        print("[AuthDebug] Attempting authorize GET to: \(authorizeURL.absoluteString)")
-                        let authResp = try await networkService.get(url: authorizeURL)
-                        let authHTML = String(data: authResp.data, encoding: .utf8)
-                        logAuthDebug(prefix: "authorize_call", response: authResp, html: authHTML)
-
-                        // 如果 authorize 请求最终落在 mis 回调或首页，尝试解析用户信息
-                        if isAuthenticatedResponse(authResp, html: authHTML) {
-                            if let html = authHTML {
-                                parsedStudent = parseStudentInfo(from: html)
+                // Android 风格补救：若 POST 的 finalURL 是 /home/ 但响应 HTML 未包含姓名，显式对 finalURL 做一次 GET（类似 Android 使用 response.request().url() 的行为）
+                if parsedStudent == nil, let final = response.finalURL, isHomeURL(final) {
+                    print("[AuthDebug] login POST finalURL is home but HTML lacked name; fetching finalURL explicitly: \(final.absoluteString)")
+                    do {
+                        let fresh = try await networkService.get(url: final)
+                        let freshHTML = String(data: fresh.data, encoding: .utf8)
+                        logAuthDebug(prefix: "fetch_final_home", response: fresh, html: freshHTML)
+                        if let html = freshHTML {
+                            // 先试 Android 风格严格解析（可提高命中率）
+                            if let parsed = parseStudentInfoAndroidStyle(from: html) {
+                                parsedStudent = parsed
+                            } else if let parsed = parseStudentInfo(from: html) {
+                                parsedStudent = parsed
                             }
+                        }
+                    } catch {
+                        print("[AuthDebug] fetch_final_home failed: \(error)")
+                    }
+                }
+
+                // 2) 若仍未解析到用户信息，则最后退回到直接请求 /home/ 作为兜底
+                if parsedStudent == nil {
+                    if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
+                        let homeResponse = try await networkService.get(url: homeURL)
+                        let homeHTML = String(data: homeResponse.data, encoding: .utf8)
+                        logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
+                        if let html = homeHTML {
+                            parsedStudent = parseStudentInfo(from: html)
                         }
                     }
 
-                    // 2) 若仍未解析到用户信息，则最后退回到直接请求 /home/ 作为兜底
+                    // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
                     if parsedStudent == nil {
-                        if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
-                            let homeResponse = try await networkService.get(url: homeURL)
-                            let homeHTML = String(data: homeResponse.data, encoding: .utf8)
-                            logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
-                            if let html = homeHTML {
+                        if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
+                            print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
+                            let moduleResp = try await networkService.get(url: moduleURL)
+                            let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                            logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
+                            if let html = moduleHTML {
                                 parsedStudent = parseStudentInfo(from: html)
-                            }
-                        }
-
-                        // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
-                        if parsedStudent == nil {
-                            if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
-                                print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
-                                let moduleResp = try await networkService.get(url: moduleURL)
-                                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
-                                logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
-                                if let html = moduleHTML {
-                                    parsedStudent = parseStudentInfo(from: html)
-                                }
                             }
                         }
                     }
@@ -269,6 +275,26 @@ class AuthService: ObservableObject {
 
                 // 只有在解析到学生信息或至少检测到 MIS session cookie 时才视作登录成功
                 if parsedStudent != nil || hasAuthCookie() {
+                    // 若无法解析到姓名但检测到 MIS 会话，我们保存一次 /home/ 的 HTML 快照以便排查，并提示 UI 提供刷新入口
+                    if parsedStudent == nil && hasAuthCookie() {
+                        // 先尝试用可用的登录响应 HTML 保存一份快照
+                        if let html = loginResponseHTML {
+                            saveDebugHTML(html, label: "login_response_missing_name")
+                        }
+                        // 再请求 /home/ 获取最新页面并保存
+                        if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
+                            do {
+                                let homeResp = try await networkService.get(url: homeURL)
+                                let homeHTML = String(data: homeResp.data, encoding: .utf8) ?? ""
+                                logAuthDebug(prefix: "home_snapshot", response: homeResp, html: homeHTML)
+                                saveDebugHTML(homeHTML, label: "home_snapshot_missing_name")
+                            } catch {
+                                print("[AuthDebug] failed to fetch home snapshot: \(error)")
+                            }
+                        }
+                        // 告知 UI 需要手动/自动刷新用户信息
+                        needsUserInfoRefresh = true
+                    }
                     return finalizeAuthentication(username: username, student: parsedStudent)
                 }
 
@@ -294,44 +320,42 @@ class AuthService: ObservableObject {
                     }
                 }
 
+                // 2. 双重检查 (Double Check)
+                // 很多时候 CAS 登录虽然成功 (由于重定向链复杂截断、或返回 302 等原因)，
+                // 导致直接 Response 判定失败。但此时 Cookie 可能已经种入。
+                // 我们主动发起一次对 Home 的请求来确认是否真的登录成功。
+                print("[AuthDebug] Primary check failed, attempting double check on Home URL...")
+                if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
+                    // 不带额外 Header，完全依赖 CookieStore 中的 Cookie
+                    let homeResponse = try await networkService.get(url: homeURL)
+                    let homeHTML = String(data: homeResponse.data, encoding: .utf8)
+                    logAuthDebug(prefix: "home_check", response: homeResponse, html: homeHTML)
+                    
+                    if isAuthenticatedResponse(homeResponse, html: homeHTML) {
+                        // 记录 homeHTML 以便后续错误原因分析使用（避免作用域错误）
+                        lastCheckedHomeHTML = homeHTML
+                        // 从 /home/ 解析学生信息
+                        if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
+                            return finalizeAuthentication(username: username, student: parsed)
+                        }
+                        // 如果无法解析到学生信息，但能检测到 MIS 域的会话 Cookie，可保守认为登录成功
+                        if hasAuthCookie() {
+                            // 保存快照并提示 UI 需要刷新用户信息
+                            if let html = homeHTML { saveDebugHTML(html, label: "home_doublecheck_missing_name") }
+                            needsUserInfoRefresh = true
+                            return finalizeAuthentication(username: username, student: nil)
+                        }
+                    }
+                }
+
                 // 根据登录页/回调页面 HTML 尝试识别失败原因并返回更精确的提示
-                if let msg = detectLoginFailureMessage(from: [loginResponseHTML]) {
+                if let msg = detectLoginFailureMessage(from: [loginResponseHTML, lastCheckedHomeHTML]) {
                     loginFailureCleanup(reason: msg)
                     return LoginResult(success: false, message: msg)
                 }
                 loginFailureCleanup(reason: "登录失败，可能是验证码或密码错误")
                 return LoginResult(success: false, message: "登录失败，可能是验证码或密码错误")
             }
-            
-            // 2. 双重检查 (Double Check)
-            // 很多时候 CAS 登录虽然成功 (由于重定向链复杂截断、或返回 302 等原因)，
-            // 导致直接 Response 判定失败。但此时 Cookie 可能已经种入。
-            // 我们主动发起一次对 Home 的请求来确认是否真的登录成功。
-            print("[AuthDebug] Primary check failed, attempting double check on Home URL...")
-            if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
-                // 不带额外 Header，完全依赖 CookieStore 中的 Cookie
-                let homeResponse = try await networkService.get(url: homeURL)
-                let homeHTML = String(data: homeResponse.data, encoding: .utf8)
-                logAuthDebug(prefix: "home_check", response: homeResponse, html: homeHTML)
-                
-                if isAuthenticatedResponse(homeResponse, html: homeHTML) {
-                    // 记录 homeHTML 以便后续错误原因分析使用（避免作用域错误）
-                    lastCheckedHomeHTML = homeHTML
-                    // 从 /home/ 解析学生信息
-                    if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
-                        return finalizeAuthentication(username: username, student: parsed)
-                    }
-                    // 如果无法解析到学生信息，但能检测到 MIS 域的会话 Cookie，可保守认为登录成功
-                    if hasAuthCookie() {
-                        return finalizeAuthentication(username: username, student: nil)
-                    }
-                }
-            }
-            
-            // 在双重检查失败后，也尝试从 home 页面或之前的登录响应中识别失败原因
-            let finalErrMsg = detectLoginFailureMessage(from: [loginResponseHTML, lastCheckedHomeHTML]) ?? "登录失败，可能是验证码或密码错误"
-            loginFailureCleanup(reason: finalErrMsg)
-            return LoginResult(success: false, message: finalErrMsg)
         } catch {
             loginFailureCleanup(reason: "网络错误：\(error.localizedDescription)")
             return LoginResult(success: false, message: "网络错误：\(error.localizedDescription)")
@@ -390,6 +414,12 @@ class AuthService: ObservableObject {
         isAuthenticated = true
         currentStudent = finalStudent
         cachedChallenge = nil
+        // 若姓名为空，提示 UI 提供刷新入口
+        if finalStudent.name.isEmpty {
+            needsUserInfoRefresh = true
+        } else {
+            needsUserInfoRefresh = false
+        }
         print("[AuthDebug] finalizeAuthentication: authenticated as \(currentStudent?.name ?? currentStudent?.studentId ?? "<unknown>") (studentId=\(currentStudent?.studentId ?? "<none>"), major=\(currentStudent?.major ?? "<none>"))")
         return LoginResult(success: true, message: "登录成功")
     }
@@ -399,6 +429,7 @@ class AuthService: ObservableObject {
         isAuthenticated = false
         currentStudent = nil
         cachedChallenge = nil
+        needsUserInfoRefresh = false
         networkService.clearCookies()
     }
 
@@ -408,6 +439,7 @@ class AuthService: ObservableObject {
         isAuthenticated = false
         currentStudent = nil
         cachedChallenge = nil
+        needsUserInfoRefresh = false
         // 清理 cookie 存储，确保后续登录从干净状态开始
         networkService.clearCookies()
     }
@@ -657,6 +689,25 @@ class AuthService: ObservableObject {
         return nil
     }
 
+    // Android 风格的严格解析（与 Android 上的 Jsoup 选择器一致），用于在 POST 后 finalURL 为 /home/ 时的显式 GET 难题补救：
+    // 该解析更倾向于只接受 `.name_right > h3 > a` 这类“正统”位置，并短期内绕过黑名单过滤以提高命中率
+    private func parseStudentInfoAndroidStyle(from html: String) -> StudentInfo? {
+        // 优先选取 `.name_right > h3 > a`
+        if let nameRaw = extract(html: html, pattern: #"<div[^>]*class=["']name_right["'][^>]*>[\s\S]*?<h3[^>]*>\s*<a[^>]*>([^<]+)</a>"#) {
+            let name = nameRaw.split(separator: "，").map(String.init).first ?? nameRaw
+            // Android 要求 identity 和 dept 位置也存在
+            let identity = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let dept = extract(html: html, pattern: "部门：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let sid = extractStudentId(from: html) {
+                print("[AuthDebug] parseStudentInfoAndroidStyle: got studentId from page -> \(sid)")
+                return StudentInfo(name: name, studentId: sid, major: dept, college: nil)
+            }
+            // Android 逻辑若 name 存在但无学号，仍然视为命中（保留空学号）
+            return StudentInfo(name: name, studentId: "", major: identity, college: dept)
+        }
+        return nil
+    }
+
     // 在 /home 或 module 页面无法解析姓名时，尝试发现 profile/个人信息 链接并请求以获取用户信息
     private func attemptProfileFallback(basedOn html: String?) async -> StudentInfo? {
         guard let html = html else { return nil }
@@ -865,98 +916,159 @@ class AuthService: ObservableObject {
         return nil
     }
 
-    // 多次尝试完成 CAS->MIS 回调并解析学生信息（带重试与退避），用于应对回调异步完成导致的间歇性姓名缺失问题
+    /// 尝试刷新用户信息（当存在会话但页面未解析出姓名时用于手动或自动刷新）
+    func refreshStudentInfo() async -> Bool {
+        // 必须先确保存在会话 Cookie
+        guard hasAuthCookie() else { return false }
+
+        // 1) 尝试 /home
+        do {
+            let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/")!
+            let resp = try await networkService.get(url: homeURL)
+            let html = String(data: resp.data, encoding: .utf8)
+            logAuthDebug(prefix: "refresh_home", response: resp, html: html)
+            if let h = html {
+                // Android 风格优先
+                if let parsed = parseStudentInfoAndroidStyle(from: h) {
+                    needsUserInfoRefresh = false
+                    currentStudent = parsed
+                    print("[AuthDebug] refreshStudentInfo: found via android-style parse")
+                    return true
+                }
+                if let parsed = parseStudentInfo(from: h) {
+                    needsUserInfoRefresh = false
+                    currentStudent = parsed
+                    print("[AuthDebug] refreshStudentInfo: found via generic parse")
+                    return true
+                }
+                // 若未命中，保存快照以供分析
+                saveDebugHTML(h, label: "refresh_home_no_name")
+            }
+        } catch {
+            print("[AuthDebug] refreshStudentInfo home request failed: \(error)")
+        }
+
+        // 2) 尝试 module/10 与 profile fallback
+        do {
+            let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/")!
+            let resp = try await networkService.get(url: moduleURL)
+            let html = String(data: resp.data, encoding: .utf8)
+            logAuthDebug(prefix: "refresh_module10", response: resp, html: html)
+            if let h = html {
+                if let parsed = parseStudentInfo(from: h) {
+                    needsUserInfoRefresh = false
+                    currentStudent = parsed
+                    print("[AuthDebug] refreshStudentInfo: found via module parse")
+                    return true
+                }
+                if let parsed = try await attemptProfileFallback(basedOn: h) {
+                    needsUserInfoRefresh = false
+                    currentStudent = parsed
+                    print("[AuthDebug] refreshStudentInfo: found via profile fallback")
+                    return true
+                }
+                saveDebugHTML(h, label: "refresh_module_no_name")
+            }
+        } catch {
+            print("[AuthDebug] refreshStudentInfo module request failed: \(error)")
+        }
+
+        // 3) 再次尝试脚本发现 API（基于 /home/ 的 HTML）
+        do {
+            let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/")!
+            let resp = try await networkService.get(url: homeURL)
+            let homeHTML = String(data: resp.data, encoding: .utf8) ?? ""
+            if let parsed = try await discoverUserFromScripts(basedOn: homeHTML) {
+                needsUserInfoRefresh = false
+                currentStudent = parsed
+                print("[AuthDebug] refreshStudentInfo: found via script discovery")
+                return true
+            }
+            saveDebugHTML(homeHTML, label: "refresh_home_script_no_name")
+        } catch {
+            print("[AuthDebug] refreshStudentInfo script discovery failed: \(error)")
+        }
+
+        // 未找到
+        needsUserInfoRefresh = true
+        print("[AuthDebug] refreshStudentInfo: user info still missing after attempts")
+        return false
+    }
+
+    // 单次尝试完成 CAS->MIS 回调并解析学生信息（移除多次重试与退避，避免登录转圈过久）
     private func completeCallbackAndParseStudent(authorizeURL: URL?) async -> StudentInfo? {
         let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/")!
         let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/")!
-        let maxAttempts = 4
 
-        for attempt in 1...maxAttempts {
-            print("[AuthDebug] completeCallbackAndParseStudent: attempt \(attempt)/\(maxAttempts)")
+        print("[AuthDebug] completeCallbackAndParseStudent: single-pass attempt")
 
-            // 1) try authorize URL if present
-            if let aURL = authorizeURL {
-                do {
-                    let authResp = try await networkService.get(url: aURL)
-                    let authHTML = String(data: authResp.data, encoding: .utf8)
-                    logAuthDebug(prefix: "authorize_attempt_\(attempt)", response: authResp, html: authHTML)
+        var lastModuleHTML: String? = nil
+        var lastHomeHTML: String? = nil
 
-                    // 如果 authorize 返回的是 /auth/sso 重定向（302 -> /auth/sso/?next=/）
-                    if let loc = authResp.headers["Location"] ?? authResp.headers["location"], loc.contains("/auth/sso") {
-                        if let ssoURL = URL(string: loc, relativeTo: URL(string: "https://\(casHost)")) {
-                            print("[AuthDebug] authorize attempt returned sso redirect; requesting SSO URL: \(ssoURL.absoluteString)")
-                            let ssoResp = try await networkService.get(url: ssoURL)
-                            let ssoHTML = String(data: ssoResp.data, encoding: .utf8)
-                            logAuthDebug(prefix: "sso_follow_\(attempt)", response: ssoResp, html: ssoHTML)
+        // 1) try authorize URL (follow SSO/callback if present)
+        if let aURL = authorizeURL {
+            do {
+                let authResp = try await networkService.get(url: aURL)
+                let authHTML = String(data: authResp.data, encoding: .utf8)
+                logAuthDebug(prefix: "authorize_attempt", response: authResp, html: authHTML)
 
-                            // 如果 SSO 又重定向到 MIS callback（Location 包含 mis.bjtu.edu.cn），跟随之
-                            if let ssoLoc = ssoResp.headers["Location"] ?? ssoResp.headers["location"], ssoLoc.contains("mis.bjtu.edu.cn") {
-                                if let callbackURL = URL(string: ssoLoc) {
-                                    print("[AuthDebug] SSO redirected to MIS callback: \(callbackURL.absoluteString); requesting callback")
-                                    let cbResp = try await networkService.get(url: callbackURL)
-                                    let cbHTML = String(data: cbResp.data, encoding: .utf8)
-                                    logAuthDebug(prefix: "callback_follow_\(attempt)", response: cbResp, html: cbHTML)
-                                    if let html = cbHTML, let parsed = parseStudentInfo(from: html) {
-                                        return parsed
-                                    }
-                                }
-                            }
+                // follow /auth/sso -> callback if present
+                if let loc = authResp.headers["Location"] ?? authResp.headers["location"], loc.contains("/auth/sso") {
+                    if let ssoURL = URL(string: loc, relativeTo: URL(string: "https://\(casHost)")) {
+                        print("[AuthDebug] authorize returned sso redirect; requesting SSO URL: \(ssoURL.absoluteString)")
+                        let ssoResp = try await networkService.get(url: ssoURL)
+                        let ssoHTML = String(data: ssoResp.data, encoding: .utf8)
+                        logAuthDebug(prefix: "sso_follow", response: ssoResp, html: ssoHTML)
 
-                            // 也尝试直接从 SSO 返回的 HTML 解析
-                            if let html = ssoHTML, let parsed = parseStudentInfo(from: html) {
-                                return parsed
+                        if let ssoLoc = ssoResp.headers["Location"] ?? ssoResp.headers["location"], ssoLoc.contains("mis.bjtu.edu.cn") {
+                            if let callbackURL = URL(string: ssoLoc) {
+                                print("[AuthDebug] SSO redirected to MIS callback: \(callbackURL.absoluteString); requesting callback")
+                                let cbResp = try await networkService.get(url: callbackURL)
+                                let cbHTML = String(data: cbResp.data, encoding: .utf8)
+                                logAuthDebug(prefix: "callback_follow", response: cbResp, html: cbHTML)
+                                if let html = cbHTML, let parsed = parseStudentInfo(from: html) { return parsed }
                             }
                         }
+
+                        if let html = ssoHTML, let parsed = parseStudentInfo(from: html) { return parsed }
                     }
-
-                    // 常规路径：若 authorize 返回了可直接包含用户信息的页面，解析之
-                    if let html = authHTML, let parsed = parseStudentInfo(from: html) {
-                        return parsed
-                    }
-                } catch {
-                    print("[AuthDebug] authorize attempt \(attempt) failed: \(error)")
                 }
-            }
 
-            // 2) try home
-            do {
-                let homeResp = try await networkService.get(url: homeURL)
-                let homeHTML = String(data: homeResp.data, encoding: .utf8)
-                logAuthDebug(prefix: "home_attempt_\(attempt)", response: homeResp, html: homeHTML)
-                if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
-                    return parsed
-                }
+                if isAuthenticatedResponse(authResp, html: authHTML), let html = authHTML, let parsed = parseStudentInfo(from: html) { return parsed }
             } catch {
-                print("[AuthDebug] home attempt \(attempt) failed: \(error)")
+                print("[AuthDebug] authorize attempt failed: \(error)")
             }
+        }
 
-            // 3) try module/10
-            do {
-                let moduleResp = try await networkService.get(url: moduleURL)
-                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
-                logAuthDebug(prefix: "module10_attempt_\(attempt)", response: moduleResp, html: moduleHTML)
-                if let html = moduleHTML, let parsed = parseStudentInfo(from: html) {
-                    return parsed
-                }
-            } catch {
-                print("[AuthDebug] module10 attempt \(attempt) failed: \(error)")
-            }
+        // 2) request home
+        do {
+            let homeResp = try await networkService.get(url: homeURL)
+            lastHomeHTML = String(data: homeResp.data, encoding: .utf8)
+            logAuthDebug(prefix: "home_attempt", response: homeResp, html: lastHomeHTML)
+            if let html = lastHomeHTML, let parsed = parseStudentInfo(from: html) { return parsed }
+        } catch {
+            print("[AuthDebug] home attempt failed: \(error)")
+        }
 
-            // 4) try script discovery
-            do {
-                let moduleResp = try await networkService.get(url: moduleURL)
-                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
-                if let html = moduleHTML, let parsed = try await discoverUserFromScripts(basedOn: html) {
-                    return parsed
-                }
-            } catch {
-                print("[AuthDebug] script discovery attempt \(attempt) failed: \(error)")
-            }
+        // 3) request module/10
+        do {
+            let moduleResp = try await networkService.get(url: moduleURL)
+            lastModuleHTML = String(data: moduleResp.data, encoding: .utf8)
+            logAuthDebug(prefix: "module_attempt", response: moduleResp, html: lastModuleHTML)
+            if let html = lastModuleHTML, let parsed = parseStudentInfo(from: html) { return parsed }
 
-            // 等待再试（指数退避或固定等待）
-            if attempt < maxAttempts {
-                try? await Task.sleep(nanoseconds: 700_000_000) // 700ms
+            if let html = lastModuleHTML, let parsed = await attemptProfileFallback(basedOn: html) { return parsed }
+        } catch {
+            print("[AuthDebug] module attempt failed: \(error)")
+        }
+
+        // 4) discover script endpoints from latest HTML
+        do {
+            if let html = lastModuleHTML ?? lastHomeHTML {
+                if let parsed = try await discoverUserFromScripts(basedOn: html) { return parsed }
             }
+        } catch {
+            print("[AuthDebug] script discovery failed: \(error)")
         }
 
         return nil
@@ -972,7 +1084,6 @@ class AuthService: ObservableObject {
     }
 
     private func encodeFormData(_ params: [String: String]) -> Data? {
-        var components = URLComponents()
         // 手动构造符合 application/x-www-form-urlencoded 的 query string
         // 为了确保与 Android (OkHttp) 行为一致（空格转加号等），我们使用自定义编码逻辑或 URLComponents
         // URLComponents 默认使用 percent encoded (space -> %20)
@@ -1039,6 +1150,25 @@ class AuthService: ObservableObject {
         let location = response.headers["Location"] ?? response.headers["location"] ?? "nil"
         let snippet = html.map { String($0.prefix(400)) } ?? "nil"
         print("[AuthDebug] \(prefix) status=\(response.statusCode) location=\(location) snippet=\(snippet)")
+    }
+
+    // 将 HTML 快照保存到 App 的 Documents/DebugHTML 目录以便后续离线分析
+    private func saveDebugHTML(_ html: String, label: String) {
+        let fm = FileManager.default
+        do {
+            let docs = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let dir = docs.appendingPathComponent("DebugHTML", isDirectory: true)
+            if !fm.fileExists(atPath: dir.path) {
+                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+            let ts = ISO8601DateFormatter().string(from: Date())
+            let filename = "\(label)-\(ts).html"
+            let path = dir.appendingPathComponent(filename)
+            try html.write(to: path, atomically: true, encoding: .utf8)
+            print("[AuthDebug] saved debug HTML to: \(path.path)")
+        } catch {
+            print("[AuthDebug] failed to save debug HTML: \(error)")
+        }
     }
 
     // 根据登录相关页面的 HTML 内容推断失败原因，并返回适合展示的本地化消息（优先识别验证码错误）

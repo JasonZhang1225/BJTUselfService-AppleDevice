@@ -20,6 +20,7 @@ class AuthViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
     @Published var isAuthenticated: Bool = false
+    @Published var isRefreshingUserInfo: Bool = false
     
     private let authService = AuthService.shared
     
@@ -61,7 +62,17 @@ class AuthViewModel: ObservableObject {
         if result.success {
             isAuthenticated = true
         } else {
-            errorMessage = result.message
+            // 保存原始登录失败信息以便在自动刷新验证码时不会被覆盖
+            let loginFailureMsg = result.message
+            errorMessage = loginFailureMsg
+
+            // 清空当前输入的验证码并自动拉取新验证码以避免复用或过期问题
+            captcha = ""
+            // 静默刷新验证码：如果拉取失败，不覆盖原始的登录错误信息
+            await loadCaptcha()
+            if let currentErr = errorMessage, currentErr != loginFailureMsg {
+                errorMessage = loginFailureMsg
+            }
         }
         
         isLoading = false
@@ -80,6 +91,18 @@ class AuthViewModel: ObservableObject {
     /// 检查登录状态
     func checkAuthStatus() async {
         isAuthenticated = await authService.checkAuthStatus()
+    }
+
+    /// 刷新用户信息（用于当会话存在但未解析出姓名时的手动刷新）
+    func refreshUserInfo() async {
+        isRefreshingUserInfo = true
+        defer { isRefreshingUserInfo = false }
+        let ok = await authService.refreshStudentInfo()
+        if !ok {
+            errorMessage = "刷新用户信息失败，请稍后重试"
+        } else {
+            errorMessage = nil
+        }
     }
 }
 
