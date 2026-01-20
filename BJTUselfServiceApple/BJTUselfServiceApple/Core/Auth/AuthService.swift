@@ -307,6 +307,10 @@ class AuthService: ObservableObject {
                                 if let html = moduleHTML {
                                     parsedStudent = parseStudentInfo(from: html)
                                 }
+                                // 如果 module/10 仍无法解析到姓名，尝试从页面中发现 profile 链接或直接请求常见用户信息端点
+                                if parsedStudent == nil {
+                                    parsedStudent = try await attemptProfileFallback(basedOn: moduleHTML)
+                                }
                             }
                         }
 
@@ -319,6 +323,10 @@ class AuthService: ObservableObject {
                                 logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
                                 if let html = moduleHTML {
                                     parsedStudent = parseStudentInfo(from: html)
+                                }
+                                // 如果 module/10 仍无法解析到姓名，尝试从页面中发现 profile 链接或直接请求常见用户信息端点
+                                if parsedStudent == nil {
+                                    parsedStudent = try await attemptProfileFallback(basedOn: moduleHTML)
                                 }
                             }
                         }
@@ -380,12 +388,16 @@ class AuthService: ObservableObject {
                 } else {
                     computedMajor = s.major
                 }
-                finalStudent = StudentInfo(name: s.name, studentId: username, major: computedMajor, college: s.college)
+                // 若解析出的姓名为空，则使用登录名作为展示名
+                let displayName = s.name.isEmpty ? username : s.name
+                finalStudent = StudentInfo(name: displayName, studentId: username, major: computedMajor, college: s.college)
             } else {
-                finalStudent = s
+                // 若解析出的姓名为空，则使用登录名作为展示名
+                let displayName = s.name.isEmpty ? username : s.name
+                finalStudent = StudentInfo(name: displayName, studentId: s.studentId, major: s.major, college: s.college)
             }
         } else {
-            finalStudent = StudentInfo(name: "", studentId: username)
+            finalStudent = StudentInfo(name: username, studentId: username)
         }
 
         isAuthenticated = true
@@ -572,6 +584,61 @@ class AuthService: ObservableObject {
                 return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
             }
             return StudentInfo(name: name, studentId: "", major: nil, college: nil)
+        }
+
+        return nil
+    }
+
+    // 在 /home 或 module 页面无法解析姓名时，尝试发现 profile/个人信息 链接并请求以获取用户信息
+    private func attemptProfileFallback(basedOn html: String?) async -> StudentInfo? {
+        guard let html = html else { return nil }
+        var candidateURLs: [URL] = []
+        let host = URL(string: "https://mis.bjtu.edu.cn")!
+
+        // 从页面中寻找可能的 profile 链接（包含关键字 profile / user / 个人 / 账户 / student）
+        if let regex = try? NSRegularExpression(pattern: "href=[\"']([^\"']+)[\"']", options: []) {
+            let range = NSRange(location: 0, length: html.utf16.count)
+            regex.enumerateMatches(in: html, options: [], range: range) { match, _, _ in
+                guard let m = match, m.numberOfRanges > 1 else { return }
+                let r = m.range(at: 1)
+                if let swiftRange = Range(r, in: html) {
+                    let href = String(html[swiftRange])
+                    if href.contains("profile") || href.contains("个人") || href.contains("user") || href.contains("account") || href.contains("student") || href.contains("个人中心") {
+                        if let u = URL(string: href, relativeTo: host)?.absoluteURL {
+                            candidateURLs.append(u)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 还尝试一些常见的可能端点作为兜底
+        let guesses = ["/user/profile/", "/user/info/", "/accounts/profile/", "/student/profile/", "/student/index/", "/profile/", "/api/user/"]
+        for g in guesses {
+            if let u = URL(string: g, relativeTo: host)?.absoluteURL {
+                candidateURLs.append(u)
+            }
+        }
+
+        // 去重并尝试每个 URL
+        var seen = Set<String>()
+        candidateURLs = candidateURLs.filter { url in
+            if seen.contains(url.absoluteString) { return false }
+            seen.insert(url.absoluteString); return true
+        }
+
+        for url in candidateURLs {
+            do {
+                print("[AuthDebug] Attempting profile fallback -> \(url.absoluteString)")
+                let resp = try await networkService.get(url: url)
+                let pageHTML = String(data: resp.data, encoding: .utf8)
+                logAuthDebug(prefix: "profile_fallback", response: resp, html: pageHTML)
+                if let pg = pageHTML, let parsed = parseStudentInfo(from: pg) {
+                    return parsed
+                }
+            } catch {
+                print("[AuthDebug] profile fallback error for \(url): \(error)")
+            }
         }
 
         return nil
