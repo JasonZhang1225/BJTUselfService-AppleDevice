@@ -370,18 +370,20 @@ class AuthService: ObservableObject {
 
         // 合并解析结果并确保 studentId 是账号或一个数字ID（优先选择页面学号，其次回退到登录用户名）
         var finalStudent: StudentInfo
-        if var s = student {
-            // 如果解析到的 studentId 为空或看起来像“本科生”（非数字），用登录名做后备
+        if let s = student {
+            // 如果解析到的 studentId 为空或看起来像“本科生”（非数字），用登录名做后备，并且把原始身份放到 major
             let numericMatch = s.studentId.range(of: "[0-9]{5,12}", options: .regularExpression) != nil
             if !numericMatch {
-                // 把原始身份信息迁移到 major（若 major 为空）
+                let computedMajor: String?
                 if !s.studentId.isEmpty && (s.major == nil || s.major?.isEmpty == true) {
-                    s.major = s.studentId
+                    computedMajor = s.studentId
+                } else {
+                    computedMajor = s.major
                 }
-                // 使用 username（通常为学号）作为 studentId
-                s = StudentInfo(name: s.name, studentId: username, major: s.major, college: s.college)
+                finalStudent = StudentInfo(name: s.name, studentId: username, major: computedMajor, college: s.college)
+            } else {
+                finalStudent = s
             }
-            finalStudent = s
         } else {
             finalStudent = StudentInfo(name: "", studentId: username)
         }
@@ -519,17 +521,28 @@ class AuthService: ObservableObject {
             return StudentInfo(name: name, studentId: "", major: identity, college: dept)
         }
 
+/// 判断姓名是否看起来是站点标签或导航（黑名单）
+    private func isBlacklistedName(_ name: String) -> Bool {
+        let blacklist = ["主页", "首页", "校园", "信息", "交大", "北京交通大学", "登录", "校园信息", "交大主页"]
+        return blacklist.contains { token in name.contains(token) }
+    }
+
         // 兜底：尝试更宽松的匹配（例如直接匹配 h3 > a）
         if let nameRaw = extract(html: html, pattern: "<h3[^>]*>\\s*<a[^>]*>([^<]+)</a>") {
             let name = nameRaw.split(separator: "，").map(String.init).first ?? nameRaw
             let identity = extract(html: html, pattern: "身份：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let dept = extract(html: html, pattern: "部门：\\s*([^<]+)")?.trimmingCharacters(in: .whitespacesAndNewlines)
-
+            
             if let sid = extractStudentId(from: html) {
                 print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
                 return StudentInfo(name: name, studentId: sid, major: dept, college: nil)
             }
-            return StudentInfo(name: name, studentId: "", major: identity, college: dept)
+            if isBlacklistedName(name) {
+                print("[AuthDebug] parseStudentInfo: matched h3 a name '\(name)' rejected by blacklist")
+                // fallthrough to other matchers
+            } else {
+                return StudentInfo(name: name, studentId: "", major: identity, college: dept)
+            }
         }
 
         // 再次尝试：匹配欢迎关键字，例如 "欢迎 张三"
@@ -540,7 +553,11 @@ class AuthService: ObservableObject {
                 print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
                 return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
             }
-            return StudentInfo(name: name, studentId: "", major: identity, college: nil)
+            if isBlacklistedName(name) {
+                print("[AuthDebug] parseStudentInfo: matched welcome name '\(name)' rejected by blacklist")
+            } else {
+                return StudentInfo(name: name, studentId: "", major: identity, college: nil)
+            }
         }
 
         // 宽松匹配任意 h3 内的 a 文本或其他可能位置的用户名
