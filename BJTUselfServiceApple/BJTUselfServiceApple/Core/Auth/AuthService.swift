@@ -127,6 +127,7 @@ class AuthService: ObservableObject {
             }
         }
         guard let challenge else {
+            loginFailureCleanup(reason: "无法获取验证码，请重试")
             return LoginResult(success: false, message: "无法获取验证码，请重试")
         }
         do {
@@ -136,7 +137,7 @@ class AuthService: ObservableObject {
             } else if let auto = await recognizeCaptcha(challenge: challenge) {
                 captchaToUse = auto
             } else {
-                return LoginResult(success: false, message: "验证码识别失败，请手动输入")
+                loginFailureCleanup(reason: "验证码识别失败，请手动输入")
             }
 
             // Match Android: `next` 仅在 URL 查询中，不放在 form body。
@@ -271,6 +272,7 @@ class AuthService: ObservableObject {
                     return finalizeAuthentication(username: username, student: parsedStudent)
                 }
 
+                loginFailureCleanup(reason: "登录未生效（未检测到 MIS 会话或用户信息解析失败）")
                 return LoginResult(success: false, message: "登录未生效（未检测到 MIS 会话或用户信息解析失败）")
             } else {
                 // 如果响应仍为 CAS 登录页，但已经拿到 CAS session cookie（或短轮询后出现），
@@ -294,8 +296,10 @@ class AuthService: ObservableObject {
 
                 // 根据登录页/回调页面 HTML 尝试识别失败原因并返回更精确的提示
                 if let msg = detectLoginFailureMessage(from: [loginResponseHTML]) {
+                    loginFailureCleanup(reason: msg)
                     return LoginResult(success: false, message: msg)
                 }
+                loginFailureCleanup(reason: "登录失败，可能是验证码或密码错误")
                 return LoginResult(success: false, message: "登录失败，可能是验证码或密码错误")
             }
             
@@ -326,8 +330,10 @@ class AuthService: ObservableObject {
             
             // 在双重检查失败后，也尝试从 home 页面或之前的登录响应中识别失败原因
             let finalErrMsg = detectLoginFailureMessage(from: [loginResponseHTML, lastCheckedHomeHTML]) ?? "登录失败，可能是验证码或密码错误"
+            loginFailureCleanup(reason: finalErrMsg)
             return LoginResult(success: false, message: finalErrMsg)
         } catch {
+            loginFailureCleanup(reason: "网络错误：\(error.localizedDescription)")
             return LoginResult(success: false, message: "网络错误：\(error.localizedDescription)")
         }
     }
@@ -336,6 +342,7 @@ class AuthService: ObservableObject {
         // 要求存在会话相关的 Cookie（防止仅页面跳转但未实际登录的误判）
         if !hasAuthCookie() {
             print("[AuthDebug] finalizeAuthentication: no auth cookie present -> rejecting authentication")
+            loginFailureCleanup(reason: "登录未生效（未检测到会话 Cookie）")
             return LoginResult(success: false, message: "登录未生效（未检测到会话 Cookie）")
         }
 
@@ -391,6 +398,17 @@ class AuthService: ObservableObject {
     func logout() {
         isAuthenticated = false
         currentStudent = nil
+        cachedChallenge = nil
+        networkService.clearCookies()
+    }
+
+    // 在登录失败/未能建立会话时清理客户端状态和 Cookie，以确保后续登录不受先前尝试影响
+    private func loginFailureCleanup(reason: String) {
+        print("[AuthDebug] loginFailureCleanup: \(reason) — clearing cookies and cached state")
+        isAuthenticated = false
+        currentStudent = nil
+        cachedChallenge = nil
+        // 清理 cookie 存储，确保后续登录从干净状态开始
         networkService.clearCookies()
     }
     
@@ -892,13 +910,44 @@ class AuthService: ObservableObject {
                     }
 
                     // 常规路径：若 authorize 返回了可直接包含用户信息的页面，解析之
-                } catch {
-                    print("[AuthDebug] authorize attempt \(attempt) failed: \(error)")
-            do {
-                if let html = moduleHTML {
-                    if let parsed = try await discoverUserFromScripts(basedOn: html) {
+                    if let html = authHTML, let parsed = parseStudentInfo(from: html) {
                         return parsed
                     }
+                } catch {
+                    print("[AuthDebug] authorize attempt \(attempt) failed: \(error)")
+                }
+            }
+
+            // 2) try home
+            do {
+                let homeResp = try await networkService.get(url: homeURL)
+                let homeHTML = String(data: homeResp.data, encoding: .utf8)
+                logAuthDebug(prefix: "home_attempt_\(attempt)", response: homeResp, html: homeHTML)
+                if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
+                    return parsed
+                }
+            } catch {
+                print("[AuthDebug] home attempt \(attempt) failed: \(error)")
+            }
+
+            // 3) try module/10
+            do {
+                let moduleResp = try await networkService.get(url: moduleURL)
+                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                logAuthDebug(prefix: "module10_attempt_\(attempt)", response: moduleResp, html: moduleHTML)
+                if let html = moduleHTML, let parsed = parseStudentInfo(from: html) {
+                    return parsed
+                }
+            } catch {
+                print("[AuthDebug] module10 attempt \(attempt) failed: \(error)")
+            }
+
+            // 4) try script discovery
+            do {
+                let moduleResp = try await networkService.get(url: moduleURL)
+                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                if let html = moduleHTML, let parsed = try await discoverUserFromScripts(basedOn: html) {
+                    return parsed
                 }
             } catch {
                 print("[AuthDebug] script discovery attempt \(attempt) failed: \(error)")
@@ -1013,7 +1062,6 @@ class AuthService: ObservableObject {
         return nil
     }
 }
-
 
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
