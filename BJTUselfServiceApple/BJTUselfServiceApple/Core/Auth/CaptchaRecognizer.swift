@@ -373,17 +373,84 @@ final class CaptchaRecognizer {
         // 只允许数字和 +-*/ 运算符
         let allowed = CharacterSet(charactersIn: "0123456789+-*/")
         if s.rangeOfCharacter(from: allowed.inverted) != nil || s.isEmpty {
+            print("[CaptchaRecognizer] evaluateExpression: contains invalid characters -> \(expr) -> sanitized=\(s)")
             return nil
         }
 
-        // 使用 NSExpression 来计算（简洁），结果转为整数字符串（若为整数）
-        let sanitized = s
-        let expression = NSExpression(format: sanitized)
-        if let value = expression.expressionValue(with: nil, context: nil) as? NSNumber {
-            let dbl = value.doubleValue
-            let intVal = Int(dbl.rounded())
-            return String(intVal)
+        // 验证表达式结构：必须为 number (op number)* 的形式
+        if let re = try? NSRegularExpression(pattern: "^[0-9]+(?:[+\-*/][0-9]+)*$", options: []) {
+            let range = NSRange(location: 0, length: s.utf16.count)
+            if re.firstMatch(in: s, options: [], range: range) == nil {
+                print("[CaptchaRecognizer] evaluateExpression: malformed expression -> \(s)")
+                return nil
+            }
         }
-        return nil
+
+        // 手动计算表达式，先处理 * /，再处理 + - （避免使用 NSExpression 导致 NSException）
+        // 解析为数字和操作符序列
+        var numbers: [Double] = []
+        var ops: [Character] = []
+        var currentNum = ""
+        for ch in s {
+            if ch.isNumber {
+                currentNum.append(ch)
+            } else {
+                if currentNum.isEmpty {
+                    print("[CaptchaRecognizer] evaluateExpression: empty number when parsing -> \(s)")
+                    return nil
+                }
+                if let v = Double(currentNum) {
+                    numbers.append(v)
+                } else {
+                    print("[CaptchaRecognizer] evaluateExpression: numeric parse failed for \(currentNum)")
+                    return nil
+                }
+                currentNum = ""
+                ops.append(ch)
+            }
+        }
+        if !currentNum.isEmpty {
+            if let v = Double(currentNum) { numbers.append(v) } else { return nil }
+        }
+
+        // 先处理乘除
+        var nums2: [Double] = [numbers.first!]
+        var ops2: [Character] = []
+        for i in 0..<ops.count {
+            let op = ops[i]
+            let rhs = numbers[i+1]
+            if op == "*" || op == "/" {
+                let lhs = nums2.removeLast()
+                if op == "*" {
+                    nums2.append(lhs * rhs)
+                } else {
+                    // 除零保护
+                    if rhs == 0 {
+                        print("[CaptchaRecognizer] evaluateExpression: division by zero")
+                        return nil
+                    }
+                    nums2.append(lhs / rhs)
+                }
+            } else {
+                ops2.append(op)
+                nums2.append(rhs)
+            }
+        }
+
+        // 再处理加减
+        var acc = nums2.first ?? 0
+        for i in 0..<ops2.count {
+            let op = ops2[i]
+            let v = nums2[i+1]
+            if op == "+" { acc += v }
+            else if op == "-" { acc -= v }
+        }
+
+        if acc.isNaN || acc.isInfinite {
+            return nil
+        }
+
+        let intVal = Int(acc.rounded())
+        return String(intVal)
     }
 }
