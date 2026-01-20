@@ -276,66 +276,16 @@ class AuthService: ObservableObject {
                 // 如果响应仍为 CAS 登录页，但已经拿到 CAS session cookie（或短轮询后出现），
                 // 也要主动触发 authorize/home 流程以尽量完成回调并建立 MIS 会话。
                 if hasAuthCookie() || cookieAppearedAfterRetry {
-                    print("[AuthDebug] Detected CAS session cookie despite login page; attempting authorize/home to complete flow")
+                    print("[AuthDebug] Detected CAS session cookie despite login page; attempting multi-step authorize/home retries to complete flow")
                     var parsedStudent: StudentInfo? = nil
 
-                    if let authorizeURL = URL(string: challenge.nextPath, relativeTo: URL(string: "https://\(casHost)")) {
-                        print("[AuthDebug] Attempting authorize GET to: \(authorizeURL.absoluteString)")
-                        let authResp = try await networkService.get(url: authorizeURL)
-                        let authHTML = String(data: authResp.data, encoding: .utf8)
-                        logAuthDebug(prefix: "authorize_call", response: authResp, html: authHTML)
-
-                        if isAuthenticatedResponse(authResp, html: authHTML) {
-                            if let html = authHTML {
-                                parsedStudent = parseStudentInfo(from: html)
-                            }
-                        }
+                    var authorizeURL: URL? = nil
+                    if let aURL = URL(string: challenge.nextPath, relativeTo: URL(string: "https://\(casHost)")) {
+                        authorizeURL = aURL
                     }
 
-                    if parsedStudent == nil {
-                        if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
-                            let homeResponse = try await networkService.get(url: homeURL)
-                            let homeHTML = String(data: homeResponse.data, encoding: .utf8)
-                            logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
-                            if let html = homeHTML {
-                                parsedStudent = parseStudentInfo(from: html)
-                            }
-                        }
-
-                        // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
-                        if parsedStudent == nil {
-                            if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
-                                print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
-                                let moduleResp = try await networkService.get(url: moduleURL)
-                                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
-                                logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
-                                if let html = moduleHTML {
-                                    parsedStudent = parseStudentInfo(from: html)
-                                }
-                                // 如果 module/10 仍无法解析到姓名，尝试从页面中发现 profile 链接或直接请求常见用户信息端点
-                                if parsedStudent == nil {
-                                    parsedStudent = try await attemptProfileFallback(basedOn: moduleHTML)
-                                }
-                            }
-                        }
-
-                        // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
-                        if parsedStudent == nil {
-                            if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
-                                print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
-                                let moduleResp = try await networkService.get(url: moduleURL)
-                                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
-                                logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
-                                if let html = moduleHTML {
-                                    parsedStudent = parseStudentInfo(from: html)
-                                }
-                                // 如果 module/10 仍无法解析到姓名，尝试从页面中发现 profile 链接或直接请求常见用户信息端点
-                                if parsedStudent == nil {
-                                    parsedStudent = try await attemptProfileFallback(basedOn: moduleHTML)
-                                }
-                            }
-                        }
-                    }
+                    // 借助重试 helper 完成回调并解析学生信息
+                    parsedStudent = await completeCallbackAndParseStudent(authorizeURL: authorizeURL)
 
                     if parsedStudent != nil || hasAuthCookie() {
                         return finalizeAuthentication(username: username, student: parsedStudent)
@@ -742,8 +692,12 @@ class AuthService: ObservableObject {
         }
 
         // 未从显式 profile 页面获取到信息，尝试从页面内嵌脚本/JS 发起的 API 端点发现用户信息
-        if let fromScripts = try await discoverUserFromScripts(basedOn: html) {
-            return fromScripts
+        do {
+            if let fromScripts = try await discoverUserFromScripts(basedOn: html) {
+                return fromScripts
+            }
+        } catch {
+            print("[AuthDebug] discoverUserFromScripts error: \(error)")
         }
 
         return nil
@@ -853,7 +807,7 @@ class AuthService: ObservableObject {
         if let dict = obj as? [String: Any] {
             let nameKeys = ["realname", "realName", "name", "xm", "displayName", "nick", "nickname", "username", "姓名"]
             for k in nameKeys {
-                if let v = dict[k] as? String, v.range(of: "[\u4e00-\u9fa5]{2,20}", options: .regularExpression) != nil {
+                if let v = dict[k] as? String, v.range(of: #"[\u{4E00}-\u{9FA5}]{2,20}"#, options: .regularExpression) != nil {
                     return v
                 }
             }
@@ -890,6 +844,80 @@ class AuthService: ObservableObject {
                 if let r = Range(mr, in: html) { return String(html[r]) }
             }
         }
+        return nil
+    }
+
+    // 多次尝试完成 CAS->MIS 回调并解析学生信息（带重试与退避），用于应对回调异步完成导致的间歇性姓名缺失问题
+    private func completeCallbackAndParseStudent(authorizeURL: URL?) async -> StudentInfo? {
+        let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/")!
+        let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/")!
+        let maxAttempts = 4
+
+        for attempt in 1...maxAttempts {
+            print("[AuthDebug] completeCallbackAndParseStudent: attempt \(attempt)/\(maxAttempts)")
+
+            // 1) try authorize URL if present
+            if let aURL = authorizeURL {
+                do {
+                    let authResp = try await networkService.get(url: aURL)
+                    let authHTML = String(data: authResp.data, encoding: .utf8)
+                    logAuthDebug(prefix: "authorize_attempt_\(attempt)", response: authResp, html: authHTML)
+                    if isAuthenticatedResponse(authResp, html: authHTML), let html = authHTML, let parsed = parseStudentInfo(from: html) {
+                        return parsed
+                    }
+                } catch {
+                    print("[AuthDebug] authorize attempt \(attempt) failed: \(error)")
+                }
+            }
+
+            // 2) request home
+            do {
+                let homeResp = try await networkService.get(url: homeURL)
+                let homeHTML = String(data: homeResp.data, encoding: .utf8)
+                logAuthDebug(prefix: "home_attempt_\(attempt)", response: homeResp, html: homeHTML)
+                if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
+                    return parsed
+                }
+            } catch {
+                print("[AuthDebug] home attempt \(attempt) failed: \(error)")
+            }
+
+            // 3) try module/10
+            var moduleHTML: String? = nil
+            do {
+                let moduleResp = try await networkService.get(url: moduleURL)
+                moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                logAuthDebug(prefix: "module_attempt_\(attempt)", response: moduleResp, html: moduleHTML)
+                if let html = moduleHTML, let parsed = parseStudentInfo(from: html) {
+                    return parsed
+                }
+                // attempt profile fallback on module html
+                if let html = moduleHTML {
+                    if let parsed = try await attemptProfileFallback(basedOn: html) {
+                        return parsed
+                    }
+                }
+            } catch {
+                print("[AuthDebug] module attempt \(attempt) failed: \(error)")
+            }
+
+            // 4) attempt to discover script endpoints from the last module/home HTML
+            do {
+                if let html = moduleHTML {
+                    if let parsed = try await discoverUserFromScripts(basedOn: html) {
+                        return parsed
+                    }
+                }
+            } catch {
+                print("[AuthDebug] script discovery attempt \(attempt) failed: \(error)")
+            }
+
+            // 等待再试（指数退避或固定等待）
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: 700_000_000) // 700ms
+            }
+        }
+
         return nil
     }
 
