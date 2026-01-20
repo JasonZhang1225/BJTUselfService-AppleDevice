@@ -602,6 +602,76 @@ class AuthService: ObservableObject {
             }
         }
 
+        // 额外：优先匹配显式标签或嵌入的用户信息（避免被站点导航文本误捕获）
+        // 1) 匹配 '姓名：张三' 或 '学生姓名' 这种显式标签
+        if let labeled = extract(html: html, pattern: "姓名[:：]\s*([^<，,\s]{2,10})") {
+            let name = labeled.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[AuthDebug] parseStudentInfo: matched explicit '姓名' label -> \(name)")
+            if isBlacklistedName(name) {
+                print("[AuthDebug] parseStudentInfo: explicit name '\(name)' rejected by blacklist")
+            } else {
+                if let sid = extractStudentId(from: html) {
+                    print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                    return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+                }
+                return StudentInfo(name: name, studentId: "", major: nil, college: nil)
+            }
+        }
+
+        // 2) 匹配表格形式：<th>姓名</th><td>张三</td>
+        if let tableName = extract(html: html, pattern: "(?:<th[^>]*>\s*姓名\s*</th>|<td[^>]*>\s*姓名\s*</td>)[\\s\\S]*?<td[^>]*>\\s*([^<]+)\\s*</td>") {
+            let name = tableName.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[AuthDebug] parseStudentInfo: matched table name -> \(name)")
+            if !isBlacklistedName(name) {
+                if let sid = extractStudentId(from: html) {
+                    print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                    return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+                }
+                return StudentInfo(name: name, studentId: "", major: nil, college: nil)
+            } else {
+                print("[AuthDebug] parseStudentInfo: table name '\(name)' rejected by blacklist")
+            }
+        }
+
+        // 3) 匹配 meta/author
+        if let metaAuthor = extract(html: html, pattern: "<meta[^>]*name=[\'\"]author[\'\"][^>]*content=[\'\"]([^\'\"]+)[\'\"]") {
+            let name = metaAuthor.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[AuthDebug] parseStudentInfo: matched meta author -> \(name)")
+            if !isBlacklistedName(name) {
+                if let sid = extractStudentId(from: html) {
+                    print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                    return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+                }
+                return StudentInfo(name: name, studentId: "", major: nil, college: nil)
+            }
+        }
+
+        // 4) 匹配脚本内的 JSON 字段（常见键名 name / realName / realname / xm）
+        if let jsName = extract(html: html, pattern: "(?:\"realname\"|\"realName\"|\"name\"|\"xm\")\s*:\s*\"([^\"]{2,20})\"") {
+            let name = jsName.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[AuthDebug] parseStudentInfo: matched script JSON name -> \(name)")
+            if !isBlacklistedName(name) {
+                if let sid = extractStudentId(from: html) {
+                    print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                    return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+                }
+                return StudentInfo(name: name, studentId: "", major: nil, college: nil)
+            }
+        }
+
+        // 5) header 区域优先（避免匹配页脚等导航）
+        if let headerName = extract(html: html, pattern: "<header[\\s\\S]*?<a[^>]*>([\\u4e00-\\u9fa5]{2,10})</a>") {
+            let name = headerName.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[AuthDebug] parseStudentInfo: matched header anchor -> \(name)")
+            if !isBlacklistedName(name) {
+                if let sid = extractStudentId(from: html) {
+                    print("[AuthDebug] parseStudentInfo: got studentId from page -> \(sid)")
+                    return StudentInfo(name: name, studentId: sid, major: nil, college: nil)
+                }
+                return StudentInfo(name: name, studentId: "", major: nil, college: nil)
+            }
+        }
+
         // 宽松匹配任意 h3 内的 a 文本或其他可能位置的用户名
         if let generic = extract(html: html, pattern: "<a[^>]*>([\\u4e00-\\u9fa5]{2,10})</a>") {
             let name = generic.trimmingCharacters(in: .whitespacesAndNewlines)
