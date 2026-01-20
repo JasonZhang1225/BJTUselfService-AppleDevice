@@ -376,27 +376,37 @@ class AuthService: ObservableObject {
             return LoginResult(success: false, message: "登录未生效（未检测到会话 Cookie）")
         }
 
-        // 合并解析结果并确保 studentId 是账号或一个数字ID（优先选择页面学号，其次回退到登录用户名）
+        // 合并解析结果并确保 studentId 是账号或一个数字ID（优先选择登录名为准，当登录名为数字学号时覆盖页面学号）
         var finalStudent: StudentInfo
+        // 登录名是否看起来像学号（数字串）
+        let usernameIsNumeric = username.range(of: "[0-9]{5,12}", options: .regularExpression) != nil
         if let s = student {
-            // 如果解析到的 studentId 为空或看起来像“本科生”（非数字），用登录名做后备，并且把原始身份放到 major
-            let numericMatch = s.studentId.range(of: "[0-9]{5,12}", options: .regularExpression) != nil
-            if !numericMatch {
-                let computedMajor: String?
-                if !s.studentId.isEmpty && (s.major == nil || s.major?.isEmpty == true) {
-                    computedMajor = s.studentId
-                } else {
-                    computedMajor = s.major
+            // 优先策略：如果登录名本身就是一个数字学号，则以登录名为权威学号（覆盖页面解析的学号），以避免页面解析到其他账号的学号导致混淆
+            if usernameIsNumeric {
+                let displayName = s.name.isEmpty ? username : s.name
+                if !s.studentId.isEmpty && s.studentId != username {
+                    print("[AuthDebug] finalizeAuthentication: overriding parsed studentId '\(s.studentId)' with username '\(username)'")
                 }
-                // 若解析出的姓名为空，则使用登录名作为展示名
-                let displayName = s.name.isEmpty ? username : s.name
-                finalStudent = StudentInfo(name: displayName, studentId: username, major: computedMajor, college: s.college)
+                finalStudent = StudentInfo(name: displayName, studentId: username, major: s.major, college: s.college)
             } else {
-                // 若解析出的姓名为空，则使用登录名作为展示名
-                let displayName = s.name.isEmpty ? username : s.name
-                finalStudent = StudentInfo(name: displayName, studentId: s.studentId, major: s.major, college: s.college)
+                // 旧逻辑：若页面解析出的 studentId 不是数字（例如“本科生”标签），则回退使用用户名作为学号并把原始身份放到 major
+                let numericMatch = s.studentId.range(of: "[0-9]{5,12}", options: .regularExpression) != nil
+                if !numericMatch {
+                    let computedMajor: String?
+                    if !s.studentId.isEmpty && (s.major == nil || s.major?.isEmpty == true) {
+                        computedMajor = s.studentId
+                    } else {
+                        computedMajor = s.major
+                    }
+                    let displayName = s.name.isEmpty ? username : s.name
+                    finalStudent = StudentInfo(name: displayName, studentId: username, major: computedMajor, college: s.college)
+                } else {
+                    let displayName = s.name.isEmpty ? username : s.name
+                    finalStudent = StudentInfo(name: displayName, studentId: s.studentId, major: s.major, college: s.college)
+                }
             }
         } else {
+            // 无解析结果时，使用用户名作为学号与展示名
             finalStudent = StudentInfo(name: username, studentId: username)
         }
 
