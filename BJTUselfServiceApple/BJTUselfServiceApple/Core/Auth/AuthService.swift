@@ -483,6 +483,12 @@ class AuthService: ObservableObject {
         }
     }
 
+    // 判断姓名是否看起来是站点标签或导航（黑名单），类级私有函数
+    private func isBlacklistedName(_ name: String) -> Bool {
+        let blacklist = ["主页", "首页", "校园", "信息", "交大", "北京交通大学", "登录", "校园信息", "交大主页"]
+        return blacklist.contains { token in name.contains(token) }
+    }
+
     /// 从 MIS 首页 HTML 中解析学生信息（name / 学号 / 部门）
     /// 提取页面中可能的学号：优先匹配“学号: xxxx”，否则查找 6-12 位数字
     private func extractStudentId(from html: String) -> String? {
@@ -520,12 +526,6 @@ class AuthService: ObservableObject {
             // 若没有学号，则把 identity（如 本科生）放到 major 字段，并保留空 studentId
             return StudentInfo(name: name, studentId: "", major: identity, college: dept)
         }
-
-/// 判断姓名是否看起来是站点标签或导航（黑名单）
-    private func isBlacklistedName(_ name: String) -> Bool {
-        let blacklist = ["主页", "首页", "校园", "信息", "交大", "北京交通大学", "登录", "校园信息", "交大主页"]
-        return blacklist.contains { token in name.contains(token) }
-    }
 
         // 兜底：尝试更宽松的匹配（例如直接匹配 h3 > a）
         if let nameRaw = extract(html: html, pattern: "<h3[^>]*>\\s*<a[^>]*>([^<]+)</a>") {
