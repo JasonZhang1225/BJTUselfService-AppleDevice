@@ -254,6 +254,43 @@ class AuthService: ObservableObject {
                 }
 
                 return LoginResult(success: false, message: "登录未生效（未检测到 MIS 会话或用户信息解析失败）")
+            } else {
+                // 如果响应仍为 CAS 登录页，但已经拿到 CAS session cookie（或短轮询后出现），
+                // 也要主动触发 authorize/home 流程以尽量完成回调并建立 MIS 会话。
+                if hasAuthCookie() || cookieAppearedAfterRetry {
+                    print("[AuthDebug] Detected CAS session cookie despite login page; attempting authorize/home to complete flow")
+                    var parsedStudent: StudentInfo? = nil
+
+                    if let authorizeURL = URL(string: challenge.nextPath, relativeTo: URL(string: "https://\(casHost)")) {
+                        print("[AuthDebug] Attempting authorize GET to: \(authorizeURL.absoluteString)")
+                        let authResp = try await networkService.get(url: authorizeURL)
+                        let authHTML = String(data: authResp.data, encoding: .utf8)
+                        logAuthDebug(prefix: "authorize_call", response: authResp, html: authHTML)
+
+                        if isAuthenticatedResponse(authResp, html: authHTML) {
+                            if let html = authHTML {
+                                parsedStudent = parseStudentInfo(from: html)
+                            }
+                        }
+                    }
+
+                    if parsedStudent == nil {
+                        if let homeURL = URL(string: "https://mis.bjtu.edu.cn/home/") {
+                            let homeResponse = try await networkService.get(url: homeURL)
+                            let homeHTML = String(data: homeResponse.data, encoding: .utf8)
+                            logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
+                            if let html = homeHTML {
+                                parsedStudent = parseStudentInfo(from: html)
+                            }
+                        }
+                    }
+
+                    if parsedStudent != nil || hasAuthCookie() {
+                        return finalizeAuthentication(username: username, student: parsedStudent)
+                    }
+                }
+
+                return LoginResult(success: false, message: "登录失败，可能是验证码或密码错误")
             }
             
             // 2. 双重检查 (Double Check)
