@@ -245,6 +245,19 @@ class AuthService: ObservableObject {
                                 parsedStudent = parseStudentInfo(from: html)
                             }
                         }
+
+                        // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
+                        if parsedStudent == nil {
+                            if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
+                                print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
+                                let moduleResp = try await networkService.get(url: moduleURL)
+                                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                                logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
+                                if let html = moduleHTML {
+                                    parsedStudent = parseStudentInfo(from: html)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -281,6 +294,32 @@ class AuthService: ObservableObject {
                             logAuthDebug(prefix: "home_after_post", response: homeResponse, html: homeHTML)
                             if let html = homeHTML {
                                 parsedStudent = parseStudentInfo(from: html)
+                            }
+                        }
+
+                        // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
+                        if parsedStudent == nil {
+                            if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
+                                print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
+                                let moduleResp = try await networkService.get(url: moduleURL)
+                                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                                logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
+                                if let html = moduleHTML {
+                                    parsedStudent = parseStudentInfo(from: html)
+                                }
+                            }
+                        }
+
+                        // 回退：若 /home/ 无法解析出有效姓名，尝试拉取 module/10 页面作为备用来源（与 Android 的流程一致）
+                        if parsedStudent == nil {
+                            if let moduleURL = URL(string: "https://mis.bjtu.edu.cn/module/module/10/") {
+                                print("[AuthDebug] Attempting to fetch module/10 as fallback -> \(moduleURL.absoluteString)")
+                                let moduleResp = try await networkService.get(url: moduleURL)
+                                let moduleHTML = String(data: moduleResp.data, encoding: .utf8)
+                                logAuthDebug(prefix: "module10", response: moduleResp, html: moduleHTML)
+                                if let html = moduleHTML {
+                                    parsedStudent = parseStudentInfo(from: html)
+                                }
                             }
                         }
                     }
