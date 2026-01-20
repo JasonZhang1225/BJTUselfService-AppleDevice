@@ -196,6 +196,8 @@ class AuthService: ObservableObject {
 
             // 保存本次登录响应 HTML 以便在失败时分析错误类型（验证码 vs 密码）
             let loginResponseHTML = String(data: response.data, encoding: .utf8)
+            // 准备一个函数级变量以保存后续 Home 页面检查的 HTML（避免作用域问题）
+            var lastCheckedHomeHTML: String? = nil
 
             // 某些情况下服务器会有短暂延迟才写入 MIS session cookie（导致我们立刻检查时未检到），
             // 在判断失败之前做一次短轮询：最多重试 3 次，每次等待 500ms
@@ -359,6 +361,8 @@ class AuthService: ObservableObject {
                 logAuthDebug(prefix: "home_check", response: homeResponse, html: homeHTML)
                 
                 if isAuthenticatedResponse(homeResponse, html: homeHTML) {
+                    // 记录 homeHTML 以便后续错误原因分析使用（避免作用域错误）
+                    lastCheckedHomeHTML = homeHTML
                     // 从 /home/ 解析学生信息
                     if let html = homeHTML, let parsed = parseStudentInfo(from: html) {
                         return finalizeAuthentication(username: username, student: parsed)
@@ -371,7 +375,7 @@ class AuthService: ObservableObject {
             }
             
             // 在双重检查失败后，也尝试从 home 页面或之前的登录响应中识别失败原因
-            let finalErrMsg = detectLoginFailureMessage(from: [loginResponseHTML, homeHTML]) ?? "登录失败，可能是验证码或密码错误"
+            let finalErrMsg = detectLoginFailureMessage(from: [loginResponseHTML, lastCheckedHomeHTML]) ?? "登录失败，可能是验证码或密码错误"
             return LoginResult(success: false, message: finalErrMsg)
         } catch {
             return LoginResult(success: false, message: "网络错误：\(error.localizedDescription)")
