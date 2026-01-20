@@ -194,6 +194,9 @@ class AuthService: ObservableObject {
             print("[AuthDebug] login response headers: \(response.headers)")
             logCookies()
 
+            // 保存本次登录响应 HTML 以便在失败时分析错误类型（验证码 vs 密码）
+            let loginResponseHTML = String(data: response.data, encoding: .utf8)
+
             // 某些情况下服务器会有短暂延迟才写入 MIS session cookie（导致我们立刻检查时未检到），
             // 在判断失败之前做一次短轮询：最多重试 3 次，每次等待 500ms
             var cookieAppearedAfterRetry = false
@@ -337,6 +340,10 @@ class AuthService: ObservableObject {
                     }
                 }
 
+                // 根据登录页/回调页面 HTML 尝试识别失败原因并返回更精确的提示
+                if let msg = detectLoginFailureMessage(from: [loginResponseHTML]) {
+                    return LoginResult(success: false, message: msg)
+                }
                 return LoginResult(success: false, message: "登录失败，可能是验证码或密码错误")
             }
             
@@ -363,7 +370,9 @@ class AuthService: ObservableObject {
                 }
             }
             
-            return LoginResult(success: false, message: "登录失败，可能是验证码或密码错误")
+            // 在双重检查失败后，也尝试从 home 页面或之前的登录响应中识别失败原因
+            let finalErrMsg = detectLoginFailureMessage(from: [loginResponseHTML, homeHTML]) ?? "登录失败，可能是验证码或密码错误"
+            return LoginResult(success: false, message: finalErrMsg)
         } catch {
             return LoginResult(success: false, message: "网络错误：\(error.localizedDescription)")
         }
@@ -739,7 +748,29 @@ class AuthService: ObservableObject {
         let snippet = html.map { String($0.prefix(400)) } ?? "nil"
         print("[AuthDebug] \(prefix) status=\(response.statusCode) location=\(location) snippet=\(snippet)")
     }
+
+    // 根据登录相关页面的 HTML 内容推断失败原因，并返回适合展示的本地化消息（优先识别验证码错误）
+    private func detectLoginFailureMessage(from htmls: [String?]) -> String? {
+        // 关键词（包含中文/英文常见变体）
+        let captchaKeywords = ["认证码错误", "验证码错误", "验证码不正确", "验证码有误", "invalid captcha", "incorrect captcha"]
+        let passwordKeywords = ["用户密码不正确", "用户名或密码错误", "用户名或密码不正确", "密码错误", "incorrect username or password", "invalid login"]
+
+        for html in htmls.compactMap({ $0?.lowercased() }) {
+            for k in captchaKeywords {
+                if html.contains(k.lowercased()) {
+                    return "验证码错误，请重新输入验证码"
+                }
+            }
+            for k in passwordKeywords {
+                if html.contains(k.lowercased()) {
+                    return "用户名或密码不正确，请检查后重试"
+                }
+            }
+        }
+        return nil
+    }
 }
+
 
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
