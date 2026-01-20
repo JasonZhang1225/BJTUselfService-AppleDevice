@@ -862,11 +862,36 @@ class AuthService: ObservableObject {
                     let authResp = try await networkService.get(url: aURL)
                     let authHTML = String(data: authResp.data, encoding: .utf8)
                     logAuthDebug(prefix: "authorize_attempt_\(attempt)", response: authResp, html: authHTML)
-                    if isAuthenticatedResponse(authResp, html: authHTML), let html = authHTML, let parsed = parseStudentInfo(from: html) {
-                        return parsed
+
+                    // 如果 authorize 返回的是 /auth/sso 重定向（302 -> /auth/sso/?next=/）
+                    if let loc = authResp.headers["Location"] ?? authResp.headers["location"], loc.contains("/auth/sso") {
+                        if let ssoURL = URL(string: loc, relativeTo: URL(string: "https://\(casHost)")) {
+                            print("[AuthDebug] authorize attempt returned sso redirect; requesting SSO URL: \(ssoURL.absoluteString)")
+                            let ssoResp = try await networkService.get(url: ssoURL)
+                            let ssoHTML = String(data: ssoResp.data, encoding: .utf8)
+                            logAuthDebug(prefix: "sso_follow_\(attempt)", response: ssoResp, html: ssoHTML)
+
+                            // 如果 SSO 又重定向到 MIS callback（Location 包含 mis.bjtu.edu.cn），跟随之
+                            if let ssoLoc = ssoResp.headers["Location"] ?? ssoResp.headers["location"], ssoLoc.contains("mis.bjtu.edu.cn") {
+                                if let callbackURL = URL(string: ssoLoc) {
+                                    print("[AuthDebug] SSO redirected to MIS callback: \(callbackURL.absoluteString); requesting callback")
+                                    let cbResp = try await networkService.get(url: callbackURL)
+                                    let cbHTML = String(data: cbResp.data, encoding: .utf8)
+                                    logAuthDebug(prefix: "callback_follow_\(attempt)", response: cbResp, html: cbHTML)
+                                    if let html = cbHTML, let parsed = parseStudentInfo(from: html) {
+                                        return parsed
+                                    }
+                                }
+                            }
+
+                            // 也尝试直接从 SSO 返回的 HTML 解析
+                            if let html = ssoHTML, let parsed = parseStudentInfo(from: html) {
+                                return parsed
+                            }
+                        }
                     }
-                } catch {
-                    print("[AuthDebug] authorize attempt \(attempt) failed: \(error)")
+
+                    // 常规路径：若 authorize 返回了可直接包含用户信息的页面，解析之
                 }
             }
 
