@@ -13,3 +13,20 @@
 ## 鸣谢
 
 感谢 [nimisora-homowork-notify](https://github.com/10086mea/nimisora-homowork-notify) 项目提供的邮箱订阅功能。
+
+## 贡献者
+
+感谢以下所有为本项目做出贡献的朋友们：
+- [optsimauth](https://github.com/optsimauth): 
+  - 重构了整个项目的架构，优化了代码结构
+  - 以及后续若干跟进
+- [guh0613](https://github.com/guh0613)
+  - 提供自动构建与发布
+- [carolyn-sun](https://github.com/carolyn-sun)
+  - 优化了工作流配置
+- [NAPHthalene130](https://github.com/NAPHthalene130)
+  - 修复若干 bug
+- [B-Silva20](https://github.com/B-Silva20)
+  - 提供了成绩自选课程计算
+- [wangxiaobo1747](https://github.com/wangxiaobo1747) 
+  - 提供了自定义壁纸和桌面课程表小组件
