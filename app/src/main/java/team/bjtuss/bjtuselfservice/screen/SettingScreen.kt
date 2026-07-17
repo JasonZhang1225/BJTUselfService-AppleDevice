@@ -76,6 +76,12 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 
 
 @Composable
@@ -175,6 +181,10 @@ fun SettingScreen(mainViewModel: MainViewModel) {
                 checked = dynamicColorEnable,
                 onCheckedChange = { settingViewModel.setDynamicColorOption(it) },
             )
+        }
+
+        item {
+            CustomBackgroundSettingItem(settingViewModel)
         }
 
         // Auto sync settings section
@@ -285,6 +295,84 @@ fun SettingScreen(mainViewModel: MainViewModel) {
                     fontSize = 16.sp,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun CustomBackgroundSettingItem(settingViewModel: team.bjtuss.bjtuselfservice.viewmodel.SettingViewModel) {
+    val context = LocalContext.current
+    val backgroundImageUri by settingViewModel.backgroundImageUri.collectAsState()
+
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.toFloat()
+    val screenHeight = configuration.screenHeightDp.toFloat()
+
+    val cropLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            val resultUri = com.yalantis.ucrop.UCrop.getOutput(result.data!!)
+            if (resultUri != null) {
+                settingViewModel.setBackgroundImageUri(resultUri.path ?: "")
+            }
+        }
+    }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            val destinationFile = java.io.File(context.filesDir, "custom_background_${System.currentTimeMillis()}.jpg")
+            val destinationUri = android.net.Uri.fromFile(destinationFile)
+            
+            val options = com.yalantis.ucrop.UCrop.Options().apply {
+                setCompressionQuality(100)
+                setCompressionFormat(android.graphics.Bitmap.CompressFormat.PNG)
+            }
+            val intent = com.yalantis.ucrop.UCrop.of(uri, destinationUri)
+                .withAspectRatio(screenWidth, screenHeight)
+                .withOptions(options)
+                .getIntent(context)
+            cropLauncher.launch(intent)
+        }
+    }
+
+    SettingItemBase(
+        onClick = {
+            if (backgroundImageUri.isNotEmpty()) {
+                settingViewModel.setBackgroundImageUri("")
+            } else {
+                launcher.launch("image/*")
+            }
+        }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Brush,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "自定义背景",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (backgroundImageUri.isNotEmpty()) "点击清除背景" else "点击选择背景图片",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
             }
         }
     }

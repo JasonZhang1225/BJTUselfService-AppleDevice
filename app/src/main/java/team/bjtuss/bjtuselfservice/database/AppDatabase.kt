@@ -23,7 +23,8 @@ import team.bjtuss.bjtuselfservice.entity.HomeworkEntity
         HomeworkEntity::class,
     ],
 
-    version = 2
+    version = 2,
+    exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun gradeEntityDao(): GradeEntityDao

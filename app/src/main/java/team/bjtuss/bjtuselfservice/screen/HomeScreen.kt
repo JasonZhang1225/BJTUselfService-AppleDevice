@@ -110,11 +110,13 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
             AppEventManager.sendEvent(AppEvent.DataSyncRequest)
         }
     }
+    
+    val backgroundImageUri by mainViewModel.settingViewModel.backgroundImageUri.collectAsState()
+    val hasBackground = backgroundImageUri.isNotEmpty()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -123,7 +125,8 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
             ecardBalance = formatEcardBalance(status?.EcardBalance),
             netBalance = formatNetBalance(status?.NetBalance),
             newMailCount = formatNewMailCount(status?.NewMailCount),
-            navController = navController
+            navController = navController,
+            hasBackground = hasBackground
         )
 
 
@@ -153,7 +156,7 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 item {
-                    HomeworkNoticeCard(homeworkList, navController)
+                    HomeworkNoticeCard(homeworkList, navController, hasBackground = hasBackground)
                 }
 
                 // Grade Changes Section
@@ -168,7 +171,8 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
                                 onItemClick = { change ->
                                     selectedGradeChange = change
                                     showGradeDialog = true
-                                }
+                                },
+                                hasBackground = hasBackground
                             )
                         }
                     }
@@ -185,7 +189,8 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
                                 changes = courseChangeList,
                                 onItemClick = { _ ->
                                     navController.navigate(RouteManager.CourseSchedule)
-                                }
+                                },
+                                hasBackground = hasBackground
                             )
                         }
                     }
@@ -203,7 +208,8 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
                                 onItemClick = { change ->
                                     selectedExamChange = change
                                     showExamDialog = true
-                                }
+                                },
+                                hasBackground = hasBackground
                             )
                         }
                     }
@@ -222,7 +228,8 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
                                 onItemClick = { change ->
                                     selectedHomeworkChange = change
                                     showHomeworkDialog = true
-                                }
+                                },
+                                hasBackground = hasBackground
                             )
                         }
                     }
@@ -265,7 +272,8 @@ fun HomeScreen(navController: NavController, mainViewModel: MainViewModel) {
 private fun <T> ChangeSection(
     title: String,
     changes: List<DataChange<T>>,
-    onItemClick: (DataChange<T>) -> Unit
+    onItemClick: (DataChange<T>) -> Unit,
+    hasBackground: Boolean = false
 ) {
     Text(
         text = title,
@@ -282,7 +290,8 @@ private fun <T> ChangeSection(
         changes.forEach { change ->
             ChangeCard(
                 dataChange = change,
-                onClick = { onItemClick(change) }
+                onClick = { onItemClick(change) },
+                hasBackground = hasBackground
             )
         }
     }
@@ -321,7 +330,8 @@ fun StatusInfo(
     ecardBalance: String,
     netBalance: String,
     newMailCount: String,
-    navController: NavController
+    navController: NavController,
+    hasBackground: Boolean = false
 ) {
 
     Column(
@@ -331,31 +341,32 @@ fun StatusInfo(
         Row(verticalAlignment = Alignment.CenterVertically) {
             MailButton({
                 Text(newMailCount, fontSize = 18.sp)
-            }, navController)
+            }, navController, hasBackground)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            EcardButton({ Text(ecardBalance, fontSize = 18.sp) })
+            EcardButton({ Text(ecardBalance, fontSize = 18.sp) }, hasBackground)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            NetButton({ Text(netBalance, fontSize = 18.sp) })
+            NetButton({ Text(netBalance, fontSize = 18.sp) }, hasBackground)
         }
     }
 
 }
 
 @Composable
-fun MailButton(content: @Composable () -> Unit, navController: NavController) {
+fun MailButton(content: @Composable () -> Unit, navController: NavController, hasBackground: Boolean = false) {
     Button(
         onClick = {
             navController.navigate(RouteManager.Email)
         },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(32.dp),
+        border = if (hasBackground) androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f)) else null,
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            containerColor = if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.onPrimaryContainer
         ),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = if (hasBackground) 0.dp else 2.dp)
     ) {
         Row(
             modifier = Modifier
@@ -367,7 +378,7 @@ fun MailButton(content: @Composable () -> Unit, navController: NavController) {
             Icon(
                 imageVector = Icons.Default.Email,
                 contentDescription = "New Mail",
-                tint = MaterialTheme.colorScheme.primary,
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(28.dp)
             )
             Spacer(modifier = Modifier.width(16.dp))
@@ -376,14 +387,14 @@ fun MailButton(content: @Composable () -> Unit, navController: NavController) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Open",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
             )
         }
     }
 }
 
 @Composable
-fun EcardButton(content: @Composable () -> Unit) {
+fun EcardButton(content: @Composable () -> Unit, hasBackground: Boolean = false) {
     val context = LocalContext.current
     var showDialog by remember { mutableStateOf(false) }
 
@@ -391,11 +402,12 @@ fun EcardButton(content: @Composable () -> Unit) {
         onClick = { showDialog = true },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(32.dp),
+        border = if (hasBackground) androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f)) else null,
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            containerColor = if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.onPrimaryContainer
         ),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = if (hasBackground) 0.dp else 2.dp)
     ) {
         Row(
             modifier = Modifier
@@ -407,7 +419,7 @@ fun EcardButton(content: @Composable () -> Unit) {
             Icon(
                 imageVector = Icons.Default.AccountBalanceWallet,
                 contentDescription = "Ecard Balance",
-                tint = MaterialTheme.colorScheme.primary,
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(28.dp)
             )
             Spacer(modifier = Modifier.width(16.dp))
@@ -416,7 +428,7 @@ fun EcardButton(content: @Composable () -> Unit) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Open",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
             )
         }
     }
@@ -466,7 +478,7 @@ fun shareToWeChat(context: Context) {
 }
 
 @Composable
-fun NetButton(content: @Composable () -> Unit) {
+fun NetButton(content: @Composable () -> Unit, hasBackground: Boolean = false) {
     val context = LocalContext.current
     var showDialog by remember { mutableStateOf(false) }
 
@@ -474,11 +486,12 @@ fun NetButton(content: @Composable () -> Unit) {
         onClick = { showDialog = true },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(32.dp),
+        border = if (hasBackground) androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f)) else null,
         colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            containerColor = if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.onPrimaryContainer
         ),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = if (hasBackground) 0.dp else 2.dp)
     ) {
         Row(
             modifier = Modifier
@@ -490,7 +503,7 @@ fun NetButton(content: @Composable () -> Unit) {
             Icon(
                 imageVector = Icons.Default.Wifi,
                 contentDescription = "Net Balance",
-                tint = MaterialTheme.colorScheme.primary,
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(28.dp)
             )
             Spacer(modifier = Modifier.width(16.dp))
@@ -499,7 +512,7 @@ fun NetButton(content: @Composable () -> Unit) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Open",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
             )
         }
     }
@@ -555,7 +568,8 @@ fun launchWanMeiCampusApp(context: Context) {
 @Composable
 private fun HomeworkNoticeCard(
     homeworkList: List<HomeworkEntity>,
-    navController: NavController
+    navController: NavController,
+    hasBackground: Boolean = false
 ) {
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     val now = LocalDateTime.now()
@@ -583,7 +597,9 @@ private fun HomeworkNoticeCard(
             modifier = Modifier
                 .fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            border = if (hasBackground) androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f)) else null,
+            colors = CardDefaults.cardColors(containerColor = if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.surfaceVariant),
+            elevation = CardDefaults.cardElevation(defaultElevation = if (hasBackground) 0.dp else 2.dp),
             onClick = {
                 showDetail = true
             }
@@ -591,7 +607,7 @@ private fun HomeworkNoticeCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.onErrorContainer)
+                    .background(if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.onErrorContainer)
                     .padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -603,14 +619,14 @@ private fun HomeworkNoticeCard(
                     Text(
                         text = "有${countForDeadline}项作业已经迫在眉睫！",
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.errorContainer
+                            color = if (hasBackground) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.errorContainer
                         )
                     )
                 }
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = "View Details",
-                    tint = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                    tint = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
                 )
             }
         }
@@ -630,14 +646,17 @@ private fun HomeworkNoticeCard(
 @Composable
 private fun <T> ChangeCard(
     dataChange: DataChange<T>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    hasBackground: Boolean = false
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        border = if (hasBackground) androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f)) else null,
+        colors = CardDefaults.cardColors(containerColor = if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (hasBackground) 0.dp else 2.dp)
     ) {
         val (backgroundColor, textColor, icon) = when (dataChange) {
             is DataChange.Added -> Triple(
@@ -662,7 +681,7 @@ private fun <T> ChangeCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(backgroundColor)
+                .background(if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else backgroundColor)
                 .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -674,7 +693,7 @@ private fun <T> ChangeCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = textColor
+                    tint = if (hasBackground) androidx.compose.ui.graphics.Color.White else textColor
                 )
                 Text(
                     text = when (dataChange) {
@@ -682,14 +701,15 @@ private fun <T> ChangeCard(
                         is DataChange.Modified -> "变化 ${dataChange.items.size}项"
                         is DataChange.Deleted -> "删除 ${dataChange.items.size}项"
                     },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = textColor
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        color = if (hasBackground) androidx.compose.ui.graphics.Color.White else textColor
+                    )
                 )
             }
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "View Details",
-                tint = textColor.copy(alpha = 0.7f)
+                tint = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.7f) else textColor.copy(alpha = 0.7f)
             )
         }
     }

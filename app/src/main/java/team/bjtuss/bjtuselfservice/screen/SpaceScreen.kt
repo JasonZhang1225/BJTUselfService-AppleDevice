@@ -67,6 +67,8 @@ fun SpaceCard(
     contentModifier: Modifier = Modifier,
     onClick: () -> Unit = {}
 ) {
+    val hasBackground = team.bjtuss.bjtuselfservice.LocalHasBackground.current
+
     Card(
         modifier = modifier,
         shape = SquircleShape(
@@ -74,10 +76,11 @@ fun SpaceCard(
             CornerSmoothing.Medium
         ),
         elevation = CardDefaults.elevatedCardElevation(
-            8.dp
+            if (hasBackground) 0.dp else 8.dp
         ),
+        border = if (hasBackground) androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)) else null,
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = if (hasBackground) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant
                 .copy(alpha = 0.1f)
                 .compositeOver(backgroundColor),
         )

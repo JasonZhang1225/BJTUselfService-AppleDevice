@@ -31,6 +31,9 @@ class SettingViewModel : ViewModel() {
     private val _dynamicColorEnable = MutableStateFlow(false)
     val dynamicColorEnable = _dynamicColorEnable.asStateFlow()
 
+    private val _backgroundImageUri = MutableStateFlow("")
+    val backgroundImageUri = _backgroundImageUri.asStateFlow()
+
 
     init {
         viewModelScope.launch {
@@ -76,6 +79,11 @@ class SettingViewModel : ViewModel() {
                 _dynamicColorEnable.value = it
             }
         }
+        viewModelScope.launch {
+            DataStoreRepository.getBackgroundImageUri().collect {
+                _backgroundImageUri.value = it
+            }
+        }
     }
 
     fun setGradeAutoSyncOption(enabled: Boolean) {
@@ -116,6 +124,12 @@ class SettingViewModel : ViewModel() {
     fun setDynamicColorOption(enabled: Boolean) {
         viewModelScope.launch {
             DataStoreRepository.setDynamicColorOption(enabled)
+        }
+    }
+
+    fun setBackgroundImageUri(uri: String) {
+        viewModelScope.launch {
+            DataStoreRepository.setBackgroundImageUri(uri)
         }
     }
 }

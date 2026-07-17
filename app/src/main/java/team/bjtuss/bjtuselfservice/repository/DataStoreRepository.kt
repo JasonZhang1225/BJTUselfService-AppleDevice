@@ -38,6 +38,8 @@ object DataStoreRepository {
     private val gradeSelectionsMapType =
         object : TypeToken<Map<String, List<GradeSelectionRecord>>>() {}.type
 
+    private val BACKGROUND_IMAGE_URI_KEY = stringPreferencesKey("background_image_uri")
+
 
     suspend fun setCredentials(credentials: Credentials) {
         appContext.dataStore.edit { preferences ->
@@ -242,6 +244,18 @@ object DataStoreRepository {
             preferences[DYNAMIC_COLOR_KEY] = enabled
         }
 
+    }
+
+    fun getBackgroundImageUri(): Flow<String> {
+        return appContext.dataStore.data.map { preferences ->
+            preferences[BACKGROUND_IMAGE_URI_KEY] ?: ""
+        }
+    }
+
+    suspend fun setBackgroundImageUri(uri: String) {
+        appContext.dataStore.edit { preferences ->
+            preferences[BACKGROUND_IMAGE_URI_KEY] = uri
+        }
     }
 
 }

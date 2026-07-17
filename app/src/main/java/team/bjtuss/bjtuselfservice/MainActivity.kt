@@ -58,6 +58,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -115,7 +116,23 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 
+import androidx.compose.material3.ExperimentalMaterial3Api
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeChild
+import dev.chrisbanes.haze.HazeStyle
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+
+val LocalHasBackground = androidx.compose.runtime.compositionLocalOf { false }
+val LocalHazeState = androidx.compose.runtime.compositionLocalOf<dev.chrisbanes.haze.HazeState?> { null }
+
 class MainActivity : ComponentActivity() {
+    @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -148,30 +165,53 @@ class MainActivity : ComponentActivity() {
             val appState by AppStateManager.appState.collectAsState()
             val credentials by AuthenticatorManager.credentials.collectAsState()
             val currentTheme by mainViewModel.settingViewModel.currentTheme.collectAsState()
-
             val checkUpdate by settingViewModel.checkUpdateEnable.collectAsState()
-
+            val backgroundImageUri by settingViewModel.backgroundImageUri.collectAsState()
 
             AppTheme(currentTheme = currentTheme, dynamicColor = dynamicColorEnable) {
-                Surface {
-                    if (checkUpdate) {
-                        CheckUpdate()
+                val hazeState = remember { dev.chrisbanes.haze.HazeState() }
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalHasBackground provides backgroundImageUri.isNotEmpty(),
+                    LocalHazeState provides hazeState
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                    val bitmap = remember(backgroundImageUri) {
+                        if (backgroundImageUri.isNotEmpty() && java.io.File(backgroundImageUri).exists()) {
+                            android.graphics.BitmapFactory.decodeFile(backgroundImageUri)?.asImageBitmap()
+                        } else null
+                    }
+                    if (bitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = bitmap,
+                            contentDescription = "Background",
+                            modifier = Modifier.fillMaxSize().haze(hazeState),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
                     }
 
-                    if (appState == AppState.Logout || appState == AppState.Error) {
+                    Surface(
+                        color = if (bitmap != null) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.background,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        if (checkUpdate) {
+                            CheckUpdate()
+                        }
 
-                        LoginDialog(credentials)
+                        if (appState == AppState.Logout || appState == AppState.Error) {
+
+                            LoginDialog(credentials)
+                        }
+
+                        App(mainViewModel, hasBackground = bitmap != null)
+                        FloatingLoggingIndicator(appState)
+
                     }
-
-                    App(mainViewModel)
-                    FloatingLoggingIndicator(appState)
-
+                    }
                 }
             }
         }
     }
 }
-
 
 @SuppressLint("CoroutineCreationDuringComposition")
 @Composable
@@ -249,7 +289,7 @@ fun CheckUpdate() {
 
 
 @Composable
-fun App(mainViewModel: MainViewModel) {
+fun App(mainViewModel: MainViewModel, hasBackground: Boolean = false) {
 
     val navController = rememberNavController()
     NavHost(navController = navController,
@@ -259,7 +299,7 @@ fun App(mainViewModel: MainViewModel) {
         popEnterTransition = { activityPopEnterTransition() },
         popExitTransition = { activityPopExitTransition() }) {
         composable(RouteManager.Navigation) {
-            AppNavigation(navController, mainViewModel)
+            AppNavigation(navController, mainViewModel, hasBackground)
         }
         composable(RouteManager.CourseSchedule) {
             CourseScheduleScreen(mainViewModel)
@@ -391,7 +431,7 @@ object RouteManager {
 
 @Composable
 fun AppNavigation(
-    navController: NavController, mainViewModel: MainViewModel
+    navController: NavController, mainViewModel: MainViewModel, hasBackground: Boolean = false
 ) {
     val pages = listOf(
         PageItem(RouteManager.Home, "首页", Icons.Default.Home),
@@ -406,33 +446,84 @@ fun AppNavigation(
     val answer = listOf(1, 2, 2, 0, 1, 1)
     var targetPage by remember { mutableIntStateOf(pagerState.currentPage) }
     val coroutineScope = rememberCoroutineScope()
-    Scaffold(bottomBar = {
+    Scaffold(
+        containerColor = if (hasBackground) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.background,
+        bottomBar = {
 
-        NavigationBar {
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp, start = 24.dp, end = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             pages.forEachIndexed { index, pageItem ->
-                NavigationBarItem(selected = targetPage == index, onClick = {
-                    targetPage = index
-                    clickSequence.add(index)
-                    if (clickSequence.size > answer.size) {
-                        clickSequence.removeAt(0)
-                    }
-                    if (clickSequence.toList() == answer) {
-                        ClassroomCapacityService.ok = true
-                    }
-                    coroutineScope.launch {
-                        pagerState.animateScrollToPage(
-                            index,
-                            animationSpec = tween(
-                                durationMillis = 350,
-                                easing = LinearOutSlowInEasing
-                            )
+                val isSelected = targetPage == index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 8.dp)
+                        .let { 
+                            if (hasBackground && LocalHazeState.current != null) 
+                                it.hazeChild(LocalHazeState.current!!, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), style = HazeStyle(tint = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f), blurRadius = 8.dp))
+                            else it 
+                        }
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+                        .background(
+                            if (hasBackground) androidx.compose.ui.graphics.Color.Transparent 
+                            else if (isSelected) MaterialTheme.colorScheme.secondaryContainer 
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color.Transparent,
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+                        )
+                        .clickable {
+                            targetPage = index
+                            clickSequence.add(index)
+                            if (clickSequence.size > answer.size) {
+                                clickSequence.removeAt(0)
+                            }
+                            if (clickSequence.toList() == answer) {
+                                ClassroomCapacityService.ok = true
+                            }
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(
+                                    index,
+                                    animationSpec = tween(
+                                        durationMillis = 350,
+                                        easing = LinearOutSlowInEasing
+                                    )
+                                )
+                            }
+                        }
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = pageItem.icon, 
+                            contentDescription = pageItem.title,
+                            tint = if (hasBackground) {
+                                if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f)
+                            } else {
+                                if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = pageItem.title, 
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+                            color = if (hasBackground) {
+                                if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f)
+                            } else {
+                                if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
-                }, icon = {
-                    Icon(imageVector = pageItem.icon, contentDescription = pageItem.title)
-                }, label = {
-                    Text(text = pageItem.title)
-                })
+                }
             }
         }
 
