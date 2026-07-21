@@ -28,4 +28,6 @@ interface CourseEntityDao : BaseDao<CourseEntity> {
     @Query("select * from CourseEntity where isCurrentSemester = :isCurrentSemester")
     fun getCurrentSemesterCourseBySemester(isCurrentSemester: Boolean): Flow<List<CourseEntity>>
 
+    @Query("select * from CourseEntity where isCurrentSemester = :isCurrentSemester")
+    suspend fun getCurrentSemesterCourseListBySemester(isCurrentSemester: Boolean): List<CourseEntity>
 }

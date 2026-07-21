@@ -25,4 +25,7 @@ interface HomeworkEntityDao : BaseDao<HomeworkEntity> {
 
     @Query("delete from HomeworkEntity")
     override suspend fun deleteAll()
+
+    @Query("select * from HomeworkEntity")
+    suspend fun getAllList(): List<HomeworkEntity>
 }

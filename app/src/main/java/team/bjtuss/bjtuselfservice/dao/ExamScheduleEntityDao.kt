@@ -26,4 +26,6 @@ interface ExamScheduleEntityDao : BaseDao<ExamScheduleEntity>{
     @Query("delete from ExamScheduleEntity")
     override suspend fun deleteAll()
 
+    @Query("select * from ExamScheduleEntity")
+    suspend fun getAllList(): List<ExamScheduleEntity>
 }

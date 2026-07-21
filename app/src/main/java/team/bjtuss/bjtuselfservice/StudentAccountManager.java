@@ -96,7 +96,6 @@ public class StudentAccountManager {
             throw new RuntimeException(e);
         }
 
-
         return new OkHttpClient.Builder()
                 .sslSocketFactory(sslContext.getSocketFactory(), (X509TrustManager) trustAllCerts[0])
                 .hostnameVerifier((hostname, session) -> true)
@@ -173,7 +172,6 @@ public class StudentAccountManager {
 
     public void clearCookie() {
         client = generateNewClient();
-
     }
 
     private void setStudentInfoFromCode(String code, String stuId) {

@@ -101,6 +101,10 @@ dependencies {
     implementation ("com.airbnb.android:lottie-compose:4.0.0")
     implementation("com.github.yalantis:ucrop:2.2.8")
     implementation("dev.chrisbanes.haze:haze:0.7.1")
+    
+    // Jetpack Glance for Widgets
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 }
 kapt {
     correctErrorTypes = true
