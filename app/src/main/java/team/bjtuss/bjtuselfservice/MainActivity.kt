@@ -454,21 +454,20 @@ fun AppNavigation(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 24.dp, start = 24.dp, end = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             pages.forEachIndexed { index, pageItem ->
                 val isSelected = targetPage == index
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 8.dp)
+                        .size(72.dp)
                         .let { 
-                            if (hasBackground && LocalHazeState.current != null) 
-                                it.hazeChild(LocalHazeState.current!!, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), style = HazeStyle(tint = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f), blurRadius = 8.dp))
+                            if (hasBackground && LocalHazeState.current != null)
+                                it.hazeChild(LocalHazeState.current!!, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), style = HazeStyle(tint = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f), blurRadius = 8.dp))
                             else it 
                         }
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
                         .background(
                             if (hasBackground) androidx.compose.ui.graphics.Color.Transparent 
                             else if (isSelected) MaterialTheme.colorScheme.secondaryContainer 
@@ -477,7 +476,7 @@ fun AppNavigation(
                         .border(
                             width = 1.dp,
                             color = if (hasBackground) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color.Transparent,
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
                         )
                         .clickable {
                             targetPage = index
@@ -497,8 +496,7 @@ fun AppNavigation(
                                     )
                                 )
                             }
-                        }
-                        .padding(vertical = 12.dp),
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -511,10 +509,10 @@ fun AppNavigation(
                                 if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
-                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(4.dp))
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = pageItem.title, 
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
                             color = if (hasBackground) {
                                 if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f)
@@ -590,5 +588,4 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.activityPopExitTra
         animationSpec = tween(DEFAULT_EXIT_DURATION, easing = FastOutLinearInEasing),
         targetOffset = { it })
 }
-
 
