@@ -115,14 +115,20 @@ import team.bjtuss.bjtuselfservice.error
 import team.bjtuss.bjtuselfservice.primary
 import team.bjtuss.bjtuselfservice.primaryContainer
 import team.bjtuss.bjtuselfservice.repository.DatabaseRepository
+import team.bjtuss.bjtuselfservice.repository.HomeworkAttachment
+import team.bjtuss.bjtuselfservice.repository.HomeworkDetail
+import team.bjtuss.bjtuselfservice.repository.SmartCurriculumPlatformRepository
 import team.bjtuss.bjtuselfservice.statemanager.AppState
 import team.bjtuss.bjtuselfservice.statemanager.AppStateManager
+import team.bjtuss.bjtuselfservice.utils.DownloadUtil
+import team.bjtuss.bjtuselfservice.utils.KotlinUtils
 import team.bjtuss.bjtuselfservice.viewmodel.DataChange
 import team.bjtuss.bjtuselfservice.viewmodel.HomeworkViewModel
 import team.bjtuss.bjtuselfservice.viewmodel.MainViewModel
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.roundToInt
 
 @Composable
 fun HomeworkScreen(mainViewModel: MainViewModel) {
@@ -413,7 +419,7 @@ fun getHomeworkStatusInfo(
 
 @Composable
 fun HomeworkItemCard(homework: HomeworkEntity) {
-    var showHtmlDialog by remember { mutableStateOf(false) }
+    var showHomeworkDetailDialog by remember { mutableStateOf(false) }
     var showUploadHomeworkDialog by remember { mutableStateOf(false) }
     val appState by AppStateManager.appState.collectAsState()
 
@@ -471,7 +477,7 @@ fun HomeworkItemCard(homework: HomeworkEntity) {
                 ),
                 interactionSource = remember { MutableInteractionSource() }
             ) {
-                showHtmlDialog = true
+                showHomeworkDetailDialog = true
             },
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -600,8 +606,11 @@ fun HomeworkItemCard(homework: HomeworkEntity) {
         }
     }
 
-    if (showHtmlDialog) {
-        ShowHtmlDialog({ showHtmlDialog = false }, homework.content)
+    if (showHomeworkDetailDialog) {
+        HomeworkDetailDialog(
+            homework = homework,
+            onDismiss = { showHomeworkDetailDialog = false },
+        )
     }
     if (showUploadHomeworkDialog) {
         UploadHomeDialog(homework) { showUploadHomeworkDialog = false }
@@ -966,37 +975,238 @@ fun UploadHomeDialog(homeworkEntity: HomeworkEntity, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun ShowHtmlDialog(onDismiss: () -> Unit, htmlContent: String) {
-    Dialog(onDismissRequest = onDismiss) {
+fun HomeworkDetailDialog(
+    homework: HomeworkEntity,
+    onDismiss: () -> Unit,
+) {
+    var detail by remember(homework.upId) { mutableStateOf<HomeworkDetail?>(null) }
+    var isLoading by remember(homework.upId) { mutableStateOf(true) }
+    var loadError by remember(homework.upId) { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+
+    LaunchedEffect(homework.upId) {
+        isLoading = true
+        loadError = null
+        detail = runCatching {
+            SmartCurriculumPlatformRepository.getHomeworkDetail(homework)
+        }.onFailure {
+            loadError = it.message ?: "作业详情加载失败"
+        }.getOrNull()
+        isLoading = false
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
         Card(
             modifier = Modifier
-                .background(MaterialTheme.colorScheme.surface)
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.76f),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
         ) {
-            AndroidView(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth(0.9f)
-                    .fillMaxHeight(0.4f)
-                    .align(Alignment.CenterHorizontally),
-                factory = { context ->
-                    WebView(context).apply {
-                        settings.javaScriptEnabled = true  // 启用JavaScript
-                        settings.loadWithOverviewMode = true
-                        settings.useWideViewPort = true
-                        settings.textZoom = 300
-                        webViewClient = WebViewClient()
+                    .fillMaxSize()
+                    .padding(20.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = homework.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = homework.courseName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                },
-                update = { webView ->
-                    webView.loadDataWithBaseURL(
-                        null,
-                        htmlContent,
-                        "text/html",
-                        "utf-8",
-                        null
-                    )
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
                 }
-            )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Text(
+                            text = "作业内容",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AndroidView(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            factory = { webViewContext ->
+                                WebView(webViewContext).apply {
+                                    settings.loadWithOverviewMode = true
+                                    settings.useWideViewPort = true
+                                    settings.textZoom = (
+                                        120 * webViewContext.resources.configuration.fontScale
+                                    ).roundToInt()
+                                    webViewClient = WebViewClient()
+                                }
+                            },
+                            update = { webView ->
+                                webView.loadDataWithBaseURL(
+                                    null,
+                                    buildHomeworkHtml(detail?.content ?: homework.content),
+                                    "text/html",
+                                    "utf-8",
+                                    null,
+                                )
+                            },
+                        )
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                        Text(
+                            text = "附件",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        loadError?.let { errorMessage ->
+                            Text(
+                                text = "附件加载失败：$errorMessage",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        val attachments = detail?.attachments.orEmpty()
+                        if (attachments.isEmpty() && loadError == null) {
+                            Text(
+                                text = "暂无附件",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().height(168.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(attachments, key = { it.id }) { attachment ->
+                                    HomeworkAttachmentItem(
+                                        attachment = attachment,
+                                        onDownload = {
+                                            val downloadUrl = SmartCurriculumPlatformRepository
+                                                .getHomeworkAttachmentDownloadUrl(
+                                                    homeworkId = homework.upId,
+                                                    attachmentId = attachment.id,
+                                                )
+                                            val extension = attachment.sourcePath
+                                                .substringBefore('?')
+                                                .substringAfterLast('.', "")
+                                                .ifBlank {
+                                                    attachment.fileName
+                                                        .substringAfterLast('.', "bin")
+                                                }
+                                            val nameWithoutExtension = attachment.fileName
+                                                .removeSuffix(".$extension")
+                                            DownloadUtil.downloadFile(
+                                                url = downloadUrl,
+                                                title = nameWithoutExtension,
+                                                cookie = KotlinUtils.getCookieByUrl(downloadUrl),
+                                                fileType = extension,
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                "已开始下载，请到下载目录查收",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+private fun buildHomeworkHtml(content: String): String {
+    return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+            <style>
+                html, body { margin: 0; padding: 0; }
+                body {
+                    font-size: 16px;
+                    line-height: 1.75;
+                    overflow-wrap: anywhere;
+                    word-break: break-word;
+                }
+                p { margin: 0 0 0.9em; }
+                img, video, table { max-width: 100%; height: auto; }
+                table { display: block; overflow-x: auto; }
+            </style>
+        </head>
+        <body>$content</body>
+        </html>
+    """.trimIndent()
+}
+
+@Composable
+private fun HomeworkAttachmentItem(
+    attachment: HomeworkAttachment,
+    onDownload: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = attachment.fileName,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = formatAttachmentSize(attachment.sizeBytes),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            FilledTonalButton(
+                onClick = onDownload,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("下载")
+            }
+        }
+    }
+}
+
+private fun formatAttachmentSize(sizeBytes: Long): String {
+    if (sizeBytes <= 0) return "大小未知"
+    return when {
+        sizeBytes >= 1024L * 1024L -> "%.1f MB".format(sizeBytes / 1024f / 1024f)
+        sizeBytes >= 1024L -> "%.1f KB".format(sizeBytes / 1024f)
+        else -> "$sizeBytes B"
     }
 }
 
@@ -1195,5 +1405,3 @@ fun MaterialHomeworkDownloadButton(
         }
     }
 }
-
-

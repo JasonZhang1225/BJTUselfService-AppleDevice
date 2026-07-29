@@ -5,8 +5,10 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import team.bjtuss.bjtuselfservice.StudentAccountManager
@@ -24,6 +26,17 @@ import team.bjtuss.bjtuselfservice.statemanager.AppStateManager
 import team.bjtuss.bjtuselfservice.utils.KotlinUtils
 import java.io.IOException
 
+data class HomeworkAttachment(
+    val id: Int,
+    val fileName: String,
+    val sizeBytes: Long,
+    val sourcePath: String,
+)
+
+data class HomeworkDetail(
+    val content: String,
+    val attachments: List<HomeworkAttachment>,
+)
 
 object SmartCurriculumPlatformRepository {
 
@@ -150,6 +163,77 @@ object SmartCurriculumPlatformRepository {
 //            getHomeWorkListByHomeworkType(0)
 //        }.getOrElse { emptyList() }
         return getHomeWorkListByHomeworkType(0)
+    }
+
+    suspend fun getHomeworkDetail(homework: HomeworkEntity): HomeworkDetail {
+        val teacherId = courseFromJson?.courseList
+            ?.firstOrNull { it.id == homework.courseId }
+            ?.teacher_id
+            ?: throw IOException("未找到课程对应的教师信息")
+        val detailUrl = "http://123.121.147.7:88/ve/back/coursePlatform/homeWork.shtml"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("method", "queryStudentCourseNote")
+            .addQueryParameter("id", homework.upId.toString())
+            .addQueryParameter("courseId", homework.courseId.toString())
+            .addQueryParameter("teacherId", teacherId.toString())
+            .build()
+
+        return withContext(Dispatchers.IO) {
+            RequestKotlin.get(detailUrl.toString(), headersBuilder.build()).use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("获取作业详情失败：${response.code}")
+                }
+                val responseJson = JSONObject(
+                    response.body?.string() ?: throw IOException("作业详情响应为空")
+                )
+                if (responseJson.optString("STATUS") != "0") {
+                    throw IOException(responseJson.optString("message", "获取作业详情失败"))
+                }
+                val homeworkJson = responseJson.optJSONObject("homeWork")
+                    ?: throw IOException("作业详情缺失")
+                val attachments = responseJson.optJSONArray("picList")
+                    ?.let { attachmentArray ->
+                        buildList {
+                            for (index in 0 until attachmentArray.length()) {
+                                val attachmentJson = attachmentArray.optJSONObject(index)
+                                    ?: continue
+                                val attachmentId = attachmentJson.optInt("id")
+                                if (attachmentId == 0) continue
+                                add(
+                                    HomeworkAttachment(
+                                        id = attachmentId,
+                                        fileName = attachmentJson
+                                            .optString("file_name", "附件 $attachmentId")
+                                            .replace('+', ' '),
+                                        sizeBytes = attachmentJson.optLong("pic_size", 0L),
+                                        sourcePath = attachmentJson.optString("url"),
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    .orEmpty()
+                HomeworkDetail(
+                    content = homeworkJson.optString("content", homework.content),
+                    attachments = attachments,
+                )
+            }
+        }
+    }
+
+    fun getHomeworkAttachmentDownloadUrl(
+        homeworkId: Int,
+        attachmentId: Int,
+    ): String {
+        return "http://123.121.147.7:88/ve/back/coursePlatform/dataSynAction.shtml"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("method", "downLoadPic")
+            .addQueryParameter("id", attachmentId.toString())
+            .addQueryParameter("noteId", homeworkId.toString())
+            .build()
+            .toString()
     }
 
     suspend fun getCourseDesign(): List<HomeworkEntity> {
