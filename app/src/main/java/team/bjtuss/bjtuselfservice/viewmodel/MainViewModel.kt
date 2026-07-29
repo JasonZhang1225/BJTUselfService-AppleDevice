@@ -50,6 +50,7 @@ class MainViewModel(
         courseScheduleViewModel.loadDataAndDetectChanges()
         examScheduleViewModel.loadDataAndDetectChanges()
         homeworkViewModel.loadDataAndDetectChanges()
+        classroomViewModel.refreshClassroomMap()
     }
 
     fun clearChange() {

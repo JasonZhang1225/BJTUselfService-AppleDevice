@@ -14,7 +14,7 @@ class ClassroomViewModel : ViewModel() {
     val classroomMap: StateFlow<MutableMap<String, List<Int>>> = _classroomMap.asStateFlow()
 
     init {
-        refreshClassroomMap()
+        // refreshClassroomMap()
     }
 
     fun refreshClassroomMap() {

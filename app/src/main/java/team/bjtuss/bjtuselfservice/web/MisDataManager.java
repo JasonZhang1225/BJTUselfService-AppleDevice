@@ -40,6 +40,8 @@ import team.bjtuss.bjtuselfservice.utils.Network.WebCallback;
 import team.bjtuss.bjtuselfservice.utils.Utils;
 
 public class MisDataManager {
+    private static final long DATA_REQUEST_DELAY_MS = 500L;
+
     public static void login(OkHttpClient client, String stuId, String stuPasswd, WebCallback loginCallback) {
 
         Request request = new Request.Builder()
@@ -297,6 +299,13 @@ public class MisDataManager {
                 .url("https://aa.bjtu.edu.cn/score/scores/stu/view/?page=1&perpage=500&ctype=" + ctype)
                 .header("Host", "aa.bjtu.edu.cn")
                 .build();
+        try {
+            Thread.sleep(DATA_REQUEST_DELAY_MS / 5);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            ResCallback.onFailure(0);
+            return;
+        }
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
@@ -361,6 +370,13 @@ public class MisDataManager {
                 .url("https://aa.bjtu.edu.cn/examine/examplanstudent/stulist/")
                 .header("Host", "aa.bjtu.edu.cn")
                 .build();
+        try {
+            Thread.sleep(DATA_REQUEST_DELAY_MS / 5);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            ResCallback.onFailure(0);
+            return;
+        }
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
@@ -405,6 +421,13 @@ public class MisDataManager {
                 .url(url)
                 .header("Host", "aa.bjtu.edu.cn")
                 .build();
+        try {
+            Thread.sleep(DATA_REQUEST_DELAY_MS / 5);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            ResCallback.onFailure(0);
+            return;
+        }
         client.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
@@ -518,7 +541,14 @@ public class MisDataManager {
     }
 
     public static void getClassroom(OkHttpClient client, WebCallback<Map<String, List<Integer>>> ResCallback) {
-        String url = "https://aa.bjtu.edu.cn/classroomtimeholdresult/room_view/";
+        String url = "https://aa.bjtu.edu.cn/classroom/timeholdresult/room_view/";
+        try {
+            Thread.sleep(DATA_REQUEST_DELAY_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            ResCallback.onFailure(0);
+            return;
+        }
         Request request = new Request.Builder()
                 .url(url)
                 .header("Host", "aa.bjtu.edu.cn")
@@ -532,9 +562,18 @@ public class MisDataManager {
             @Override
             public void onResponse(@NonNull Call call, @NonNull Response response) {
                 String url = response.request().url().toString();
-                if (url.contains("https://aa.bjtu.edu.cn/classroomtimeholdresult/room_view/?zc=")) {
+                Log.d("ClassroomMap", "入口页响应: code=" + response.code() + ", url=" + url);
+                response.close();
+                if (url.contains("https://aa.bjtu.edu.cn/classroom/timeholdresult/room_view/?zc=")) {
                     int nowWeek = Integer.parseInt(url.split("zc=")[1].split("&")[0]);
                     url += "&page=1&perpage=500";
+                    try {
+                        Thread.sleep(DATA_REQUEST_DELAY_MS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        ResCallback.onFailure(0);
+                        return;
+                    }
                     Request request = new Request.Builder()
                             .url(url)
                             .header("Host", "aa.bjtu.edu.cn")
@@ -542,6 +581,10 @@ public class MisDataManager {
                     client.newCall(request).enqueue(new Callback() {
                         @Override
                         public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                            Log.d(
+                                    "ClassroomMap",
+                                    "数据页响应: code=" + response.code() + ", url=" + response.request().url()
+                            );
                             try {
                                 Document doc = Jsoup.parse(response.body().string());
                                 Element table = doc.selectFirst("table");
@@ -602,7 +645,6 @@ public class MisDataManager {
                 } else {
                     ResCallback.onFailure(1);
                 }
-                response.close();
             }
         });
     }
