@@ -19,7 +19,7 @@ class HomeworkViewModel :
             networkData != localData
 
         },
-    ) { Pair(it.courseName, it.title) }) {
+    ) { Pair(it.courseName, it.upId) }) {
     val homeworkList: StateFlow<List<HomeworkEntity>> = DatabaseRepository.homeworkList
 
     init {
