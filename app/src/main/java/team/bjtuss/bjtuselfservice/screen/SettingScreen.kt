@@ -314,6 +314,8 @@ fun ClearLocalCacheItem(mainViewModel: MainViewModel) {
                                     courseEntityDao().deleteAll()
                                     homeworkEntityDao().deleteAll()
                                 }
+                                mainViewModel.gradeViewModel
+                                    .clearAllPersistedGradeSelections()
                                 mainViewModel.clearChange()
                             } catch (e: Exception) {
                                 e.printStackTrace()
@@ -831,6 +833,3 @@ fun ThemeSelectionItem(
         }
     )
 }
-
-
-

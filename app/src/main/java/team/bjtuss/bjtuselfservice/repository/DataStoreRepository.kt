@@ -6,10 +6,13 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import team.bjtuss.bjtuselfservice.MainApplication.Companion.appContext
+import team.bjtuss.bjtuselfservice.entity.GradeSelectionRecord
 import team.bjtuss.bjtuselfservice.statemanager.Credentials
 
 object DataStoreRepository {
@@ -29,6 +32,11 @@ object DataStoreRepository {
     private val THEME_KEY = stringPreferencesKey("theme")
 
     private val COURSEWARE_JSON = stringPreferencesKey("courseware_json")
+    private val GRADE_SELECTIONS_BY_STUDENT_KEY =
+        stringPreferencesKey("grade_selections_by_student")
+    private val gson = Gson()
+    private val gradeSelectionsMapType =
+        object : TypeToken<Map<String, List<GradeSelectionRecord>>>() {}.type
 
 
     suspend fun setCredentials(credentials: Credentials) {
@@ -129,6 +137,57 @@ object DataStoreRepository {
     suspend fun setCoursewareJson(json: String) {
         appContext.dataStore.edit { preferences ->
             preferences[COURSEWARE_JSON] = json
+        }
+    }
+
+    suspend fun getGradeSelections(studentId: String): List<GradeSelectionRecord> {
+        if (studentId.isBlank()) {
+            return emptyList()
+        }
+        val preferences = appContext.dataStore.data.first()
+        return readGradeSelectionsMap(preferences)[studentId].orEmpty()
+    }
+
+    suspend fun setGradeSelections(
+        studentId: String,
+        records: List<GradeSelectionRecord>,
+    ) {
+        if (studentId.isBlank()) {
+            return
+        }
+        appContext.dataStore.edit { preferences ->
+            val selectionsByStudent = readGradeSelectionsMap(preferences).toMutableMap()
+            if (records.isEmpty()) {
+                selectionsByStudent.remove(studentId)
+            } else {
+                selectionsByStudent[studentId] = records
+            }
+            preferences[GRADE_SELECTIONS_BY_STUDENT_KEY] =
+                gson.toJson(selectionsByStudent, gradeSelectionsMapType)
+        }
+    }
+
+    suspend fun clearAllGradeSelections() {
+        appContext.dataStore.edit { preferences ->
+            preferences.remove(GRADE_SELECTIONS_BY_STUDENT_KEY)
+            // Remove the account-scoped eligibility cache written by earlier test builds.
+            preferences.remove(
+                stringPreferencesKey("dual_grade_eligibility_by_student")
+            )
+        }
+    }
+
+    private fun readGradeSelectionsMap(
+        preferences: Preferences,
+    ): Map<String, List<GradeSelectionRecord>> {
+        val json = preferences[GRADE_SELECTIONS_BY_STUDENT_KEY] ?: return emptyMap()
+        return try {
+            gson.fromJson<Map<String, List<GradeSelectionRecord>>>(
+                json,
+                gradeSelectionsMapType,
+            ).orEmpty()
+        } catch (_: Exception) {
+            emptyMap()
         }
     }
 
