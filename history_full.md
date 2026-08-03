@@ -1,0 +1,192 @@
+# BJTUselfService KMP 迁移完整历史
+
+> 本文件是**只读归档**，按里程碑记录已完成的验证事实与决策。它不是工作记忆：当前状态、待办和近期计划见 `memory.md`；原则与边界见 `CLAUDE.md`；规划与验收标准见 `goal.md`。
+>
+> 写入规则：只在里程碑/阶段真正完成时追加新子节（如 `### M5-9 登录页 UI 与验证码（2026-08-01）`），不重写旧子节，保持不可变历史。细节完整保留（日期、真实命令与结果、字节数、SHA、实机现象、验收边界），但原则性叙述归 `CLAUDE.md`，不再重复。
+>
+> 本文件不含账号、密码、Cookie、令牌、真实验证码会话或任何敏感信息。
+>
+> 个别归档条目保留了当时的"待办/待复验/待登录"句式，其中多数随后在本文件内被闭环（如 2026-08-01 风控解除、明文链路打通）；仍未闭环的事项不在本文件展开，统一见 `memory.md` 当前痛点。
+
+## 未拆分的历史基线（M0 之前）
+
+- 已检查现有仓库结构和主要依赖，确认它是 Kotlin/Java + Jetpack Compose 的原生 Android 应用。
+- 已确定迁移路线：Kotlin Multiplatform + Compose Multiplatform，目标平台为 Android、iOS 和 macOS。
+- 已从 `main@9d8da18` 创建并切换到本地 `ZJG` 分支（后作为分支创建点保留）。
+- 已创建 `goal.md`（记录迁移范围、技术方向、里程碑和完成标准）与 `CLAUDE.md`（记录协作方式、平台边界、安全规则、Apple 设计原则和验证要求）。
+- 已冻结现有 Android 工程：根工程不参与 KMP 改造；新实现只写 `multiplatform/`。
+
+## M0：基线与工具链
+
+- 2026-07-31：用户授权将根工程 `app/` 等工作树补齐到正式 `v1.7.0` 源码（壁纸/Haze、周视图小组件、作业附件、`upId` 同步身份、教室安排修复等）。本机保留 `compileSdk/targetSdk 36`、阿里云镜像与 `local-maven`，并为 ucrop 增加 JitPack；`MainActivity`/`SettingScreen` 采用 1.7.0 功能代码并仅补 `versionName` 空安全以便编译。`:app:assembleDebug` 在 Android Studio JBR 21 下 `BUILD SUCCESSFUL`。`multiplatform/` 未改动。提交 `e74d60a` 已推送到 fork `mine/main`。
+- 已确认正式 Release `v1.7.0` 于 2026-07-29 发布，对应提交 `419313d`，不是草稿或预发布，发布资产包含 `BJTUSelfService-1.7.0_arm64-v8a.apk`。
+- 已通过远端 compare 确认 `419313d` 是 `9d8da18` 的后代，领先 9 个提交且没有分叉；`ZJG@9d8da18` 只保留为分支创建点，发布与功能基线已调整为 `v1.7.0@419313d`。
+- 已把 1.7.0 的成绩自选、课程表当前周修复、作业附件下载、作业同步修复、课程表小组件周视图、底部导航/壁纸/玻璃态优化和教室安排修复全部纳入 KMP 三端迁移与回归范围。
+- 已下载并隔离保存官方 1.7.0 APK 与标签源码；APK SHA-256 为 `c48b4ddb8f2fdbbb30b546e9f67d34a12fdf4041861dc27b9318c70d428dad3f`，清单核验为 applicationId `team.bjtuss.bjtuselfservice`、versionCode 8、versionName `v1.7.0`、minSdk 28、target/compileSdk 34。
+- 已核对工具链：Apple Silicon arm64、macOS 27.0、Xcode 26.6、Apple SDK 26.5、iOS 26.2/26.5 模拟器、Android Studio JBR 21.0.10、Temurin JDK 25、Android AVD `Pixel_10_Pro_XL`。
+- 已使用 Android Studio JBR 21 运行 `:app:testDebugUnitTest` 和 `:app:assembleDebug`，结果 `BUILD SUCCESSFUL in 9s`；记录了 Kapt 对 Kotlin 2.0 回退 1.9 和 Gradle 9 弃用兼容警告。
+- 已把官方 v1.7.0 APK 安装到 Pixel 10 Pro XL API 37.1 模拟器，并按用户动作时授权完成一次真实 CAPTCHA 登录；“正在登录...”结束后首页/应用/设置保持可用。
+- 用户于 2026-07-30 表达持续授权：在本机原 Android App 与本机 iOS/macOS 移植版所复现的同一北交大登录流程中，后续获取、识别、填写和提交 CAPTCHA 不希望逐次确认；若执行环境存在不可豁免的 CAPTCHA 动作时确认规则，则只按其最小要求确认。账号来源、登录目标或凭据接收方发生变化时仍须重新确认。
+- 已创建 `docs/migration/m0-baseline.md`，记录基线身份、工具链、构建证据和当前视觉观察。
+- 已用稳定 Xcode 26.6 完成 KMP framework、SwiftUI 宿主、Swift 编译/链接、iOS 26.5 Simulator 安装与运行；本机 Xcode 26.6 对当前 M1 组合实测可用。
+- 已基于 1.7.0 隔离源码和真实登录行为更新 `docs/migration/feature-matrix.md`；每项区分通过、部分验证、仅确认入口和未执行。
+
+## M1：最小 KMP 骨架
+
+- 已完成 M1：`multiplatform/` 使用 Kotlin 2.4.10、Compose Multiplatform 1.11.1、Material 3 `1.11.0-alpha07`、AGP 9.1.1 和 Gradle 9.3.1，采用 `shared + androidApp + desktopApp + iosApp` 独立结构。
+- 已创建 `docs/migration/m1-result.md` 和三端脱敏证据图；`iosSimulatorArm64Test` 执行器曾长时间无输出后中止，不能写成通过，iOS 可运行性由 framework/Xcode build/真实首帧证明。
+- `docs/migration/m1-frozen-boundary.md` 已完成交付复核：受保护 Android 根工程仍为 154 个跟踪文件、原有 6 条用户修改，M1 前后聚合 SHA-256 都是 `a2b8313387fa6902cb8297554a2724c63dfddcfdd800f5f536374e44bbe1c73f`。
+- M1 后已复跑冻结根工程 `:app:testDebugUnitTest :app:assembleDebug`，结果 `BUILD SUCCESSFUL in 9s`。
+- 已使用 Computer Use 保持 Android Studio Running Devices 在前台，并逐页打开首页、应用、设置、七个核心入口与安全二级流程。
+- 已确认真实行为：邮箱 SSO 进入桌面式 Webmail；校园卡/校园网为确认弹层；成绩支持自选模式和详情；课程表有切换学期/14 周选择；作业详情含内容/附件及上传下载入口；课件可展开资源；教室为教学楼—教室两级；其他功能为校历和中英文成绩单。
+- 已在 `docs/migration/visual-baseline/` 保存 19 张本地脱敏基线图及安全说明；目录没有 `raw` 文件。WebView 内容不使用可访问性文字框脱敏，邮箱图被整页覆盖；Dialog 背景额外覆盖。
+- 已确认设置页的主题菜单、检查更新和清除数据确认层；没有改变开关、壁纸、主题或账号，也没有执行下载、上传、充值、分享、发送、清除或退出。
+- 已只读检查 Android 验证码流程：当前输入为 `130×42`、RGB、CHW、`[0,1]`，模型输出按 8 个位置 × 15 类解码。
+- 已决定 Apple 首版必须支持验证码图片展示、刷新和手动填写；Core ML 自动识别是非阻塞增强，不能只凭“模型可以运行”就启用。
+- 已读取 Computer Use 和 Apple Design 技能，并把适用规则写入项目文档。
+
+## M2：共享领域层
+
+- 已完成 M2：在 `shared/commonMain` 建立无 Room/Android/JVM 依赖的成绩、课程、作业、考试模型，以及成绩计算/筛选/排序、稳定选中恢复、课程周次和作业日期规则。
+- M2 使用官方 `kotlinx-datetime 0.8.0`；时间与时区由调用层注入，测试不依赖真实系统时钟。
+- M2 已对照隔离的 `v1.7.0@419313d` 源码；成绩页和选中恢复规则与冻结分支对应实现无差异。
+- `:shared:desktopTest` 共 19 个测试全部通过；`:shared:compileTestKotlinIosSimulatorArm64`、`:androidApp:assembleDebug` 和 `:shared:linkDebugFrameworkIosSimulatorArm64` 同次构建成功。
+
+## M3：网络、登录与解析
+
+- M3 已完成：共享登录状态机、HTTP transport、Ktor Android OkHttp/iOS Darwin/desktop CIO 引擎、内存 Cookie 会话和 CAS/MIS/AA HTML 解析已进入 `shared`。
+- Ktor 使用 3.5.1、Ksoup 使用 0.2.6；没有复制 Android 的 trust-all TLS 与 hostname verifier。
+- 登录协议对象已对密码、学号、CSRF、CAPTCHA、Cookie、响应正文和 URL 查询参数做字符串脱敏；Desktop 当前共 35 个测试全部通过，iOS Simulator 共享目标、Xcode App 与 Android APK 构建成功。
+- M3 已接入共享 Compose 登录 UI；Android/iOS 紧凑窗口和 macOS 宽窗口首屏已用 Computer Use 实际验证并保存脱敏证据。
+- iOS 26.5 与 Pixel 10 Pro XL Android 17 的 KMP App 都已通过真实 MIS→CAS 重定向、Cookie、HTML 隐藏字段、CAPTCHA 提交、MIS profile 解析与 AA module 10 联动，并显示“登录成功”。
+- 真实验收发现 CAS POST 有时已建立 MIS Cookie 但最终响应地址仍停留在 CAS；当前协议会主动探测 MIS home，再决定是否失败，因此 iOS 最终版本已验证一次 CAPTCHA 提交直接成功。
+- 真实验收发现 iPhone 紧凑高度下主登录按钮不易到达；紧凑介绍区和表单间距已调整，按钮现在直接出现在 iPhone 17 Pro 视口内。
+- 真实凭据只在 Computer Use/临时本地输入脚本与本机移植版内短暂使用，随后清除变量、临时脚本和完整截图；泄密扫描为 0 个文件命中，成功页未保存为证据。
+- 已发现并修复 KMP 客户端缺少浏览器 User-Agent 的协议差异（原 Android App 登录请求带桌面 Chrome UA）；修复已进 `KtorSchoolHttpTransport` 并通过测试与三端重建，但单独不能解决当前登录阻塞。
+
+## M4：持久化与账户安全
+
+- M4 已接入共享账户安全协调器和版本化凭据载荷；记住选项只在登录成功后保存，取消选中与退出登录都会清除凭据和普通偏好。
+- Android 使用 Keystore AES/GCM 加密后只在私有 SharedPreferences 保存 IV 与密文，debug 合成凭据运行烟测为 `SECURITY_SMOKE_PASS`；该烟测 Activity 仅存在于 debug APK，release 清单只有正式 MainActivity。
+- macOS 使用 Security.framework Keychain，JNA 5.17.0 只负责本机框架调用；合成凭据真实 Keychain 往返测试通过，自包含 App 使用 Temurin JDK 25 打包成功。
+- iOS Keychain 实现已经通过 Simulator arm64 与真机 arm64 编译；未签名 Simulator 运行返回 `errSecMissingEntitlement (-34018)`，伪造 ad-hoc entitlement 的试验被拒绝启动并已完整回退，后续必须使用合法 Apple 签名身份验证。
+- M4 普通缓存采用 SQLDelight 2.3.2，当前 schema v2 包含成绩、课程、考试、作业、成绩自选、账号元数据和全局设置七张表；业务缓存按 `account_scope` 隔离，密码、Cookie、CSRF、CAPTCHA 与可复用会话禁止写入 SQLite。
+- 已实现真实 `v1 → v2` 迁移、旧数据登录后认领、关闭重开、损坏后单次重建、账号范围清理和全局设置容错；退出登录会清除当前账号的安全凭据、内存会话与普通缓存，不删除其他账号缓存或全局普通设置。
+- M4 后 Desktop 共 43 个测试全部通过；Android debug/release、iOS Xcode arm64 Simulator、iOS 两架构共享编译和 macOS 自包含 App 均构建成功。Android、iOS 与 macOS 已分别真实创建数据库；iOS 和 macOS 完成终止/关闭后的二次启动，macOS SQLite 只读检查为 `quick_check=ok`、`user_version=2`。
+- macOS 自包含运行时已补入 `java.sql`，数据库和 Keychain 工厂移出 Compose 重组路径；Computer Use 已确认首次启动与二次启动均显示完整宽窗口登录页。
+- Android 首次显示新 UI 曾耗时约 23 秒；Ktor transport 改为惰性创建后，冷启动复测 `TotalTime 13065 ms`、`WaitTime 16158 ms`，有效但仍未达到理想首屏速度。
+- `./gradlew projects`、`:shared:desktopTest`、`:androidApp:assembleDebug`、`:desktopApp:compileKotlin`、`:desktopApp:createDistributable`、`:desktopApp:packageDmg`、`:shared:linkDebugFrameworkIosSimulatorArm64` 与 Xcode Simulator build 均成功；DMG SHA-256 为 `8119d38cf44d2d3d45cc707c8db51d7416f71c00029165de3c3d7bcf5416dc0c`。
+- Android KMP APK 已在 Pixel 10 Pro XL API 37.1 实际显示；iOS KMP APP 已在 iPhone 17 Pro iOS 26.5 实际显示；macOS 自包含 `.app` 已启动。三端显示同一份共享 Compose 页面，Computer Use 已验证平台名、紧凑/宽布局和按钮展开状态。
+- 视觉验收发现并修复 Android `MissingResourceException`：新的 Android-KMP library target 必须设置 `androidResources.enable = true`，否则共享 Compose resources 不进入 APK。
+- 视觉验收发现并修复 iOS `PlistSanityCheck` SIGABRT：`Info.plist` 必须包含 `CADisableMinimumFrameDurationOnPhone = true`。
+- macOS 打包使用本机 Temurin JDK 25 的 `jpackage`，Java/Kotlin bytecode 对齐 JVM 21；分发包版本因 macOS 规则使用 `1.0.0`。
+
+## M5：核心功能纵向迁移
+
+### M5-0 首页与登录状态（含 M5.5 前置现状）
+
+- M5 首页状态切片已完成首版：登录后默认进入首页，严格解析 `newmail_count`、`ecard_yuer`、`net_fee`，账号隔离缓存支持失败保留旧快照；邮件卡进入既有邮箱切片。
+- 2026-08-01 用户指定 iOS 与 Android“完美校园”均用默认浏览器打开微信小程序链接 `https://wxaurl.cn/RLEw5IMZRKl`，macOS 显示同一链接的二维码并提示手机微信扫描；三端校园网续费统一由默认浏览器直接打开，不再分享或复制。
+- iOS 实机确认：校园网进入 Safari 学校域名并在返回后保留会话；完美校园进入 `wxaurl.cn` 的“完美校园·小程序”落地页，用户确认落地正确且安装微信时会继续唤起小程序；因 Simulator 无微信，不宣称本次已在微信内打开（macOS 二维码与 Android 浏览器动作的独立复验尚未执行，见 memory 当前痛点）。
+- 2026-07-31 登录页验证码显示放大：最小宽度 220dp、高度 96dp，改用 `ContentScale.Fit` 保留像素比例；macOS 自包含包已重建成功（`createDistributable` BUILD SUCCESSFUL，ad-hoc arm64）。旧包多次提交仍被 CAS 统一“登录未通过”；新包启动后 Computer Use 暂时无法附着新 Bundle ID `team.bjtuss.bjtuselfservice.kmp.macos`（list_apps 可见 isRunning=true，get_app_state 返回 Invalid app/timeout），因此放大后的验证码可读性与新会话作业/课件真实验收尚未完成。
+- M5 首页周议程与 DDL 已接入：按 v1.7.0 的周一至周日口径聚合作业开始、截止（截止时间减 1 分钟归日）和考试日期，未提交且 0..48 小时截止的作业单独提醒；首页刷新并行协调状态、作业、考试和教学周既有模型。iPhone 七日按钮/日期切换/两条事件和 macOS 宽布局已用虚构数据做 Computer Use 视觉验证，期间发现并修复宽屏 DDL 全宽按钮；临时入口及示例值已清零，正式 iOS/macOS 重新显示登录页。新增 4 项测试后全量 Desktop 200 项零失败零错误零跳过，三端构建、Xcode host、macOS arm64 与严格签名检查通过。详见 `docs/migration/m5-home-agenda-result.md`。
+- M5 首页四类数据变动信息流已接入：成绩、课程表、考试、作业刷新成功后按稳定身份比较旧/新快照，重复身份按出现次序配对，首次无缓存同步只建基线不误报全量新增；账号隔离未读记录可持久化、去重、限制 100 条并按域/全部清除，首页支持摘要、前后详情和真实页面跳转。2026-08-01 iOS 真实刷新后缓存计数为成绩 26、课程 43、考试 9、作业 4，信息流只有 1 个账号基线、无真实变化事件，`quick_check=ok`。因此刷新与空变化落地通过，但新增/修改/删除仍缺服务器真实样本。详见 `docs/migration/m5-home-changes-result.md` 与 `docs/migration/m7-apple-real-audit.md`。
+
+### M5-1 成绩
+
+- M5 第一个业务切片“成绩”已完成实现：登录后的 transport 与成绩 Repository 共享 Cookie 会话，顺序拉取 `ln/lr`，严格解析和去重；缓存优先、失败保留旧数据、账号隔离、选择恢复及退出清理均已接入。
+- 成绩行与自选记录现由同一 SQLDelight 事务原子替换；本地写入失败测试证明原成绩与选择快照保持不变，避免第一张表已换而选择表失败的半更新。
+- 成绩共享 UI 已覆盖同步/缓存/空/错误、学期多选、三态排序、自选课程加权平均和详情；iPhone 使用单列与底部 sheet，macOS 宽窗口使用侧栏和列表—详情。
+- M5 后 Desktop 共 57 个测试零失败、零跳过；Android debug/release、iOS Simulator/arm64、macOS distributable 和 Xcode iPhone 17 Pro iOS 26.5 arm64 构建成功。release APK 仅含正式 MainActivity，凭据值在 `MisSecret.md` 外扫描命中为 0，冻结摘要仍为 `a2b8313387fa6902cb8297554a2724c63dfddcfdd800f5f536374e44bbe1c73f`。
+- 最新 iOS/macOS M5 构建已实际启动并用 Computer Use 重新填入本地凭据、获取新 CAPTCHA；当时停在提交前，真实成绩同步与交互尚未宣称通过（后由 2026-08-01 M7 真实会话补齐）。
+
+### M5-2 课程表
+
+- M5 第二个业务切片“课程表”已实现：教师映射、本学期、选课课表和 HTTPS 当前周提示组成完整远端快照；课程与当前周按账号同事务缓存，失败保留旧快照。
+- 登录后应用壳现支持成绩/课程表导航；iPhone 课表采用星期切换与纵向节次，macOS 采用七日网格和常驻详情。周选择按 v1.7.0 源码修正为“全部 + 1–26 周”，此前实机截图只同时显示了前 14 项。
+- 课程表新增 12 项测试，全量 Desktop 现为 69 项并通过；Android debug/release、iOS 两架构、macOS distributable 和 Xcode Simulator 构建成功。
+- 课程表 iOS 构建与 2026-07-30 聚合门禁均已通过；课程表真实数据运行与视觉验收当时待风控解除后的登录（后由 2026-08-01 M7 真实会话补齐）。
+
+### M5-3 考试安排
+
+- M5 第三个切片“考试安排”已完成：单一教务接口严格解析、缓存优先 Repository、类型筛选/详情状态、iPhone 卡片与底部详情、macOS 列表—详情，以及登录后第三个导航入口；8 项测试已进入 123 项全量门禁并通过。
+
+### M5-4 作业列表与详情
+
+- M5 第四个切片“作业列表与详情”已完成：智慧教学平台会话、学期/课程/三种任务/详情/附件元数据解析、缓存优先 Repository、课程多选、隐藏过期、三态截止时间排序、48 小时统计、iPhone 底部详情与 macOS 列表—详情，以及登录后第四个导航入口。用户先授权 macOS、后于 2026-08-01 授权 iOS 明文会话，远端采用平台注入策略：Android 只校验 HTTPS；iOS/macOS 只允许 `123.121.147.7:88/ve/`，`sessionid` 仅驻内存并参与请求字符串脱敏，页面常驻不可关闭风险提示。Computer Use 已成功填写新会话凭据与 CAPTCHA 答案，等待动作时提交确认。
+- 教师附件元数据已进入详情；系统文件保存/预览、学生已交附件下载、作业上传和原生 HTML 容器明确留到 M6，当前 UI 不提供伪完成按钮。
+- M5 作业任务核心测试、2 项文件网关契约测试及 multipart 脱敏测试均已通过（16 项）。
+
+### M5-5 课件与课程资源
+
+- M5 第五个切片“课件与课程资源”已写入工作区：严格 JSON/HTML 解析、账号范围嵌套缓存、完整递归树、单文件 ticket 下载、状态模型和登录后第五个导航入口均已接入。iPhone 使用课程选择和文件夹逐级进入，macOS 使用课程列—Outline—常驻详情。
+- 课程与文件夹目录导出会保留相对层级，并已改为会话式流：先让用户选择 Android 文档树、iOS `UTTypeFolder` 或 macOS 目标目录并创建本次新根目录，再逐个下载和写入；全部成功才提交，失败或取消会回滚。三端共用安全导出名称和大小写不敏感冲突分配规则。用户先授权 macOS、后将授权扩展到 iOS；现 iOS/macOS 课件 API/资源只允许 `123.121.147.7:88/ve/`，教学日历只把 iframe 末五个安全路径段重建到 `:1936/kk/rp/`；Android 仍拒绝旧 HTTP。测试覆盖换主机/端口/协议和路径穿越。真实课件树/下载当时待新 macOS 登录会话（后由 2026-08-01 M6/M7 真实会话补齐）。详见 `docs/migration/m5-courseware-plan.md` 与 `docs/migration/m7-apple-real-audit.md`。
+
+### M5-4/M5-5 2026-08-02 真机同步性能收尾
+
+- iPhone 15 Pro Max 真机基线分段日志确认：课件旧实现需等待 15 门课程全部首层后才发布，完整刷新 12.143 秒，其中多门课程首层单次请求为 2.5～5.3 秒；作业旧实现串行执行 15 门课程×3 类型共 45 个列表请求并串行补 4 个得分，完整刷新 16.258 秒。
+- 作业改为列表与得分各最多 3 个有界并发，去掉默认 80 ms 人工间隔，`awaitAll` 后仍按原请求描述顺序展平；并发上限、最终顺序和既有失败语义均有测试。真机清缓存复测完整刷新为 5.026 秒，另一轮为 5.140 秒，较基线约缩短 69%。
+- 课件改为先返回并缓存课程目录，当前课程首层优先按需加载，切换其他课程时再加载对应首层，文件夹继续逐级按需加载；旧缓存树按课程身份保留，缓存格式升级到 v3，v1/v2 继续按完整加载语义迁移，完整目录导出前仍补齐目标课程与子树。清缓存两轮真机复测：目录 1.911/1.742 秒，当前课程首层 0.151/0.144 秒，从请求开始到首层数据齐约 2.06/1.89 秒。
+- 成绩、作业、课表、考试四项自动同步对未保存设置统一默认开启，已保存的 `false` 不被覆盖。诊断完成后删除全部 `PerformanceTrace` expect/actual 与 `BJTU_PERF` 调用；最终无日志签名包通过 Desktop 全测、iOS Simulator 全测、KMP Android Debug 构建和 iPhone 覆盖安装。未提交、未打标签、未推送。
+
+### M5-6 其他功能（校历 + 成绩单）
+
+- M5 第六个切片“其他功能”（校历 + 中英文成绩单下载）已完成：校历走 `bksy.bjtu.edu.cn` 公开页面（聚合多 script 块解析 `url` 字段，单双引号均可，域名边界强制校验），成绩单走 `aa.bjtu.edu.cn` 会话接口（非 PDF 响应判会话失效）；下载产物经 `HomeworkFileGateway.saveFile` 系统面板保存，取消不显示红色错误。校历真实下载 9,744,588 字节。2026-08-01 iOS 有效会话已补齐中英文成绩单端到端：两个系统保存面板文件名分别为“中文成绩单”“英文成绩单”，均取消保存且恢复默认中文版。详见 `docs/migration/m5-other-function-plan.md`。
+- 已修复中文 URL 未编码导致 404；2026-08-01 已用 iOS AA 会话补齐中英文成绩单真实下载与系统保存面板，不再保留“待风控解除”的阻塞。
+
+### M5-7 教室人数评估
+
+- M5 第七个切片“教室人数评估”已完成：11 栋教学楼、严格 JSON、名称/空位/容量筛选与四维排序、失败保留旧快照、快速切楼竞态保护、iPhone 两级列表与 macOS 列表—详情；应用壳新增第七入口。新增 14 项测试，全量 Desktop 166 项零失败，三端构建通过；真实网络验收思源楼 37 间教室（时间窗口 21:17:17—21:17:58）。HTTPS TLS 握手失败，故不加 ATS/Android cleartext 例外；iOS/Android 明确安全不可用，macOS 仅限精确明文 origin 并提示仅供参考。详见 `docs/migration/m5-classroom-plan.md`。
+
+### M5-8 设置
+
+- M5 第八个切片“设置”已完成首版：登录后新增设置入口；跟随系统/浅色/深色通过 SQLDelight 普通设置持久化并从根 `MaterialTheme` 即时生效；账号、v1.7.0 对齐基线、GitHub、当前账号离线缓存清理与安全退出路径已接入。自动同步、Material You、壁纸/Haze 和 Android APK 更新没有跨端生效链路，因此只显示边界说明，不提供假开关。新增 5 项测试，全量 Desktop 171 项零失败零跳过，正式源码三端构建和 Xcode host 均成功。
+- 设置页 Computer Use 预览实际发现 iPhone 两个长按钮并排拥挤，已改为紧凑窗口纵向全宽、macOS 宽屏保持并排；iOS 深色切换与缓存确认框、macOS 浅色切换和关闭窗口后再次激活保持主题均通过。2026-08-01 iOS 真实账号缓存往返已执行：清除前成绩/课程/考试/作业为 26/43/9/4，确认清除后四类表、筛选和同步元数据均为 0，深色主题与会话保留；逐页重新同步后恢复 26/43/9/4，信息流仅重建无事件基线，`quick_check=ok`。退出账号仍留到当前会话不再需要时验证。详见 `docs/migration/m5-settings-plan.md`。
+
+## M6：平台能力
+
+### M6 文件/WebView/邮箱/macOS 菜单与窗口生命周期
+
+- M6 作业文件共享协议已继续写入：`SchoolHttpRequest` 支持结构化 multipart，Ktor transport 发送二进制；远端支持教师附件下载、`piGaiDiv` 已交附件发现/下载，以及“临时上传回执 → `sendStuHomeWorks`”两阶段提交。
+- 文件名、二进制正文、提交说明、上传回执列表、`sessionid` 和查询参数均不进入请求字符串；文件端点仍只允许学校 HTTPS origin，相关测试已通过。
+- Android SAF、iOS `UIDocumentPickerViewController`、macOS 系统文件对话框三种文件网关已接入 `App`；共享详情可下载教师/已交附件，上传界面要求“选择并检查文件列表 → 提交”。
+- 2026-08-01 M6 文件能力真实验收与 GB18030 修复：macOS 作业教师附件 DOCX 与课件 RAR 已真实落盘并验证文件头。iOS 随后暴露 Ktor common charset 不支持 GB18030、静默回退 UTF-8 的真实缺陷；改为 `decodeLegacyGb18030OrNull` expect/actual——Android/Desktop 用 JDK GB18030，iOS 用 CoreFoundation 编码常量与 Foundation NSString 解码。修复版实机 4 个中文附件名完整还原（照片 PNG、讲解脚本、视频、实验报告 DOCX），点击中文附件下载后 iOS 系统保存面板也显示正确文件名，随后取消未落盘。目标 GB18030 测试在 iOS Simulator 通过；教室数据源 legacy 可用性改为可注入后 iOS commonTest 全量 223 项全部通过。
+- 2026-08-01 macOS 真实会话已完成下载侧验收：教师附件（任务书 20KB DOCX）经 NSSavePanel 落盘 20832 字节、真实 Word 头；课件微积分 d11_24 RAR 经 ticket→下载→NSSavePanel 落盘 5599196 字节、真实 v5 归档。iOS 作业、课件和中英文成绩单的系统保存面板均已用真实会话通过；各面板均在最终保存前取消。用户确认当前没有新布置、可用于上传验收的作业，因此真实上传延期到学校后续布置作业时再做，不制造作业或上传无关文件。详见 `docs/migration/m6-homework-files-plan.md` 与 `docs/migration/m5-courseware-plan.md`。
+- M6 网页容器基础设施已完成：共享 `WebPageRequest`/`WebCookie`/`SchoolWebDomainPolicy`（仅允许 mis/cas/aa/bksycenter/dean 五个学校域名，Cookie 域名与页面域名必须匹配，强制 HTTPS，字符串化脱敏）、expect `SchoolWebView` 与三端 actual（iOS WKWebView+NSHTTPCookie 同步+非学校域名分流外部浏览器；Android WebView+CookieManager；macOS 按既定方案走系统浏览器引导卡）。新增 7 项域名校验测试，全量 Desktop 130 项测试零失败，三端构建与 Xcode build 全部成功。真实网页验收当时待登录风控解除（后由 2026-08-01 邮箱实机确认补齐）。
+- M6 第一个具体网页页面“校内邮箱”已接入为第九入口：transport 只导出对 MIS module 26 生效的内存 Cookie，模型把 Domain 收窄到精确 `mis.bjtu.edu.cn`；网页策略新增 `mail.bjtu.edu.cn` 导航 host，同时拒绝 `.bjtu.edu.cn` 过宽父域并改用 Ktor URL host 解析。iOS 等全部 Cookie 写入 WKWebsiteDataStore 后才加载；Android 内嵌 WebView；macOS 系统浏览器不接收 App Cookie 并明示可能需要重新登录。2026-08-01 iOS 真实邮箱由用户确认肉眼正常且可用；网页自身仍是学校桌面布局，macOS 仍保留系统浏览器的平台差异。详见 `docs/migration/m6-mailbox-plan.md`。
+- M6 macOS 原生菜单已接入：平台侧“前往”十个入口连接共享 `AppSection`，“数据”连接当前页面刷新，快捷键为 `⌘,` 设置和 `⌘R` 刷新。`AppCommandBus` 使用无重放 SharedFlow，未登录命令不排队；订阅数驱动菜单可用性。Computer Use 在最新正式构建展开菜单，确认登录页十个入口均由系统标记为 disabled，快捷键标签正确。新增 2 项测试后全量 Desktop 193 项零失败零错误零跳过，三端构建、Xcode host、macOS arm64 与严格签名检查通过。详见 `docs/migration/m6-macos-menu-plan.md`。
+- M6 macOS 窗口生命周期已修正：关闭按钮只隐藏同一个原生窗口，不销毁 Compose 树或会话；JDK `AppReopenedListener` 在 Dock/系统重开时显示并聚焦原窗口；数据库只在 application 真正退出后的 `finally` 中关闭。Computer Use 用未持久化的“记住登录信息”勾选做无敏感标记，证明关窗后进程仍运行、重开后状态仍保留，恢复标记后 `⌘Q` 使进程终止；退出后 SQLite `quick_check=ok`、`user_version=2`。新增 3 项测试后全量 Desktop 196 项零失败零错误零跳过，三端构建、Xcode host、macOS arm64 与严格签名检查通过。详见 `docs/migration/m6-macos-lifecycle.md`。
+- 课程表小组件不再属于当前 M6：2026-08-01 已按用户决定移除 iOS WidgetKit 扩展、App Group entitlement、共享快照发布和预览入口。等 Android/iOS/macOS 公版主应用完全稳定后，再依据 1.7.0 周视图基线另立切片设计、实现和验收。
+
+## M7：Apple 设计与可访问性
+
+- macOS 已完成首页和九入口首轮真实验收：成绩/课表/考试同步成功，教室真实数据、登录态原生菜单跳转、`⌘R`、主题 `Dark → System` 持久化、关窗不退出和重开保留页面均通过；作业/课件失败。数据库脱敏计数为成绩 26、课程 43、考试 9、作业 0、数据变动基线 1，`quick_check=ok`。详见 `docs/migration/m7-apple-real-audit.md`。
+- 2026-07-31 iOS 跨日重试已按 Computer Use 动作时规则取得用户确认并提交新 CAPTCHA，学校仍返回统一“登录未通过”；等待可能令 CAPTCHA 会话过期，未连续提交第二张。
+- M7 首批可访问性修复已闭环：真实 AX 树发现登录页保存凭据控件被拆成无名称按钮和文字，现把登录、作业课程筛选、教室空位筛选、成绩单语言四处开关改为单一有名称/状态、最小 48dp 控件，并为成绩自选框增加课程级标签。最新 macOS AX 为具名复选框；iOS AX 有完整名称并在切换时出现 `selected`，恢复后消失。Desktop 224 项测试与三端/Xcode 构建通过；后续运行态 VoiceOver 专项已按用户决定移出当前范围。
+- 智慧教学真实安全边界已确认：v1.7.0 使用 `http://123.121.147.7:88`（教学日历另有 `:1936`）；假设的 HTTPS 域名同路径由 curl 与 CIO 均返回 404，旧端口无凭据 HTTP 探针可达。用户已明确授权 iOS/macOS 登录会话使用精确旧 HTTP；代码以平台/端点/路径白名单、iOS 固定 IP ATS 例外和常驻 UI 警告实现，Android 不放宽。224 项测试和三端构建通过；Computer Use 已填好新会话 CAPTCHA，但尚未获得本次提交确认，真实同步仍未执行。
+- iPadOS 可访问性基线已补齐：iOS actual 监听系统内容大小、增强对比度、减弱动态效果和降低透明度通知；12 档 Dynamic Type 映射到 Compose 字号，最大无障碍字号下宽屏降为单栏，恢复默认后运行中即时回到双栏。减弱动态效果把 Material 空间动画改为 `snap` 并只保留 120–180ms 效果反馈；降低透明度让显式半透明层变为不透明。iPad Pro 11-inch (M5) / iPadOS 26.5 正式产物已完成四项系统偏好的 Computer Use 切换、视觉和 AX 现场复核，测试后开关均恢复；Computer Use 无法可靠注入 Simulator 触控拖动，用户随后将进一步最大字号手势专项移出当前范围。
+- 2026-08-01 iOS 明文策略边界实机验收（iPhone 17 Pro iOS 26.5 Simulator，真实登录会话）：作业/课件在 VerifiedHttps 下正确拒绝 module 28 → 明文 `thirdLogin` 302 降级，明文请求未发出。发现并修正拒绝文案误报：握手停在未放行 3xx 原统一映射 NETWORK（"请检查网络"），现区分安全拒绝与网络故障、先抛 SECURE_CHANNEL_UNAVAILABLE；作业页实机显示"已拒绝降级到明文连接"、课件页"没有提供可验证的 HTTPS 通道"，不崩溃可返回。新增 stopsHandshakeAtPlainHttpRedirect 测试锁定；Desktop 全量、Android debug、iOS framework、macOS distributable 门禁全绿。iOS/Android 明文不放宽边界成立。
+- 2026-08-01 用户随后明确授权 iOS 与 macOS 使用相同的智慧教学旧 HTTP 精确范围，暂不考虑 App Store 上架。端点更名并集中为 `AppleLegacyHttp`/`smartPlatformEndpointFor`：iOS/macOS 使用固定 `:88/ve/` 与 `:1936/kk/rp/`，Android 仍为 VerifiedHttps；iOS `Info.plist` 只为固定 IP `123.121.147.7` 添加 ATS 明文例外，端口/路径仍由共享白名单限制。Apple 紧凑全局顶部及相关页面常驻不可关闭的窃听/篡改风险提示。iPhone 17 Pro iOS 26.5 真实登录后，作业同步 4 项实验报告、课件同步 7 门资源树；微积分 d11_24 RAR 详情与 iOS 系统“文件”保存面板验证通过。Desktop 238 项、iOS Simulator 223 项零失败；Android debug、iOS framework、macOS distributable、Xcode App 全绿。
+- 2026-08-01 App Store 加密合规：iOS `Info.plist` 与 macOS（jpackage 打包后经 `FinalizeMacDistributable` 用 PlistBuddy 写入并重签名）均声明 `ITSAppUsesNonExemptEncryption=false`（仅用系统 HTTPS/Keychain，属豁免加密），两端构建验证提取值均为 `false`。
+- 2026-08-01 macOS 作业/课件明文链路端到端打通：逐跳诊断定位三层真实缺陷并修复——①MIS module 28 以裸 HTTP 302 指向明文 `thirdLogin`，Ktor 拒绝 HTTPS→HTTP 降级跟随，新增共享 `followSmartHandshakeRedirects` 逐跳白名单校验后手动跟随（明文跳限精确 apiOrigin，HTTPS 跳限 cas/mis 主机，降级不扩散白名单）；②会话经握手最后一跳 `ve/s.shtml` 的 `Set-Cookie: JSESSIONID` 下发，article 只返回文章列表无 `sessionId` 字段，改为优先从 transport Cookie 读 `JSESSIONID` 填 `sessionid` 头、article JSON 解析作回退；③服务器对"没作业/没课件"返回 `STATUS:"2"`（"没有数据"），KMP 严格解析曾当失败致整批中断，现对齐原 Android moshi 默认值容错识别为合法空列表；④课件递归拉取资源树时慢子文件夹请求触发默认超时，transport 显式配 connect 15s / socket/request 30s。真实验收：作业同步出人工智能基础及应用 4 项实验报告（全部已提交含截止时间/提交人数/评分），详情正文完整渲染；课件同步出 7 门课程资源树（微积分4项、概率论8项、毛概10项、两门空数据容错、另两门各1项），教学日历按钮随会话启用。
+
+## M8：发布准备
+
+- M8 Apple 发布元数据首轮闭环：iOS/iPadOS 和 macOS 正式图标、隐私清单均进入最终 `.app`；iOS 为实际使用的 `NSUserDefaults` 声明 CA92.1，并仅为智慧教学固定 IP 添加 ATS 例外，macOS 修正独立 Bundle ID、教育类目、最低 11.0 并以配置缓存兼容任务把清单放入 `Contents/Resources` 后更新 ad-hoc 封印。iPad 主屏 Computer Use 发现 v1 角色过小并完成 v2 放大复测；通用 Simulator Xcode `BUILD SUCCEEDED`，macOS arm64 自包含包严格签名检查通过。v1.7.0 仍只是功能基线，KMP 自身保持 iOS/Android/shared 0.1.0、macOS jpackage 1.0.0。Developer Team、真机、Archive、正式签名、公证和 App Store 隐私问卷仍未闭环，见 `memory.md` 当前痛点与 `docs/migration/m8-apple-release-readiness.md`。
+- 2026-08-01 小组件范围调整：删除 `CourseScheduleWidget` target、宿主 WidgetKit 监听、App Group、共享课表 JSON 发布链路、预览入口和专项测试；发布脚本改为反向校验旧 `.appex` 不得残留。移除后 Desktop 233 项与 iOS Simulator 218 项测试零失败；Android debug/release、iOS framework、arm64 Xcode 宿主、macOS 自包含应用和 Apple 元数据脚本通过，最终 iOS `.app` 没有 `PlugIns` 目录；重新安装到 iPhone 17 Pro Simulator 后，Computer Use 确认既有登录页正常显示。公版完成前不要恢复这些代码或相关验收任务。
+- 可编辑草稿已写入 `docs/migration/m8-release-notes-draft.md`；正式版本号、日期、支持/隐私网址和已知限制仍须发布者审阅，当前没有执行任何提交、标签、推送或发布操作。
+
+## 决策记录
+
+- 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。
+- 2026-07-29：Android、iOS、macOS 都在目标范围内。
+- 2026-07-29：从当时的 `main@9d8da18` 创建迁移分支 `ZJG`，该提交保留为分支创建点。
+- 2026-07-29：正式 Release `v1.7.0@419313d` 发布；发布与功能对齐基线由 `9d8da18` 调整为 `419313d`，当前冻结 Android 根工程不因此自动合并或改写。
+- 2026-07-29：冻结现有 Android 工程；KMP 在独立 `multiplatform/` 工程中并行实现，不修改 `app/` 和现有根构建配置。
+- 2026-07-29：Apple 端允许共享 Compose UI，但必须做平台自适应，不能只放大 Android 页面。
+- 2026-07-29：Apple 验证码先支持手动输入；自动识别作为非阻塞增强，必须通过端到端精度验证后再启用。
+- 2026-07-30：普通缓存采用 SQLDelight 2.3.2，业务缓存按账号隔离，全局普通设置独立保留；数据库损坏只允许删除并重建一次，敏感凭据和可复用会话不得进入 SQLite。
+- 2026-08-01：iOS/macOS 智慧教学旧 HTTP 精确放行（`:88/ve/` 与 `:1936/kk/rp/`），iOS ATS 只覆盖固定 IP，Android 继续拒绝；暂不考虑 App Store 上架。
+- 2026-08-01：iOS/macOS 小组件（WidgetKit/App Group/共享快照）移出当前公版范围，公版主应用完成后再开发。
+- 2026-08-01：进一步无障碍专项（VoiceOver、最大字号手势等）暂时移出当前范围，不作为完成门禁。
+- 2026-08-01：真实作业上传延期到学校后续布置作业时再做；不制造作业或上传无关文件。

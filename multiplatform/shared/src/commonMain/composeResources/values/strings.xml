@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">交大自由行</string>
+    <string name="shared_title">三端共享骨架已连接</string>
+    <string name="shared_subtitle">Android、iOS 与 macOS 正在使用同一份 Compose Multiplatform 界面。</string>
+    <string name="details_show">查看共享边界</string>
+    <string name="details_hide">收起共享边界</string>
+</resources>

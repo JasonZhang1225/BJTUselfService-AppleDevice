@@ -1,0 +1,158 @@
+package team.bjtuss.bjtuselfservice.shared.auth
+
+import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpMethod
+import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
+import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpTransport
+
+private const val MIS_SSO_URL = "https://mis.bjtu.edu.cn/auth/sso/?next=/"
+private const val MIS_HOME_URL = "https://mis.bjtu.edu.cn/home/"
+private const val CAS_LOGIN_PREFIX = "https://cas.bjtu.edu.cn/auth/login/?next="
+private const val CAS_ORIGIN = "https://cas.bjtu.edu.cn"
+private const val AA_MODULE_URL = "https://mis.bjtu.edu.cn/module/module/10/"
+private const val AA_HOME_URL = "https://aa.bjtu.edu.cn/notice/item/"
+
+sealed interface SessionProbeResult {
+    data object Active : SessionProbeResult
+    data object Missing : SessionProbeResult
+}
+
+sealed interface ChallengeResult {
+    data class SessionActive(val profile: StudentProfile) : ChallengeResult
+    data class Ready(val challenge: CaptchaChallenge) : ChallengeResult
+    data class Failed(val reason: LoginFailure) : ChallengeResult
+}
+
+sealed interface AuthenticationResult {
+    data class Success(val profile: StudentProfile) : AuthenticationResult
+    data class Failed(val reason: LoginFailure) : AuthenticationResult
+}
+
+class SchoolLoginProtocol(
+    private val transport: SchoolHttpTransport,
+) : LoginAutomationGateway {
+    suspend fun checkSession(): SessionProbeResult {
+        val response = transport.execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.GET,
+                url = MIS_HOME_URL,
+                headers = mapOf("Referer" to MIS_HOME_URL),
+            ),
+        )
+        return if (response.finalUrl.matchesEndpoint(MIS_HOME_URL)) {
+            SessionProbeResult.Active
+        } else {
+            SessionProbeResult.Missing
+        }
+    }
+
+    override suspend fun requestCaptchaChallenge(studentId: String): ChallengeResult {
+        val sso = transport.execute(SchoolHttpRequest(SchoolHttpMethod.GET, MIS_SSO_URL))
+        if (sso.finalUrl.matchesEndpoint(MIS_HOME_URL)) {
+            return when (val profile = parseMisStudentProfile(sso.bodyText(), studentId)) {
+                is ParseResult.Success -> ChallengeResult.SessionActive(profile.value)
+                is ParseResult.Failure -> ChallengeResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+            }
+        }
+        if (!sso.finalUrl.startsWith(CAS_LOGIN_PREFIX)) {
+            return ChallengeResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+        }
+
+        val loginPage = transport.execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.GET,
+                url = sso.finalUrl,
+                headers = mapOf("Referer" to MIS_SSO_URL),
+            ),
+        )
+        val form = when (val parsed = parseCasLoginForm(loginPage.bodyText())) {
+            is ParseResult.Success -> parsed.value
+            is ParseResult.Failure -> return ChallengeResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+        }
+        val image = transport.execute(
+            SchoolHttpRequest(SchoolHttpMethod.GET, "$CAS_ORIGIN/image/${form.captchaId}/"),
+        )
+        if (image.statusCode !in 200..299 || image.body.isEmpty()) {
+            return ChallengeResult.Failed(LoginFailure.NETWORK)
+        }
+        return ChallengeResult.Ready(
+            CaptchaChallenge(
+                loginPageUrl = sso.finalUrl,
+                csrfToken = form.csrfToken,
+                captchaId = form.captchaId,
+                imageBytes = image.body,
+            ),
+        )
+    }
+
+    override suspend fun authenticateMis(
+        credentials: Credentials,
+        challenge: CaptchaChallenge,
+        captchaAnswer: String,
+    ): AuthenticationResult {
+        if (!credentials.isValid || captchaAnswer.isBlank()) {
+            return AuthenticationResult.Failed(LoginFailure.INVALID_CREDENTIALS)
+        }
+        if (!challenge.loginPageUrl.startsWith(CAS_LOGIN_PREFIX)) {
+            return AuthenticationResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+        }
+
+        val response = transport.execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.POST,
+                url = challenge.loginPageUrl,
+                headers = mapOf(
+                    "Referer" to challenge.loginPageUrl,
+                    "Origin" to CAS_ORIGIN,
+                ),
+                formFields = mapOf(
+                    "csrfmiddlewaretoken" to challenge.csrfToken,
+                    "captcha_0" to challenge.captchaId,
+                    "captcha_1" to captchaAnswer,
+                    "loginname" to credentials.username,
+                    "password" to credentials.password,
+                ),
+            ),
+        )
+        val authenticatedHome = if (response.finalUrl.matchesEndpoint(MIS_HOME_URL)) {
+            response
+        } else {
+            transport.execute(
+                SchoolHttpRequest(
+                    method = SchoolHttpMethod.GET,
+                    url = MIS_HOME_URL,
+                    headers = mapOf("Referer" to challenge.loginPageUrl),
+                ),
+            )
+        }
+        if (!authenticatedHome.finalUrl.matchesEndpoint(MIS_HOME_URL)) {
+            return AuthenticationResult.Failed(LoginFailure.CAPTCHA_REJECTED)
+        }
+        return when (val profile = parseMisStudentProfile(authenticatedHome.bodyText(), credentials.username)) {
+            is ParseResult.Success -> AuthenticationResult.Success(profile.value)
+            is ParseResult.Failure -> AuthenticationResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+        }
+    }
+
+    suspend fun linkAcademicSystem(): Boolean {
+        val module = transport.execute(SchoolHttpRequest(SchoolHttpMethod.GET, AA_MODULE_URL))
+        val redirect = when (val parsed = parseAcademicRedirectUrl(module.bodyText())) {
+            is ParseResult.Success -> parsed.value
+            is ParseResult.Failure -> return false
+        }
+        val response = transport.execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.GET,
+                url = redirect + "?",
+                headers = mapOf("Referer" to AA_MODULE_URL),
+            ),
+        )
+        return response.finalUrl.matchesEndpoint(AA_HOME_URL)
+    }
+
+    fun logout() = transport.clearSession()
+}
+
+private fun String.matchesEndpoint(expected: String): Boolean =
+    substringBefore('#')
+        .substringBefore('?')
+        .trimEnd('/') == expected.trimEnd('/')

@@ -1,0 +1,17 @@
+.gradle/
+.idea/
+**/build/
+local.properties
+
+iosApp/DerivedData/
+*.xcuserstate
+xcuserdata/
+
+*.dmg
+*.app
+
+# Xcode local outputs (names vary: DerivedData, DerivedDataWidget*, build-generic)
+iosApp/DerivedData*/
+iosApp/build-generic/
+**/ModuleCache.noindex/
+**/*.framework/
