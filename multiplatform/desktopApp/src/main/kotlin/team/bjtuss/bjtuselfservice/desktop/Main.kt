@@ -18,6 +18,7 @@ import java.awt.desktop.AppReopenedListener
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import team.bjtuss.bjtuselfservice.shared.App
+import team.bjtuss.bjtuselfservice.shared.registerDesktopCredentialWindowHandle
 import team.bjtuss.bjtuselfservice.shared.auth.CaptchaRecognitionResult
 import team.bjtuss.bjtuselfservice.shared.auth.DesktopCoreMlCaptchaRecognizer
 import team.bjtuss.bjtuselfservice.shared.cache.createDesktopCacheStore
@@ -91,6 +92,12 @@ fun main(args: Array<String>) {
                 DisposableEffect(lifecycle, windowHandle) {
                     lifecycle.attach(windowHandle)
                     onDispose { lifecycle.detach(windowHandle) }
+                }
+                LaunchedEffect(window) {
+                    registerDesktopCredentialWindowHandle(window.windowHandle)
+                }
+                DisposableEffect(window) {
+                    onDispose { registerDesktopCredentialWindowHandle(0L) }
                 }
                     MenuBar {
                         Menu("前往") {

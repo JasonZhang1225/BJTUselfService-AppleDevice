@@ -2,6 +2,7 @@ package team.bjtuss.bjtuselfservice.shared
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -999,13 +1001,33 @@ private fun CaptchaBlock(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            val dark = isSystemInDarkTheme()
+            val fieldContainer = if (dark) Color(0xFF23262C) else Color(0xFFF1F3F8)
+            val fieldText = if (dark) Color(0xFFF1F1F4) else Color(0xFF1A1B1F)
+            val fieldOutline = if (dark) Color(0xFF8E939D) else Color(0xFF7A818C)
             OutlinedTextField(
                 value = answer,
                 onValueChange = onAnswerChange,
                 enabled = enabled,
-                modifier = Modifier.weight(1f),
-                label = { Text("验证码答案") },
+                modifier = Modifier.weight(1f).height(56.dp),
+                placeholder = { Text("验证码答案") },
                 singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = fieldText,
+                    unfocusedTextColor = fieldText,
+                    disabledTextColor = fieldText.copy(alpha = 0.55f),
+                    focusedContainerColor = fieldContainer,
+                    unfocusedContainerColor = fieldContainer,
+                    disabledContainerColor = fieldContainer.copy(alpha = 0.55f),
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = fieldOutline,
+                    disabledBorderColor = fieldOutline.copy(alpha = 0.55f),
+                    focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    disabledPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    cursorColor = MaterialTheme.colorScheme.primary,
+                ),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Go,

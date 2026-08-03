@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.interop.UIKitView
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -84,6 +85,7 @@ actual fun PlatformCredentialFields(
     val latestPasswordImeAction = rememberUpdatedState(onPasswordImeAction)
     UIKitView(
         modifier = modifier.height(128.dp),
+        background = Color.Transparent,
         accessibilityEnabled = true,
         factory = {
             NativeCredentialFieldsView(
@@ -131,6 +133,7 @@ private class NativeCredentialFieldsView(
     ) { onPasswordChange(passwordField.text.orEmpty()) }
 
     init {
+        opaque = false
         backgroundColor = UIColor.clearColor
         usernameField.delegate = this
         passwordField.delegate = this
