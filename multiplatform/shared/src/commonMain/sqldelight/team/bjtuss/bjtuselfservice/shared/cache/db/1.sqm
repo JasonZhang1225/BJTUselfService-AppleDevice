@@ -1,0 +1,40 @@
+ALTER TABLE grade_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT '';
+ALTER TABLE course_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT '';
+ALTER TABLE exam_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT '';
+ALTER TABLE homework_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX grade_cache_account_index ON grade_cache(account_scope);
+CREATE INDEX course_cache_account_index ON course_cache(account_scope);
+CREATE INDEX exam_cache_account_index ON exam_cache(account_scope);
+CREATE INDEX homework_cache_account_index ON homework_cache(account_scope);
+
+CREATE TABLE grade_selection_cache (
+    account_scope TEXT NOT NULL,
+    course_name TEXT NOT NULL,
+    course_teacher TEXT NOT NULL,
+    course_year TEXT NOT NULL,
+    semester TEXT NOT NULL,
+    last_known_score TEXT NOT NULL,
+    last_known_credits TEXT NOT NULL,
+    occurrence INTEGER NOT NULL,
+    PRIMARY KEY (
+        account_scope,
+        course_name,
+        course_teacher,
+        course_year,
+        semester,
+        occurrence
+    )
+);
+
+CREATE TABLE cache_metadata (
+    account_scope TEXT NOT NULL,
+    cache_key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (account_scope, cache_key)
+);
+
+CREATE TABLE app_setting (
+    setting_key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);

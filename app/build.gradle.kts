@@ -9,12 +9,14 @@ plugins {
 
 android {
     namespace = "team.bjtuss.bjtuselfservice"
-    compileSdk = 34
+    // 本机 Android Studio 已装最新 platform (android-36.1)，跳过下载 API 34
+    compileSdk = 36
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "team.bjtuss.bjtuselfservice"
         minSdk = 28
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 8
         versionName = "v1.7.0"
 

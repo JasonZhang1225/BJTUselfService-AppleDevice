@@ -1,0 +1,97 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+
+plugins {
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.kotlin.multiplatform.library)
+    alias(libs.plugins.compose.multiplatform)
+    alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.sqldelight)
+}
+
+group = "team.bjtuss.bjtuselfservice"
+version = "0.1.0"
+
+kotlin {
+    android {
+        namespace = "team.bjtuss.bjtuselfservice.shared"
+        compileSdk = 36
+        minSdk = 28
+
+        androidResources {
+            enable = true
+        }
+
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
+
+    jvm("desktop") {
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
+
+    iosArm64()
+    iosSimulatorArm64()
+
+    targets.withType<KotlinNativeTarget>().configureEach {
+        binaries.framework {
+            baseName = "BJTUShared"
+            isStatic = true
+        }
+    }
+
+    sourceSets {
+        commonMain.dependencies {
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.ui)
+            implementation(libs.compose.resources)
+            implementation(libs.kotlinx.datetime)
+            implementation(libs.ksoup)
+            implementation(libs.ktor.client.core)
+            implementation(libs.sqldelight.runtime)
+            implementation(libs.kotlinx.coroutines.core)
+        }
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+
+        androidMain.dependencies {
+            implementation(libs.ktor.client.okhttp)
+            implementation(libs.sqldelight.android.driver)
+            implementation(libs.pytorch.android)
+        }
+
+        iosMain.dependencies {
+            implementation(libs.ktor.client.darwin)
+            implementation(libs.sqldelight.native.driver)
+        }
+
+        val desktopMain by getting {
+            dependencies {
+                implementation(libs.jna)
+                implementation(libs.ktor.client.cio)
+                implementation(libs.sqldelight.sqlite.driver)
+            }
+        }
+    }
+}
+
+sqldelight {
+    databases {
+        create("CacheDatabaseSql") {
+            packageName.set("team.bjtuss.bjtuselfservice.shared.cache.db")
+            schemaOutputDirectory.set(file("src/commonMain/sqldelight/databases"))
+        }
+    }
+}
+
+compose.resources {
+    publicResClass = true
+    packageOfResClass = "team.bjtuss.bjtuselfservice.shared.resources"
+}

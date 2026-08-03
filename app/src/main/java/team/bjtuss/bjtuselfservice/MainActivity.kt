@@ -244,7 +244,7 @@ fun CheckUpdate() {
         updateMarkdown = release?.body ?: ""
         versionLatest = release?.tagName ?: ""
         downloadUrl = release?.htmlUrl
-        if (versionLatest.isNotEmpty() && (versionName < versionLatest)) showDialog = true
+        if (versionLatest.isNotEmpty() && ((versionName ?: "") < versionLatest)) showDialog = true
     }
 
     if (showDialog) {

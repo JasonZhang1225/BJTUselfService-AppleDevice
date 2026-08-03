@@ -1,0 +1,870 @@
+package team.bjtuss.bjtuselfservice.shared.feature.courseware
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
+import team.bjtuss.bjtuselfservice.shared.data.courseware.CoursewareOperationResult
+import team.bjtuss.bjtuselfservice.shared.data.courseware.CoursewareSyncFailure
+import team.bjtuss.bjtuselfservice.shared.domain.courseware.CoursewareCourse
+import team.bjtuss.bjtuselfservice.shared.domain.courseware.CoursewareNode
+import team.bjtuss.bjtuselfservice.shared.domain.courseware.VisibleCoursewareNode
+import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
+import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
+import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
+import team.bjtuss.bjtuselfservice.shared.feature.shell.LegacySmartTransportWarning
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+fun CoursewareWorkspace(
+    state: CoursewareUiState,
+    expanded: Boolean,
+    usesLegacySmartTransport: Boolean = false,
+    model: CoursewareScreenModel,
+    fileGateway: HomeworkFileGateway,
+    directoryGateway: CoursewareDirectoryGateway,
+    onRefresh: () -> Unit,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    var showCoursePicker by remember { mutableStateOf(false) }
+    var fileFeedback by remember { mutableStateOf<String?>(null) }
+    var directoryJob by remember { mutableStateOf<Job?>(null) }
+    var isCancellingDirectory by remember { mutableStateOf(false) }
+
+    fun cancelDirectoryExport() {
+        val job = directoryJob ?: return
+        if (isCancellingDirectory) return
+        isCancellingDirectory = true
+        job.cancel()
+        fileFeedback = "已请求取消目录导出，正在清理本次未完成目录。"
+    }
+
+    fun saveResource(node: CoursewareNode) {
+        if (!fileGateway.isAvailable) {
+            fileFeedback = "当前平台的系统保存面板尚未接入。"
+            return
+        }
+        scope.launch {
+            fileFeedback = null
+            when (val downloaded = model.downloadResource(node.stableKey)) {
+                is CoursewareOperationResult.Failure -> Unit
+                is CoursewareOperationResult.Success -> {
+                    fileFeedback = when (fileGateway.saveFile(downloaded.value)) {
+                        HomeworkFileSaveResult.Saved -> "文件已保存。"
+                        HomeworkFileSaveResult.Cancelled -> "已取消保存，没有写入文件。"
+                        is HomeworkFileSaveResult.Failed -> "保存失败，请重新选择位置。"
+                    }
+                }
+            }
+        }
+    }
+
+    fun saveDirectory(stableKey: String?, directoryName: String) {
+        if (directoryJob != null) {
+            fileFeedback = "已有目录导出正在进行。"
+            return
+        }
+        if (!directoryGateway.isDirectoryExportAvailable) {
+            fileFeedback = "当前平台的系统目录导出面板尚未接入。"
+            return
+        }
+        directoryJob = scope.launch {
+            fileFeedback = null
+            isCancellingDirectory = false
+            try {
+                when (val exported = model.exportDirectory(stableKey, directoryName, directoryGateway)) {
+                    is CoursewareOperationResult.Failure -> Unit
+                    is CoursewareOperationResult.Success -> {
+                        fileFeedback = when (exported.value) {
+                            HomeworkFileSaveResult.Saved -> "目录已完整导出。"
+                            HomeworkFileSaveResult.Cancelled -> "已取消导出，没有写入目录。"
+                            is HomeworkFileSaveResult.Failed -> "目录导出失败；没有报告为完整成功。"
+                        }
+                    }
+                }
+            } catch (_: CancellationException) {
+                fileFeedback = "已取消目录导出；本次未完成目录已请求清理。"
+            } finally {
+                isCancellingDirectory = false
+                directoryJob = null
+            }
+        }
+    }
+
+    fun saveTeachingCalendar() {
+        if (!fileGateway.isAvailable) {
+            fileFeedback = "当前平台的系统保存面板尚未接入。"
+            return
+        }
+        scope.launch {
+            fileFeedback = null
+            when (val downloaded = model.downloadTeachingCalendar()) {
+                is CoursewareOperationResult.Failure -> Unit
+                is CoursewareOperationResult.Success -> {
+                    fileFeedback = when (fileGateway.saveFile(downloaded.value)) {
+                        HomeworkFileSaveResult.Saved -> "教学日历已保存。"
+                        HomeworkFileSaveResult.Cancelled -> "已取消保存，没有写入教学日历。"
+                        is HomeworkFileSaveResult.Failed -> "教学日历保存失败，请重新选择位置。"
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(model) { model.initialize() }
+
+    Column(
+        modifier = if (expanded) {
+            modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        } else {
+            modifier.padding(horizontal = 16.dp).padding(top = 8.dp)
+        },
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (expanded) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "课件",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Text(
+                        "按课程和文件夹浏览智慧教学平台资源",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
+                    Text(if (state.isRefreshing) "正在同步" else "同步课件")
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = ::saveTeachingCalendar,
+                    enabled = state.selectedCourse != null && fileGateway.isAvailable && !state.isDownloading,
+                ) { Text("教学日历") }
+            }
+        }
+
+
+        if (usesLegacySmartTransport) LegacySmartTransportWarning()
+
+        if (!expanded && state.courses.isNotEmpty()) {
+            OutlinedButton(
+                onClick = ::saveTeachingCalendar,
+                enabled = state.selectedCourse != null && fileGateway.isAvailable && !state.isDownloading,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("下载教学日历") }
+        }
+
+        if (state.isRefreshing || state.isSelectedCourseLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        if (state.directoryDownloadTotal > 0) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                LinearProgressIndicator(
+                    progress = { state.directoryDownloadCompleted.toFloat() / state.directoryDownloadTotal },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (isCancellingDirectory) {
+                            "正在取消并清理不完整目录…"
+                        } else {
+                            "正在导出目录 ${state.directoryDownloadCompleted}/${state.directoryDownloadTotal}"
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        onClick = ::cancelDirectoryExport,
+                    ) { Text("取消") }
+                }
+            }
+        }
+        if (directoryJob != null && state.directoryDownloadTotal == 0) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (isCancellingDirectory) "正在取消并清理不完整目录…" else "正在等待系统目录或写入文件…",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(
+                        onClick = ::cancelDirectoryExport,
+                        enabled = !isCancellingDirectory,
+                    ) { Text("取消") }
+                }
+            }
+        }
+        state.failure?.let { failure ->
+            CoursewareFailureBanner(
+                failure = failure,
+                hasContent = state.courses.isNotEmpty(),
+                onRetry = onRefresh,
+                onDismiss = model::dismissFailure,
+            )
+        }
+        state.fileFailure?.let { failure ->
+            CoursewareFileFailureBanner(failure, model::dismissFileFailure)
+        }
+        fileFeedback?.let { message ->
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = { fileFeedback = null }) { Text("关闭") }
+                }
+            }
+        }
+
+        when {
+            state.isLoading && state.courses.isEmpty() -> CoursewareLoadingState()
+            state.courses.isEmpty() -> CoursewareEmptyState(onRefresh)
+            expanded -> CoursewareExpandedWorkspace(
+                state = state,
+                model = model,
+                fileGatewayAvailable = fileGateway.isAvailable,
+                directoryGatewayAvailable = directoryGateway.isDirectoryExportAvailable,
+                onDownload = ::saveResource,
+                onExportDirectory = ::saveDirectory,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+            else -> CoursewareCompactWorkspace(
+                state = state,
+                model = model,
+                fileGatewayAvailable = fileGateway.isAvailable,
+                directoryGatewayAvailable = directoryGateway.isDirectoryExportAvailable,
+                onChooseCourse = { showCoursePicker = true },
+                onDownload = ::saveResource,
+                onExportDirectory = ::saveDirectory,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
+    }
+
+    if (showCoursePicker) {
+        ModalBottomSheet(onDismissRequest = { showCoursePicker = false }) {
+            Text(
+                "选择课程",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            )
+            LazyColumn(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(state.courses, key = CoursewareCourse::stableKey) { course ->
+                    CoursewareCourseRow(
+                        course = course,
+                        selected = course.id == state.selectedCourseId,
+                        loading = course.id in state.loadingCourseIds,
+                        onClick = {
+                            scope.launch { model.selectCourse(course.id) }
+                            showCoursePicker = false
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun CoursewareExpandedWorkspace(
+    state: CoursewareUiState,
+    model: CoursewareScreenModel,
+    fileGatewayAvailable: Boolean,
+    directoryGatewayAvailable: Boolean,
+    onDownload: (CoursewareNode) -> Unit,
+    onExportDirectory: (String?, String) -> Unit,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        ElevatedCard(modifier = Modifier.width(220.dp).fillMaxHeight()) {
+            Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("课程", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    items(state.courses, key = CoursewareCourse::stableKey) { course ->
+                        CoursewareCourseRow(
+                            course = course,
+                            selected = course.id == state.selectedCourseId,
+                            loading = course.id in state.loadingCourseIds,
+                            onClick = { scope.launch { model.selectCourse(course.id) } },
+                        )
+                    }
+                }
+            }
+        }
+
+        ElevatedCard(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        state.selectedCourse?.name.orEmpty(),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        when {
+                            state.isSelectedCourseLoading -> "正在同步…"
+                            state.selectedCourse?.childrenLoaded == false -> "点击课程加载"
+                            else -> "${state.selectedCourse?.children?.size ?: 0} 个顶层项目"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            state.selectedCourse?.let { onExportDirectory(null, it.name) }
+                        },
+                        enabled = directoryGatewayAvailable && !state.isDownloading &&
+                            state.selectedCourse?.childrenLoaded == true &&
+                            state.selectedCourse?.children?.isNotEmpty() == true,
+                    ) { Text("导出本课程") }
+                }
+                if (state.visibleTree.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            when {
+                                state.isSelectedCourseLoading -> "正在加载这门课程的课件…"
+                                state.selectedCourse?.childrenLoaded == false -> "选择课程后加载课件"
+                                else -> "这门课程暂无课件"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        contentPadding = PaddingValues(bottom = 12.dp),
+                    ) {
+                        items(state.visibleTree, key = { it.node.stableKey }) { visible ->
+                            CoursewareTreeRow(
+                                visible = visible,
+                                expanded = visible.node.stableKey in state.expandedFolderKeys,
+                                selected = visible.node.stableKey == state.selectedNodeKey,
+                                loading = visible.node.stableKey in state.loadingFolderKeys,
+                                onClick = {
+                                    if (visible.node.isFolder) {
+                                        scope.launch { model.toggleExpanded(visible.node.stableKey) }
+                                    } else {
+                                        model.selectNode(visible.node.stableKey)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        CoursewareDetailPanel(
+            course = state.selectedCourse,
+            node = state.selectedNode,
+            isDownloading = state.isDownloading,
+            fileGatewayAvailable = fileGatewayAvailable,
+            directoryGatewayAvailable = directoryGatewayAvailable,
+            onDownload = onDownload,
+            onExportDirectory = onExportDirectory,
+            modifier = Modifier.widthIn(min = 290.dp, max = 350.dp).fillMaxHeight(),
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun CoursewareCompactWorkspace(
+    state: CoursewareUiState,
+    model: CoursewareScreenModel,
+    fileGatewayAvailable: Boolean,
+    directoryGatewayAvailable: Boolean,
+    onChooseCourse: () -> Unit,
+    onDownload: (CoursewareNode) -> Unit,
+    onExportDirectory: (String?, String) -> Unit,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(onClick = onChooseCourse, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "课程 · ${state.selectedCourse?.name.orEmpty()}",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        OutlinedButton(
+            onClick = { state.selectedCourse?.let { onExportDirectory(null, it.name) } },
+            enabled = directoryGatewayAvailable && !state.isDownloading &&
+                state.selectedCourse?.childrenLoaded == true &&
+                state.selectedCourse?.children?.isNotEmpty() == true,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("导出本课程")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (state.compactFolderPath.isNotEmpty()) {
+                TextButton(onClick = { model.navigateCompactBack() }) { Text("返回") }
+            }
+            Text(
+                compactPathTitle(state),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${state.compactNodes.size} 项",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            state.compactFolderPath.lastOrNull()?.let { folderKey ->
+                TextButton(
+                    onClick = {
+                        onExportDirectory(folderKey, state.compactPathNames.lastOrNull().orEmpty().ifBlank { "课件" })
+                    },
+                    enabled = directoryGatewayAvailable && !state.isDownloading,
+                ) { Text("导出") }
+            }
+        }
+        if (state.compactNodes.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    when {
+                        state.isSelectedCourseLoading -> "正在加载这门课程的课件…"
+                        state.selectedCourse?.childrenLoaded == false -> "正在准备课程目录…"
+                        else -> "当前文件夹暂无课件"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 18.dp),
+            ) {
+                items(state.compactNodes, key = CoursewareNode::stableKey) { node ->
+                    CoursewareCompactNodeRow(
+                        node = node,
+                        loading = node.stableKey in state.loadingFolderKeys,
+                        onClick = { scope.launch { model.openCompactNode(node.stableKey) } },
+                    )
+                }
+            }
+        }
+    }
+
+    state.selectedNode?.takeIf { !it.isFolder }?.let { node ->
+        ModalBottomSheet(onDismissRequest = { model.selectNode("") }) {
+            CoursewareDetailContent(
+                course = state.selectedCourse,
+                node = node,
+                isDownloading = state.isDownloading,
+                fileGatewayAvailable = fileGatewayAvailable,
+                directoryGatewayAvailable = directoryGatewayAvailable,
+                onDownload = onDownload,
+                onExportDirectory = onExportDirectory,
+                modifier = Modifier.fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+            )
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun CoursewareCourseRow(
+    course: CoursewareCourse,
+    selected: Boolean,
+    loading: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp)) {
+            Text(course.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                when {
+                    loading -> "正在同步…"
+                    !course.childrenLoaded -> "点击加载课件"
+                    else -> "${course.children.size} 个顶层项目"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.72f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoursewareTreeRow(
+    visible: VisibleCoursewareNode,
+    expanded: Boolean,
+    selected: Boolean,
+    loading: Boolean,
+    onClick: () -> Unit,
+) {
+    val node = visible.node
+    Surface(
+        onClick = onClick,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = (visible.depth * 18).dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(if (node.isFolder) if (expanded) "▾" else "▸" else "•", modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(node.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (!node.isFolder) {
+                    Text(
+                        resourceMetadata(node),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (node.isFolder) {
+                Text(
+                    when {
+                        loading -> "加载中"
+                        !node.childrenLoaded -> "未展开"
+                        else -> "${node.children.size}"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CoursewareCompactNodeRow(node: CoursewareNode, loading: Boolean, onClick: () -> Unit) {
+    ElevatedCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(if (node.isFolder) "文件夹" else node.extension.ifBlank { "文件" }.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.width(48.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(node.name, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (node.isFolder) {
+                        when {
+                            loading -> "正在加载目录…"
+                            !node.childrenLoaded -> "点击加载目录"
+                            else -> "${node.children.size} 个项目"
+                        }
+                    } else {
+                        resourceMetadata(node)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun CoursewareDetailPanel(
+    course: CoursewareCourse?,
+    node: CoursewareNode?,
+    isDownloading: Boolean,
+    fileGatewayAvailable: Boolean,
+    directoryGatewayAvailable: Boolean,
+    onDownload: (CoursewareNode) -> Unit,
+    onExportDirectory: (String?, String) -> Unit,
+    modifier: Modifier,
+) {
+    ElevatedCard(modifier = modifier) {
+        if (node == null) {
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "选择文件或文件夹以查看详情",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        } else {
+            CoursewareDetailContent(
+                course = course,
+                node = node,
+                isDownloading = isDownloading,
+                fileGatewayAvailable = fileGatewayAvailable,
+                directoryGatewayAvailable = directoryGatewayAvailable,
+                onDownload = onDownload,
+                onExportDirectory = onExportDirectory,
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoursewareDetailContent(
+    course: CoursewareCourse?,
+    node: CoursewareNode,
+    isDownloading: Boolean,
+    fileGatewayAvailable: Boolean,
+    directoryGatewayAvailable: Boolean,
+    onDownload: (CoursewareNode) -> Unit,
+    onExportDirectory: (String?, String) -> Unit,
+    modifier: Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            if (node.isFolder) "文件夹" else "课件文件",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(node.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        course?.let { DetailLine("课程", it.name) }
+        if (node.isFolder) {
+            DetailLine("包含", "${node.children.size} 个直接子项目")
+            Button(
+                onClick = { onExportDirectory(node.stableKey, node.name) },
+                enabled = directoryGatewayAvailable && !isDownloading,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (isDownloading) "正在准备目录" else "导出此文件夹")
+            }
+            Text(
+                if (directoryGatewayAvailable) {
+                    "导出时会保留这个文件夹下的子目录层级。"
+                } else {
+                    "当前平台尚未提供系统目录导出面板。"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (directoryGatewayAvailable) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
+        } else {
+            node.size.takeIf { it.isNotBlank() }?.let { DetailLine("大小", it) }
+            node.extension.takeIf { it.isNotBlank() }?.let { DetailLine("类型", it.uppercase()) }
+            node.teacherName.takeIf { it.isNotBlank() }?.let { DetailLine("上传教师", it) }
+            node.inputTime.takeIf { it.isNotBlank() }?.let { DetailLine("上传时间", it) }
+            DetailLine("下载次数", node.downloadCount.toString())
+            Button(
+                onClick = { onDownload(node) },
+                enabled = fileGatewayAvailable && !isDownloading,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (isDownloading) "正在读取文件" else "下载并选择保存位置")
+            }
+            if (!fileGatewayAvailable) {
+                Text(
+                    "当前平台尚未提供系统保存面板。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun CoursewareFailureBanner(
+    failure: CoursewareSyncFailure,
+    hasContent: Boolean,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                failureMessage(failure, hasContent),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (failure != CoursewareSyncFailure.CACHE) TextButton(onClick = onRetry) { Text("重试") }
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    }
+}
+
+@Composable
+private fun CoursewareFileFailureBanner(failure: CoursewareSyncFailure, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (failure) {
+                    CoursewareSyncFailure.NETWORK -> "文件下载失败，请检查网络后重试。"
+                    CoursewareSyncFailure.SESSION_EXPIRED -> "登录会话已失效，请退出后重新登录。"
+                    CoursewareSyncFailure.MALFORMED_RESPONSE -> "学校平台返回了无效的文件信息。"
+                    CoursewareSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "文件地址不在允许的学校 HTTPS 范围内。"
+                    CoursewareSyncFailure.CACHE -> "本地课件缓存不可用。"
+                },
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    }
+}
+
+private fun failureMessage(failure: CoursewareSyncFailure, hasContent: Boolean): String = when (failure) {
+    CoursewareSyncFailure.NETWORK -> if (hasContent) {
+        "同步失败，正在显示本地课件缓存。"
+    } else {
+        "无法连接智慧教学平台，请检查网络后重试。"
+    }
+    CoursewareSyncFailure.SESSION_EXPIRED -> "智慧教学平台会话已失效，请退出后重新登录。"
+    CoursewareSyncFailure.MALFORMED_RESPONSE -> "学校课件数据结构已变化，暂时无法解析。"
+    CoursewareSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "学校平台没有提供可验证的 HTTPS 通道。"
+    CoursewareSyncFailure.CACHE -> "本地课件缓存操作失败。"
+}
+
+@Composable
+private fun CoursewareLoadingState() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator()
+            Text("正在读取本地课件并连接智慧教学平台…")
+        }
+    }
+}
+
+@Composable
+private fun CoursewareEmptyState(onRefresh: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("暂无课件", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                "本地没有缓存，智慧教学平台也没有返回可显示的课程资源。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onRefresh) { Text("重新同步") }
+        }
+    }
+}
+
+private fun compactPathTitle(state: CoursewareUiState): String = buildString {
+    append(state.selectedCourse?.name.orEmpty())
+    state.compactPathNames.forEach { name -> append(" / ").append(name) }
+}
+
+private fun resourceMetadata(node: CoursewareNode): String = listOfNotNull(
+    node.extension.takeIf { it.isNotBlank() }?.uppercase(),
+    node.size.takeIf { it.isNotBlank() },
+    node.teacherName.takeIf { it.isNotBlank() },
+).joinToString(" · ").ifBlank { "课程资源" }

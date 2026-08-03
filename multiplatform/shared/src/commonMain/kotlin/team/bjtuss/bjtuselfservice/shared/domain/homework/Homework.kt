@@ -1,0 +1,144 @@
+package team.bjtuss.bjtuselfservice.shared.domain.homework
+
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
+
+data class Homework(
+    val id: Int = 0,
+    val upId: Int,
+    val idSnId: Int?,
+    val score: String,
+    val userId: Int,
+    val courseId: Int,
+    val courseName: String,
+    val title: String,
+    val content: String,
+    val createDate: String,
+    val endTime: String,
+    val openDate: String,
+    val status: Int,
+    val submitCount: Int,
+    val allCount: Int,
+    val subStatus: String,
+    val scoreId: Int,
+    val homeworkType: Int,
+)
+
+data class HomeworkAttachment(
+    val id: Int,
+    val fileName: String,
+    val sizeBytes: Long,
+    /**
+     * 服务端附件路径仅用于组装受限下载请求；UI、日志和异常不得直接展示它。
+     */
+    val sourcePath: String,
+)
+
+data class HomeworkDetail(
+    val content: String,
+    val attachments: List<HomeworkAttachment>,
+)
+
+data class SubmittedHomeworkAttachment(
+    val id: String,
+    val fileName: String,
+    /** 服务端路径只允许回传给受限下载端点，不得展示或持久化。 */
+    val sourcePath: String,
+)
+
+class HomeworkFileContent(
+    val fileName: String,
+    val contentType: String,
+    val bytes: ByteArray,
+) {
+    init {
+        require(fileName.isNotBlank())
+        require(contentType.isNotBlank())
+    }
+
+    override fun equals(other: Any?): Boolean = other is HomeworkFileContent &&
+        fileName == other.fileName &&
+        contentType == other.contentType &&
+        bytes.contentEquals(other.bytes)
+
+    override fun hashCode(): Int {
+        var result = fileName.hashCode()
+        result = 31 * result + contentType.hashCode()
+        result = 31 * result + bytes.contentHashCode()
+        return result
+    }
+
+    override fun toString(): String =
+        "HomeworkFileContent(fileName=<redacted>, contentType=$contentType, bytes=${bytes.size})"
+}
+
+fun Homework.stableKey(): String = "$courseName\u0000$upId"
+
+fun Homework.typeLabel(): String = when (homeworkType) {
+    0 -> "平时作业"
+    1 -> "课程设计"
+    2 -> "实验报告"
+    else -> "其他任务"
+}
+
+enum class HomeworkSortOrder {
+    ORIGINAL,
+    ASCENDING,
+    DESCENDING,
+}
+
+/** 解析服务端固定格式 yyyy-MM-dd HH:mm，不读取系统时钟。 */
+fun parseSchoolLocalDateTime(value: String): LocalDateTime? = try {
+    LocalDateTime.parse(value.replace(' ', 'T'))
+} catch (_: IllegalArgumentException) {
+    null
+}
+
+fun filterHomework(
+    homework: List<Homework>,
+    selectedCourses: Set<String>,
+    hideExpired: Boolean,
+    now: LocalDateTime,
+): List<Homework> = homework.filter { item ->
+    val deadline = parseSchoolLocalDateTime(item.endTime)
+    val hasValidDate = deadline?.let { it > now } ?: true
+    val dateMatches = !hideExpired || hasValidDate
+    val courseMatches = selectedCourses.isEmpty() || item.courseName in selectedCourses
+    dateMatches && courseMatches
+}
+
+fun sortHomework(
+    homework: List<Homework>,
+    order: HomeworkSortOrder,
+): List<Homework> = when (order) {
+    HomeworkSortOrder.ORIGINAL -> homework
+    HomeworkSortOrder.ASCENDING -> homework.sortedWith(
+        compareBy<Homework> { parseSchoolLocalDateTime(it.endTime) == null }
+            .thenBy { parseSchoolLocalDateTime(it.endTime) },
+    )
+    HomeworkSortOrder.DESCENDING -> homework.sortedWith(
+        compareByDescending<Homework> { parseSchoolLocalDateTime(it.endTime) != null }
+            .thenByDescending { parseSchoolLocalDateTime(it.endTime) },
+    )
+}
+
+/**
+ * 保留原版“0..48 个完整小时且未提交”的口径；时区由调用层显式注入，便于测试。
+ */
+fun isHomeworkDueSoon(
+    homework: Homework,
+    now: LocalDateTime,
+    timeZone: TimeZone,
+): Boolean {
+    if (homework.subStatus == "已提交") return false
+    val deadline = parseSchoolLocalDateTime(homework.endTime) ?: return false
+    val hours = (deadline.toInstant(timeZone) - now.toInstant(timeZone)).inWholeHours
+    return hours in 0..48
+}
+
+fun dueSoonHomeworkCount(
+    homework: List<Homework>,
+    now: LocalDateTime,
+    timeZone: TimeZone,
+): Int = homework.count { isHomeworkDueSoon(it, now, timeZone) }

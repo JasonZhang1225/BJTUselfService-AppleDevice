@@ -648,7 +648,7 @@ fun CheckForUpdateSettingItem() {
             onDismissRequest = { showDialog = false },
             confirmButton = {
                 downloadUrl?.let { url ->
-                    if (versionLatest.isNotEmpty() && (versionName < versionLatest)) {
+                    if (versionLatest.isNotEmpty() && ((versionName ?: "") < versionLatest)) {
                         Button(
                             onClick = {
                                 showDialog = false
@@ -665,7 +665,7 @@ fun CheckForUpdateSettingItem() {
             },
             dismissButton = {
                 TextButton(onClick = { showDialog = false }) {
-                    if (versionLatest.isNotEmpty() && (versionName < versionLatest)) {
+                    if (versionLatest.isNotEmpty() && ((versionName ?: "") < versionLatest)) {
                         Text("人习于枸且非一日")
                     } else Text("关闭")
                 }
@@ -686,7 +686,7 @@ fun CheckForUpdateSettingItem() {
                     }
                 } else {
                     Column {
-                        if (versionLatest.isNotEmpty() && (versionName < versionLatest)) {
+                        if (versionLatest.isNotEmpty() && ((versionName ?: "") < versionLatest)) {
                             Text(
                                 "发现新版本 $versionLatest",
                                 style = MaterialTheme.typography.titleLarge.copy(

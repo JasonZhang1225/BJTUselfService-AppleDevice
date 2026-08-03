@@ -1,0 +1,138 @@
+package team.bjtuss.bjtuselfservice.shared.auth
+
+import kotlin.coroutines.startCoroutine
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+
+class AutomaticLoginCoordinatorTest {
+    @Test
+    fun retriesWithFreshChallengesAndSucceedsOnThirdAttempt() = runSuspend {
+        val gateway = FakeAutomationGateway(failuresBeforeSuccess = 2)
+        val attempts = mutableListOf<Int>()
+        val result = AutomaticLoginCoordinator(gateway, SuccessfulRecognizer).login(
+            Credentials("student", "secret"),
+        ) { attempt, _ -> attempts += attempt }
+
+        assertEquals(listOf(1, 2, 3), attempts)
+        assertEquals(listOf(1, 2, 3), gateway.challengeIds)
+        assertEquals(3, assertIs<AutomaticLoginResult.Authenticated>(result).attempts)
+    }
+
+    @Test
+    fun threeFailuresReturnLatestChallengeForManualEntry() = runSuspend {
+        val gateway = FakeAutomationGateway(failuresBeforeSuccess = Int.MAX_VALUE)
+        val result = assertIs<AutomaticLoginResult.ManualRequired>(
+            AutomaticLoginCoordinator(gateway, SuccessfulRecognizer).login(Credentials("student", "secret")),
+        )
+
+        assertEquals(3, result.attempts)
+        assertEquals("captcha-3", result.challenge?.captchaId)
+        assertEquals(LoginFailure.CAPTCHA_REJECTED, result.reason)
+    }
+
+    @Test
+    fun activeSessionSkipsRecognitionAndAuthentication() = runSuspend {
+        val gateway = FakeAutomationGateway(sessionActive = true)
+        val result = AutomaticLoginCoordinator(gateway, UnavailableCaptchaRecognizer)
+            .login(Credentials("student", "secret"))
+
+        assertIs<AutomaticLoginResult.SessionActive>(result)
+        assertEquals(0, gateway.authenticationCount)
+    }
+
+    @Test
+    fun recognitionFailuresUseFreshChallengesBeforeManualFallback() = runSuspend {
+        val gateway = FakeAutomationGateway()
+        val recognizer = SequencedRecognizer(failuresBeforeSuccess = Int.MAX_VALUE)
+        val result = assertIs<AutomaticLoginResult.ManualRequired>(
+            AutomaticLoginCoordinator(gateway, recognizer)
+                .login(Credentials("student", "secret")),
+        )
+
+        assertEquals(3, result.attempts)
+        assertEquals(listOf(1, 2, 3), gateway.challengeIds)
+        assertEquals(0, gateway.authenticationCount)
+        assertEquals("captcha-3", result.challenge?.captchaId)
+    }
+
+    @Test
+    fun unavailablePlatformModelFallsBackAfterFirstChallenge() = runSuspend {
+        val gateway = FakeAutomationGateway()
+        val result = assertIs<AutomaticLoginResult.ManualRequired>(
+            AutomaticLoginCoordinator(gateway, UnavailableCaptchaRecognizer)
+                .login(Credentials("student", "secret")),
+        )
+
+        assertEquals(1, result.attempts)
+        assertEquals(listOf(1), gateway.challengeIds)
+        assertEquals(0, gateway.authenticationCount)
+    }
+}
+
+private object SuccessfulRecognizer : CaptchaRecognizer {
+    override suspend fun recognize(imageBytes: ByteArray): CaptchaRecognitionResult =
+        CaptchaRecognitionResult.Success(CaptchaRecognition("1+2=", "3", 1f))
+}
+
+private class SequencedRecognizer(
+    private val failuresBeforeSuccess: Int,
+) : CaptchaRecognizer {
+    private var calls = 0
+
+    override suspend fun recognize(imageBytes: ByteArray): CaptchaRecognitionResult {
+        calls++
+        return if (calls <= failuresBeforeSuccess) {
+            CaptchaRecognitionResult.Failed(CaptchaRecognitionFailure.INVALID_EXPRESSION)
+        } else {
+            SuccessfulRecognizer.recognize(imageBytes)
+        }
+    }
+}
+
+private class FakeAutomationGateway(
+    private val failuresBeforeSuccess: Int = 0,
+    private val sessionActive: Boolean = false,
+) : LoginAutomationGateway {
+    val challengeIds = mutableListOf<Int>()
+    var authenticationCount = 0
+
+    override suspend fun requestCaptchaChallenge(studentId: String): ChallengeResult {
+        if (sessionActive) return ChallengeResult.SessionActive(Profile)
+        val id = challengeIds.size + 1
+        challengeIds += id
+        return ChallengeResult.Ready(
+            CaptchaChallenge("https://cas.bjtu.edu.cn/auth/login/?next=/", "csrf", "captcha-$id", byteArrayOf(1)),
+        )
+    }
+
+    override suspend fun authenticateMis(
+        credentials: Credentials,
+        challenge: CaptchaChallenge,
+        captchaAnswer: String,
+    ): AuthenticationResult {
+        authenticationCount++
+        return if (authenticationCount <= failuresBeforeSuccess) {
+            AuthenticationResult.Failed(LoginFailure.CAPTCHA_REJECTED)
+        } else {
+            AuthenticationResult.Success(Profile)
+        }
+    }
+
+    private companion object {
+        val Profile = StudentProfile("Test", "student", "student", "test")
+    }
+}
+
+private fun runSuspend(block: suspend () -> Unit) {
+    var failure: Throwable? = null
+    block.startCoroutine(
+        object : kotlin.coroutines.Continuation<Unit> {
+            override val context = kotlin.coroutines.EmptyCoroutineContext
+            override fun resumeWith(result: Result<Unit>) {
+                failure = result.exceptionOrNull()
+            }
+        },
+    )
+    failure?.let { throw it }
+}

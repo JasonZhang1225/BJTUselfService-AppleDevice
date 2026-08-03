@@ -1,0 +1,82 @@
+package team.bjtuss.bjtuselfservice.shared.feature.mailbox
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import team.bjtuss.bjtuselfservice.shared.PlatformFamily
+import team.bjtuss.bjtuselfservice.shared.PlatformInfo
+import team.bjtuss.bjtuselfservice.shared.webview.SchoolWebView
+
+@Composable
+fun MailboxWorkspace(
+    model: MailboxScreenModel,
+    platform: PlatformInfo,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val state by model.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
+    LaunchedEffect(model) { model.initialize() }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        if (expanded) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("校内邮箱", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    if (platform.family == PlatformFamily.MacOS) {
+                        "macOS 使用系统浏览器；App 会话 Cookie 不会注入浏览器，必要时请在学校页面重新登录。"
+                    } else {
+                        "在学校域名范围内复用当前登录会话；外部链接交给系统浏览器。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        when (val current = state) {
+            MailboxUiState.Idle,
+            MailboxUiState.Preparing,
+            -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            MailboxUiState.SessionUnavailable -> Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("当前登录会话无法交给邮箱页面，请退出后重新登录。")
+                Button(
+                    onClick = { scope.launch { model.refresh() } },
+                    modifier = Modifier.padding(top = 16.dp),
+                ) { Text("重试") }
+            }
+            is MailboxUiState.Ready -> SchoolWebView(
+                request = current.request,
+                modifier = Modifier.fillMaxSize(),
+                onOpenExternal = uriHandler::openUri,
+            )
+        }
+    }
+}

@@ -1,0 +1,234 @@
+CREATE TABLE grade_cache (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_scope TEXT NOT NULL,
+    course_name TEXT NOT NULL,
+    course_teacher TEXT NOT NULL,
+    course_score TEXT NOT NULL,
+    course_credits TEXT NOT NULL,
+    course_year TEXT NOT NULL,
+    semester TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX grade_cache_account_index ON grade_cache(account_scope);
+
+CREATE TABLE course_cache (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_scope TEXT NOT NULL,
+    course_id TEXT NOT NULL,
+    course_name TEXT NOT NULL,
+    course_teacher TEXT NOT NULL,
+    course_location_index INTEGER NOT NULL,
+    course_time TEXT NOT NULL,
+    course_place TEXT NOT NULL,
+    is_current_semester INTEGER NOT NULL
+);
+
+CREATE INDEX course_cache_account_index ON course_cache(account_scope);
+
+CREATE TABLE exam_cache (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_scope TEXT NOT NULL,
+    exam_type TEXT NOT NULL,
+    course_name TEXT NOT NULL,
+    exam_time_and_place TEXT NOT NULL,
+    exam_status TEXT NOT NULL,
+    detail TEXT NOT NULL
+);
+
+CREATE INDEX exam_cache_account_index ON exam_cache(account_scope);
+
+CREATE TABLE homework_cache (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    account_scope TEXT NOT NULL,
+    up_id INTEGER NOT NULL,
+    id_sn_id INTEGER,
+    score TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    course_id INTEGER NOT NULL,
+    course_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    create_date TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    open_date TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    submit_count INTEGER NOT NULL,
+    all_count INTEGER NOT NULL,
+    sub_status TEXT NOT NULL,
+    score_id INTEGER NOT NULL,
+    homework_type INTEGER NOT NULL
+);
+
+CREATE INDEX homework_cache_account_index ON homework_cache(account_scope);
+
+CREATE TABLE grade_selection_cache (
+    account_scope TEXT NOT NULL,
+    course_name TEXT NOT NULL,
+    course_teacher TEXT NOT NULL,
+    course_year TEXT NOT NULL,
+    semester TEXT NOT NULL,
+    last_known_score TEXT NOT NULL,
+    last_known_credits TEXT NOT NULL,
+    occurrence INTEGER NOT NULL,
+    PRIMARY KEY (
+        account_scope,
+        course_name,
+        course_teacher,
+        course_year,
+        semester,
+        occurrence
+    )
+);
+
+CREATE TABLE cache_metadata (
+    account_scope TEXT NOT NULL,
+    cache_key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (account_scope, cache_key)
+);
+
+CREATE TABLE app_setting (
+    setting_key TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+countAllRows:
+SELECT
+    (SELECT count(*) FROM grade_cache) +
+    (SELECT count(*) FROM course_cache) +
+    (SELECT count(*) FROM exam_cache) +
+    (SELECT count(*) FROM homework_cache) +
+    (SELECT count(*) FROM grade_selection_cache) +
+    (SELECT count(*) FROM cache_metadata) +
+    (SELECT count(*) FROM app_setting);
+
+selectGradesByAccount:
+SELECT id, course_name, course_teacher, course_score, course_credits, course_year, semester, detail
+FROM grade_cache
+WHERE account_scope = ?
+ORDER BY id;
+
+insertGrade:
+INSERT INTO grade_cache (
+    account_scope, course_name, course_teacher, course_score,
+    course_credits, course_year, semester, detail
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteGradesByAccount:
+DELETE FROM grade_cache WHERE account_scope = ?;
+
+claimLegacyGrades:
+UPDATE grade_cache SET account_scope = ? WHERE account_scope = '';
+
+selectCoursesByAccount:
+SELECT id, course_id, course_name, course_teacher, course_location_index,
+       course_time, course_place, is_current_semester
+FROM course_cache
+WHERE account_scope = ?
+ORDER BY id;
+
+insertCourse:
+INSERT INTO course_cache (
+    account_scope, course_id, course_name, course_teacher,
+    course_location_index, course_time, course_place, is_current_semester
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteCoursesByAccount:
+DELETE FROM course_cache WHERE account_scope = ?;
+
+claimLegacyCourses:
+UPDATE course_cache SET account_scope = ? WHERE account_scope = '';
+
+selectExamsByAccount:
+SELECT id, exam_type, course_name, exam_time_and_place, exam_status, detail
+FROM exam_cache
+WHERE account_scope = ?
+ORDER BY id;
+
+insertExam:
+INSERT INTO exam_cache (
+    account_scope, exam_type, course_name, exam_time_and_place, exam_status, detail
+) VALUES (?, ?, ?, ?, ?, ?);
+
+deleteExamsByAccount:
+DELETE FROM exam_cache WHERE account_scope = ?;
+
+claimLegacyExams:
+UPDATE exam_cache SET account_scope = ? WHERE account_scope = '';
+
+selectHomeworkByAccount:
+SELECT id, up_id, id_sn_id, score, user_id, course_id, course_name, title,
+       content, create_date, end_time, open_date, status, submit_count,
+       all_count, sub_status, score_id, homework_type
+FROM homework_cache
+WHERE account_scope = ?
+ORDER BY id;
+
+insertHomework:
+INSERT INTO homework_cache (
+    account_scope, up_id, id_sn_id, score, user_id, course_id, course_name,
+    title, content, create_date, end_time, open_date, status, submit_count,
+    all_count, sub_status, score_id, homework_type
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteHomeworkByAccount:
+DELETE FROM homework_cache WHERE account_scope = ?;
+
+claimLegacyHomework:
+UPDATE homework_cache SET account_scope = ? WHERE account_scope = '';
+
+selectGradeSelectionsByAccount:
+SELECT course_name, course_teacher, course_year, semester,
+       last_known_score, last_known_credits, occurrence
+FROM grade_selection_cache
+WHERE account_scope = ?
+ORDER BY course_year, semester, course_name, course_teacher, occurrence;
+
+insertGradeSelection:
+INSERT OR REPLACE INTO grade_selection_cache (
+    account_scope, course_name, course_teacher, course_year, semester,
+    last_known_score, last_known_credits, occurrence
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteGradeSelectionsByAccount:
+DELETE FROM grade_selection_cache WHERE account_scope = ?;
+
+selectMetadata:
+SELECT value FROM cache_metadata WHERE account_scope = ? AND cache_key = ?;
+
+putMetadata:
+INSERT OR REPLACE INTO cache_metadata(account_scope, cache_key, value) VALUES (?, ?, ?);
+
+deleteMetadataByAccount:
+DELETE FROM cache_metadata WHERE account_scope = ?;
+
+selectSetting:
+SELECT value FROM app_setting WHERE setting_key = ?;
+
+putSetting:
+INSERT OR REPLACE INTO app_setting(setting_key, value) VALUES (?, ?);
+
+deleteSetting:
+DELETE FROM app_setting WHERE setting_key = ?;
+
+deleteAllGrades:
+DELETE FROM grade_cache;
+
+deleteAllCourses:
+DELETE FROM course_cache;
+
+deleteAllExams:
+DELETE FROM exam_cache;
+
+deleteAllHomework:
+DELETE FROM homework_cache;
+
+deleteAllGradeSelections:
+DELETE FROM grade_selection_cache;
+
+deleteAllMetadata:
+DELETE FROM cache_metadata;
+
+deleteAllSettings:
+DELETE FROM app_setting;
