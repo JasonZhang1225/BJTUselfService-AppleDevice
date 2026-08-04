@@ -18,17 +18,8 @@ local.properties
 # Local MIS credentials; never commit this file.
 /MisSecret.md
 
-# Downloaded release/source baselines used for local migration verification.
-/.artifacts/baseline-v1.7.0/
-
-
-# Migration verification artifacts: keep light screenshots only; never track Xcode build trees.
-.artifacts/xcode-*/
-.artifacts/**/Build/
-.artifacts/**/ModuleCache.noindex/
-.artifacts/**/*.app/
-.artifacts/**/*.framework/
-.artifacts/secret-keys.txt
+# Verification artifacts (baselines, screenshots, audit evidence); local only.
+/.artifacts/
 
 # Local build / IDE caches that must never be published
 **/DerivedData*/
