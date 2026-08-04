@@ -257,7 +257,7 @@ private const val NATIVE_EVENT_PASSWORD_SUBMIT = 3
 
 actual fun dismissPlatformKeyboard() = Unit
 
-actual fun Modifier.platformLoginKeyboardAvoidance(): Modifier = this
+actual fun Modifier.platformLoginKeyboardAvoidance(enabled: Boolean): Modifier = this
 
 actual val showsPasswordVisibilityToggle: Boolean
     get() = true

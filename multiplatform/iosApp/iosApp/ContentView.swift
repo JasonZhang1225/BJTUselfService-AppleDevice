@@ -34,12 +34,14 @@ struct ContentView: View {
                 .ignoresSafeArea()
             ComposeView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea(.container, edges: .bottom)
+                // Keep the Compose host at a stable full-screen size. Compose owns the login
+                // form's IME padding only while fields are editable; SwiftUI must not retain a
+                // stale keyboard safe area after Password AutoFill or foreground transitions.
+                .ignoresSafeArea(.all, edges: .bottom)
         }
-        // Apply edge-to-edge at the hosting boundary so its own clipping cannot expose a
-        // hairline of the UIWindow background. `.container` deliberately keeps keyboard
-        // avoidance intact while Compose continues to respect the top safe area.
+        // Apply edge-to-edge at the hosting boundary so neither the container nor keyboard safe
+        // area can resize the root and expose a strip of the UIWindow background.
         .background(appBackgroundColor)
-        .ignoresSafeArea(.container, edges: .bottom)
+        .ignoresSafeArea(.all, edges: .bottom)
     }
 }

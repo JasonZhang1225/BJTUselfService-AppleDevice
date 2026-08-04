@@ -48,7 +48,13 @@ class AutomaticLoginCoordinator(
         repeat(maximumAttempts) { index ->
             val attempt = index + 1
             onAttempt(attempt, maximumAttempts)
-            when (val challenge = gateway.requestCaptchaChallenge(credentials.username)) {
+            val challenge = try {
+                gateway.requestCaptchaChallenge(credentials.username)
+            } catch (_: Exception) {
+                latestFailure = LoginFailure.NETWORK
+                return@repeat
+            }
+            when (challenge) {
                 is ChallengeResult.SessionActive -> {
                     return AutomaticLoginResult.SessionActive(challenge.profile)
                 }
@@ -57,28 +63,28 @@ class AutomaticLoginCoordinator(
                 }
                 is ChallengeResult.Ready -> {
                     latestChallenge = challenge.challenge
-                    when (val recognition = captchaRecognizer.recognize(challenge.challenge.imageBytes)) {
+                    val recognition = try {
+                        captchaRecognizer.recognize(challenge.challenge.imageBytes)
+                    } catch (_: Exception) {
+                        latestFailure = LoginFailure.CAPTCHA_RECOGNITION_FAILED
+                        return@repeat
+                    }
+                    when (recognition) {
                         is CaptchaRecognitionResult.Failed -> {
-                            latestFailure = if (
-                                recognition.reason == CaptchaRecognitionFailure.MODEL_UNAVAILABLE
-                            ) {
-                                return AutomaticLoginResult.ManualRequired(
-                                    challenge = latestChallenge,
-                                    reason = LoginFailure.CAPTCHA_RECOGNITION_FAILED,
-                                    attempts = attempt,
-                                )
-                            } else {
-                                LoginFailure.CAPTCHA_RECOGNITION_FAILED
-                            }
+                            latestFailure = LoginFailure.CAPTCHA_RECOGNITION_FAILED
                         }
                         is CaptchaRecognitionResult.Success -> {
-                            when (
-                                val authentication = gateway.authenticateMis(
+                            val authentication = try {
+                                gateway.authenticateMis(
                                     credentials,
                                     challenge.challenge,
                                     recognition.value.answer,
                                 )
-                            ) {
+                            } catch (_: Exception) {
+                                latestFailure = LoginFailure.NETWORK
+                                return@repeat
+                            }
+                            when (authentication) {
                                 is AuthenticationResult.Success -> {
                                     return AutomaticLoginResult.Authenticated(
                                         profile = authentication.profile,

@@ -57,16 +57,29 @@ class AutomaticLoginCoordinatorTest {
     }
 
     @Test
-    fun unavailablePlatformModelFallsBackAfterFirstChallenge() = runSuspend {
+    fun unavailablePlatformModelStillUsesThreeFreshChallengesBeforeFallback() = runSuspend {
         val gateway = FakeAutomationGateway()
         val result = assertIs<AutomaticLoginResult.ManualRequired>(
             AutomaticLoginCoordinator(gateway, UnavailableCaptchaRecognizer)
                 .login(Credentials("student", "secret")),
         )
 
-        assertEquals(1, result.attempts)
-        assertEquals(listOf(1), gateway.challengeIds)
+        assertEquals(3, result.attempts)
+        assertEquals(listOf(1, 2, 3), gateway.challengeIds)
         assertEquals(0, gateway.authenticationCount)
+    }
+
+    @Test
+    fun transientChallengeExceptionsAreRetriedUpToThreeTimes() = runSuspend {
+        val gateway = FakeAutomationGateway(challengeExceptionsBeforeSuccess = 2)
+        val attempts = mutableListOf<Int>()
+        val result = AutomaticLoginCoordinator(gateway, SuccessfulRecognizer).login(
+            Credentials("student", "secret"),
+        ) { attempt, _ -> attempts += attempt }
+
+        assertEquals(listOf(1, 2, 3), attempts)
+        assertIs<AutomaticLoginResult.Authenticated>(result)
+        assertEquals(3, gateway.challengeRequestCount)
     }
 }
 
@@ -93,11 +106,17 @@ private class SequencedRecognizer(
 private class FakeAutomationGateway(
     private val failuresBeforeSuccess: Int = 0,
     private val sessionActive: Boolean = false,
+    private val challengeExceptionsBeforeSuccess: Int = 0,
 ) : LoginAutomationGateway {
     val challengeIds = mutableListOf<Int>()
     var authenticationCount = 0
+    var challengeRequestCount = 0
 
     override suspend fun requestCaptchaChallenge(studentId: String): ChallengeResult {
+        challengeRequestCount++
+        if (challengeRequestCount <= challengeExceptionsBeforeSuccess) {
+            error("temporary network failure")
+        }
         if (sessionActive) return ChallengeResult.SessionActive(Profile)
         val id = challengeIds.size + 1
         challengeIds += id

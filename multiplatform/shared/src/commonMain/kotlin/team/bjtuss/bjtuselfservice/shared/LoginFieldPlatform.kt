@@ -42,12 +42,11 @@ expect fun PlatformCredentialFields(
 expect fun dismissPlatformKeyboard()
 
 /**
- * Keeps the login form reachable while the software keyboard is visible.
- *
- * Apple hosts already animate the Compose controller with the keyboard safe area, so applying
- * Compose IME insets there as well would leave a second keyboard-sized spacer during dismissal.
+ * Keeps the login form reachable while the software keyboard is visible. [enabled] must become
+ * false as soon as login leaves the editable state, so stale platform keyboard insets cannot keep
+ * the loading UI compressed after Password AutoFill or an app foreground transition.
  */
-expect fun Modifier.platformLoginKeyboardAvoidance(): Modifier
+expect fun Modifier.platformLoginKeyboardAvoidance(enabled: Boolean): Modifier
 
 /**
  * 是否在密码框显示「显示/隐藏」切换。iOS 用原生 secure 字段实现密码自动填充，
