@@ -66,14 +66,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.decodeToImageBitmap
 import team.bjtuss.bjtuselfservice.shared.auth.AuthenticationResult
 import team.bjtuss.bjtuselfservice.shared.auth.AutomaticLoginCoordinator
 import team.bjtuss.bjtuselfservice.shared.auth.AutomaticLoginResult
 import team.bjtuss.bjtuselfservice.shared.auth.CaptchaChallenge
 import team.bjtuss.bjtuselfservice.shared.auth.CaptchaRecognizer
-import team.bjtuss.bjtuselfservice.shared.auth.CaptchaRecognitionResult
 import team.bjtuss.bjtuselfservice.shared.auth.ChallengeResult
 import team.bjtuss.bjtuselfservice.shared.auth.Credentials
 import team.bjtuss.bjtuselfservice.shared.auth.LoginEvent
@@ -167,6 +165,7 @@ fun LoginRoute(
     var automationMessage by remember { mutableStateOf<String?>(null) }
     var manualDialogChallenge by remember { mutableStateOf<CaptchaChallenge?>(null) }
     var manualDialogAttempts by remember { mutableStateOf(0) }
+    var manualDialogMessage by remember { mutableStateOf<String?>(null) }
     val cacheStore = cacheStoreHandle.store
 
     suspend fun finishLogin(
@@ -199,62 +198,108 @@ fun LoginRoute(
         return LoginState.SignedIn(profile)
     }
 
-    suspend fun recognizeChallenge(challenge: CaptchaChallenge) {
-        when (val recognition = captchaRecognizer.recognize(challenge.imageBytes)) {
-            is CaptchaRecognitionResult.Success -> {
-                captchaAnswer = recognition.value.answer
+    suspend fun requestManualChallenge(
+        credentials: Credentials,
+        persistCredentials: Boolean,
+        messageOnSuccess: String? = null,
+    ): LoginState {
+        val previousChallenge = manualDialogChallenge
+        val result = try {
+            protocol.value.requestCaptchaChallenge(credentials.username)
+        } catch (_: Exception) {
+            ChallengeResult.Failed(LoginFailure.NETWORK)
+        }
+        return when (result) {
+            is ChallengeResult.SessionActive -> {
+                manualDialogChallenge = null
+                manualDialogMessage = null
+                finishLogin(result.profile, credentials, persistCredentials)
             }
-            is CaptchaRecognitionResult.Failed -> Unit
+            is ChallengeResult.Ready -> {
+                captchaAnswer = ""
+                manualDialogChallenge = result.challenge
+                manualDialogMessage = messageOnSuccess
+                LoginState.AwaitingCaptcha(result.challenge)
+            }
+            is ChallengeResult.Failed -> {
+                manualDialogMessage = when (result.reason) {
+                    LoginFailure.NETWORK -> "无法获取新的验证码，请检查网络后重试。"
+                    else -> loginFailureMessage(result.reason)
+                }
+                previousChallenge?.let(LoginState::AwaitingCaptcha)
+                    ?: LoginState.Failed(result.reason, canRetry = true)
+            }
         }
     }
 
-    fun loadChallenge(
-        openManualDialog: Boolean = false,
-        retryNetworkOnce: Boolean = false,
-    ) {
-        automationMessage = null
+    suspend fun performAutomaticLogin(
+        credentials: Credentials,
+        persistCredentials: Boolean,
+    ): LoginState {
+        manualDialogChallenge = null
+        manualDialogAttempts = 0
+        manualDialogMessage = null
+        captchaAnswer = ""
         state = LoginState.CheckingSession
-        scope.launch {
-            state = try {
-                val requestChallenge: suspend () -> ChallengeResult = {
-                    try {
-                        protocol.value.requestCaptchaChallenge(username.trim())
-                    } catch (_: Exception) {
-                        ChallengeResult.Failed(LoginFailure.NETWORK)
-                    }
-                }
-                val firstResult = requestChallenge()
-                val result = if (
-                    retryNetworkOnce &&
-                    firstResult is ChallengeResult.Failed &&
-                    firstResult.reason == LoginFailure.NETWORK
-                ) {
-                    delay(500)
-                    requestChallenge()
-                } else {
-                    firstResult
-                }
-                when (result) {
-                    is ChallengeResult.SessionActive -> {
-                        finishLogin(
-                            profile = result.profile,
-                            credentials = Credentials(username.trim(), password),
-                            persistCredentials = rememberCredentials,
-                        )
-                    }
-                    is ChallengeResult.Ready -> {
-                        captchaAnswer = ""
-                        val awaiting = LoginState.AwaitingCaptcha(result.challenge)
-                        state = awaiting
-                        if (openManualDialog) manualDialogChallenge = result.challenge
-                        recognizeChallenge(result.challenge)
-                        awaiting
-                    }
-                    is ChallengeResult.Failed -> LoginState.Failed(result.reason, canRetry = true)
-                }
-            } catch (_: Exception) {
-                LoginState.Failed(LoginFailure.NETWORK, canRetry = true)
+        automationMessage = "正在检查登录，正在自动登录"
+        val automaticResult = try {
+            AutomaticLoginCoordinator(
+                gateway = protocol.value,
+                captchaRecognizer = captchaRecognizer,
+            ).login(credentials) { attempt, maximum ->
+                automationMessage = "正在自动登录（第 $attempt/$maximum 次）"
             }
+        } catch (_: Exception) {
+            null
+        }
+        val nextState = when (automaticResult) {
+            is AutomaticLoginResult.SessionActive -> finishLogin(
+                profile = automaticResult.profile,
+                credentials = credentials,
+                persistCredentials = persistCredentials,
+            )
+            is AutomaticLoginResult.Authenticated -> finishLogin(
+                profile = automaticResult.profile,
+                credentials = credentials,
+                persistCredentials = persistCredentials,
+            )
+            is AutomaticLoginResult.ManualRequired -> {
+                manualDialogAttempts = automaticResult.attempts
+                // 自动提交过的 challenge 可能已失效；进入手动恢复前始终再取一张新图。
+                // 只有“尚未提交、仅识别失败”的 challenge 可在刷新网络失败时临时保底。
+                manualDialogChallenge = automaticResult.challenge.takeIf {
+                    automaticResult.reason == LoginFailure.CAPTCHA_RECOGNITION_FAILED
+                }
+                requestManualChallenge(
+                    credentials = credentials,
+                    persistCredentials = persistCredentials,
+                )
+            }
+            null -> LoginState.Failed(LoginFailure.NETWORK, canRetry = true)
+        }
+        automationMessage = null
+        state = nextState
+        return nextState
+    }
+
+    fun startAutomaticLogin() {
+        if (
+            state is LoginState.CheckingSession ||
+            state is LoginState.SubmittingCredentials ||
+            state is LoginState.LinkingAcademicSystem
+        ) {
+            return
+        }
+        val credentials = Credentials(username.trim(), password)
+        if (!credentials.isValid) {
+            state = LoginState.Failed(LoginFailure.INVALID_CREDENTIALS, canRetry = true)
+            return
+        }
+        dismissPlatformKeyboard()
+        state = LoginState.CheckingSession
+        automationMessage = "正在检查登录，正在自动登录"
+        scope.launch {
+            performAutomaticLogin(credentials, rememberCredentials)
         }
     }
 
@@ -279,72 +324,65 @@ fun LoginRoute(
         }
         storageReady = true
 
-        if (restoredCredentials == null) {
-            loadChallenge(retryNetworkOnce = true)
-            return@LaunchedEffect
+        if (restoredCredentials != null) {
+            performAutomaticLogin(restoredCredentials, persistCredentials = true)
         }
-
-        state = LoginState.CheckingSession
-        automationMessage = "正在检查登录，正在自动登录"
-        val automaticResult = try {
-            AutomaticLoginCoordinator(
-                gateway = protocol.value,
-                captchaRecognizer = captchaRecognizer,
-            ).login(restoredCredentials) { attempt, maximum ->
-                automationMessage = "正在检查登录，正在自动登录（第 $attempt/$maximum 次）"
-            }
-        } catch (_: Exception) {
-            null
-        }
-        state = when (automaticResult) {
-            is AutomaticLoginResult.SessionActive -> finishLogin(
-                profile = automaticResult.profile,
-                credentials = restoredCredentials,
-                persistCredentials = true,
-            )
-            is AutomaticLoginResult.Authenticated -> finishLogin(
-                profile = automaticResult.profile,
-                credentials = restoredCredentials,
-                persistCredentials = true,
-            )
-            is AutomaticLoginResult.ManualRequired -> {
-                captchaAnswer = ""
-                val challenge = automaticResult.challenge
-                if (challenge != null) {
-                    manualDialogAttempts = automaticResult.attempts
-                    manualDialogChallenge = challenge
-                    LoginState.AwaitingCaptcha(challenge)
-                } else {
-                    LoginState.Failed(automaticResult.reason, canRetry = true)
-                }
-            }
-            null -> LoginState.Failed(LoginFailure.NETWORK, canRetry = true)
-        }
-        automationMessage = null
     }
 
-    fun submit(challenge: CaptchaChallenge) {
+    fun submitManualCaptcha(challenge: CaptchaChallenge) {
         val credentials = Credentials(username.trim(), password)
         if (!credentials.isValid || captchaAnswer.isBlank()) {
-            state = LoginState.Failed(LoginFailure.INVALID_CREDENTIALS, canRetry = true)
+            manualDialogMessage = "请输入当前验证码答案。"
             return
         }
-        manualDialogChallenge = null
-        manualDialogAttempts = 0
+        manualDialogMessage = null
         state = LoginState.SubmittingCredentials
         scope.launch {
             state = try {
                 when (val result = protocol.value.authenticateMis(credentials, challenge, captchaAnswer.trim())) {
-                    is AuthenticationResult.Failed -> LoginState.Failed(result.reason, canRetry = true)
-                    is AuthenticationResult.Success -> finishLogin(
-                        profile = result.profile,
+                    is AuthenticationResult.Failed -> requestManualChallenge(
                         credentials = credentials,
                         persistCredentials = rememberCredentials,
+                        messageOnSuccess = when (result.reason) {
+                            LoginFailure.CAPTCHA_REJECTED ->
+                                "验证码未通过，已为你更换一张，请重新输入。"
+                            else -> loginFailureMessage(result.reason)
+                        },
                     )
+                    is AuthenticationResult.Success -> {
+                        manualDialogChallenge = null
+                        manualDialogAttempts = 0
+                        manualDialogMessage = null
+                        finishLogin(
+                            profile = result.profile,
+                            credentials = credentials,
+                            persistCredentials = rememberCredentials,
+                        )
+                    }
                 }
             } catch (_: Exception) {
-                LoginState.Failed(LoginFailure.NETWORK, canRetry = true)
+                requestManualChallenge(
+                    credentials = credentials,
+                    persistCredentials = rememberCredentials,
+                    messageOnSuccess = "网络连接失败，已为你更换一张验证码，请重试。",
+                )
             }
+        }
+    }
+
+    fun refreshManualChallenge() {
+        val credentials = Credentials(username.trim(), password)
+        if (!credentials.isValid) {
+            manualDialogMessage = "账号或密码已失效，请返回重新填写。"
+            return
+        }
+        manualDialogMessage = null
+        state = LoginState.CheckingSession
+        scope.launch {
+            state = requestManualChallenge(
+                credentials = credentials,
+                persistCredentials = rememberCredentials,
+            )
         }
     }
 
@@ -357,6 +395,7 @@ fun LoginRoute(
         automationMessage = null
         manualDialogChallenge = null
         manualDialogAttempts = 0
+        manualDialogMessage = null
         storageMessage = null
         state = reduceLoginState(state, LoginEvent.Logout)
         scope.launch {
@@ -507,7 +546,6 @@ fun LoginRoute(
             state = state,
             username = username,
             password = password,
-            captchaAnswer = captchaAnswer,
             canRememberCredentials = securityCoordinator.canStoreCredentials,
             rememberCredentials = rememberCredentials,
             storageReady = storageReady,
@@ -515,18 +553,12 @@ fun LoginRoute(
             automationMessage = automationMessage,
             onUsernameChange = { username = it },
             onPasswordChange = { password = it },
-            onCaptchaAnswerChange = { captchaAnswer = it },
             onRememberCredentialsChange = { enabled ->
                 // 只更新勾选状态；是否真正写入/清除系统安全存储由登录提交或退出登录时统一处理，
                 // 避免未签名平台上每次取消勾选都触发 Keychain 报错。
                 rememberCredentials = enabled
             },
-            onLoadChallenge = {
-                captchaAnswer = ""
-                loadChallenge()
-            },
-            onSubmit = { challenge -> submit(challenge) },
-            onLogout = { logout(username.trim()) },
+            onLogin = ::startAutomaticLogin,
         )
     }
 
@@ -534,44 +566,62 @@ fun LoginRoute(
     if (fallbackChallenge != null) {
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("需要手动输入验证码") },
+            title = { Text("请输入验证码") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "自动登录已尝试 ${manualDialogAttempts.coerceAtLeast(1)} 次。" +
-                            "请手动输入当前验证码答案，或重新填写账号和密码。",
+                        "自动登录已尝试 ${manualDialogAttempts.coerceAtLeast(1)} 次，仍未成功。" +
+                            "请根据图片输入本次验证码。",
                     )
+                    manualDialogMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                     CaptchaBlock(
                         challenge = fallbackChallenge,
-                        loading = false,
+                        loading = state is LoginState.CheckingSession,
                         answer = captchaAnswer,
-                        enabled = state !is LoginState.SubmittingCredentials,
-                        canSubmit = captchaAnswer.isNotBlank(),
+                        enabled = state !is LoginState.SubmittingCredentials &&
+                            state !is LoginState.CheckingSession,
                         onAnswerChange = { captchaAnswer = it },
-                        onRefresh = {
-                            captchaAnswer = ""
-                            loadChallenge(openManualDialog = true)
-                        },
-                        onSubmit = { submit(fallbackChallenge) },
+                        onRefresh = ::refreshManualChallenge,
+                        onSubmit = { submitManualCaptcha(fallbackChallenge) },
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    manualDialogChallenge = null
-                    manualDialogAttempts = 0
-                    if (protocol.isInitialized()) protocol.value.logout()
-                    username = ""
-                    password = ""
-                    captchaAnswer = ""
-                    rememberCredentials = securityCoordinator.canStoreCredentials
-                    state = LoginState.SignedOut
-                    scope.launch {
-                        securityCoordinator.clear()
-                        loadChallenge()
+                TextButton(
+                    onClick = { submitManualCaptcha(fallbackChallenge) },
+                    enabled = captchaAnswer.isNotBlank() &&
+                        state !is LoginState.SubmittingCredentials &&
+                        state !is LoginState.CheckingSession,
+                ) {
+                    Text(if (state is LoginState.SubmittingCredentials) "正在登录…" else "继续登录")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = state !is LoginState.SubmittingCredentials &&
+                        state !is LoginState.CheckingSession,
+                    onClick = {
+                        manualDialogChallenge = null
+                        manualDialogAttempts = 0
+                        manualDialogMessage = null
+                        if (protocol.isInitialized()) protocol.value.logout()
+                        username = ""
+                        password = ""
+                        captchaAnswer = ""
+                        rememberCredentials = securityCoordinator.canStoreCredentials
+                        state = LoginState.SignedOut
+                        scope.launch {
+                            securityCoordinator.clear()
+                        }
                     }
-                }) {
-                    Text("重新输入账号和密码")
+                ) {
+                    Text("修改账号和密码")
                 }
             },
         )
@@ -592,7 +642,6 @@ fun LoginScreen(
     state: LoginState,
     username: String,
     password: String,
-    captchaAnswer: String,
     canRememberCredentials: Boolean,
     rememberCredentials: Boolean,
     storageReady: Boolean,
@@ -600,25 +649,36 @@ fun LoginScreen(
     automationMessage: String?,
     onUsernameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
-    onCaptchaAnswerChange: (String) -> Unit,
     onRememberCredentialsChange: (Boolean) -> Unit,
-    onLoadChallenge: () -> Unit,
-    onSubmit: (CaptchaChallenge) -> Unit,
-    onLogout: () -> Unit,
+    onLogin: () -> Unit,
 ) {
     val scroll = rememberScrollState()
     val focusManager = LocalFocusManager.current
+    val busy = !storageReady ||
+        state is LoginState.CheckingSession ||
+        state is LoginState.SubmittingCredentials ||
+        state is LoginState.LinkingAcademicSystem
     val dismissKeyboardModifier = Modifier.pointerInput(Unit) {
         detectTapGestures {
             focusManager.clearFocus(force = true)
             dismissPlatformKeyboard()
         }
     }
+    LaunchedEffect(busy) {
+        if (busy) {
+            // 登录开始后不再保留输入阶段由键盘/BringIntoView 推动的滚动偏移。
+            // iOS 的原生 UITextField 位于 Compose 滚动层中；若加载态仍允许回弹，
+            // 上拉时会移动互操作层并短暂露出黑色合成底层，看起来像假键盘。
+            focusManager.clearFocus(force = true)
+            dismissPlatformKeyboard()
+            scroll.scrollTo(0)
+        }
+    }
     if (windowClass == WindowClass.Expanded) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .platformLoginKeyboardAvoidance()
+                .platformLoginKeyboardAvoidance(enabled = !busy)
                 .then(dismissKeyboardModifier)
                 .padding(32.dp),
             horizontalArrangement = Arrangement.spacedBy(28.dp),
@@ -630,7 +690,6 @@ fun LoginScreen(
                 state = state,
                 username = username,
                 password = password,
-                captchaAnswer = captchaAnswer,
                 canRememberCredentials = canRememberCredentials,
                 rememberCredentials = rememberCredentials,
                 storageReady = storageReady,
@@ -638,21 +697,21 @@ fun LoginScreen(
                 automationMessage = automationMessage,
                 onUsernameChange = onUsernameChange,
                 onPasswordChange = onPasswordChange,
-                onCaptchaAnswerChange = onCaptchaAnswerChange,
                 onRememberCredentialsChange = onRememberCredentialsChange,
-                onLoadChallenge = onLoadChallenge,
-                onSubmit = onSubmit,
-                onLogout = onLogout,
-                modifier = Modifier.weight(3f).heightIn(max = 760.dp).verticalScroll(scroll),
+                onLogin = onLogin,
+                modifier = Modifier
+                    .weight(3f)
+                    .heightIn(max = 760.dp)
+                    .verticalScroll(scroll, enabled = !busy),
             )
         }
     } else {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .platformLoginKeyboardAvoidance()
+                .platformLoginKeyboardAvoidance(enabled = !busy)
                 .then(dismissKeyboardModifier)
-                .verticalScroll(scroll)
+                .verticalScroll(scroll, enabled = !busy)
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.Center,
         ) {
@@ -663,7 +722,6 @@ fun LoginScreen(
                 state = state,
                 username = username,
                 password = password,
-                captchaAnswer = captchaAnswer,
                 canRememberCredentials = canRememberCredentials,
                 rememberCredentials = rememberCredentials,
                 storageReady = storageReady,
@@ -671,11 +729,8 @@ fun LoginScreen(
                 automationMessage = automationMessage,
                 onUsernameChange = onUsernameChange,
                 onPasswordChange = onPasswordChange,
-                onCaptchaAnswerChange = onCaptchaAnswerChange,
                 onRememberCredentialsChange = onRememberCredentialsChange,
-                onLoadChallenge = onLoadChallenge,
-                onSubmit = onSubmit,
-                onLogout = onLogout,
+                onLogin = onLogin,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -749,11 +804,11 @@ private fun PasswordVisibilityIcon(visible: Boolean, tint: Color) {
 }
 
 @Composable
-private fun LoginCard(    compact: Boolean,
+private fun LoginCard(
+    compact: Boolean,
     state: LoginState,
     username: String,
     password: String,
-    captchaAnswer: String,
     canRememberCredentials: Boolean,
     rememberCredentials: Boolean,
     storageReady: Boolean,
@@ -761,22 +816,15 @@ private fun LoginCard(    compact: Boolean,
     automationMessage: String?,
     onUsernameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
-    onCaptchaAnswerChange: (String) -> Unit,
     onRememberCredentialsChange: (Boolean) -> Unit,
-    onLoadChallenge: () -> Unit,
-    onSubmit: (CaptchaChallenge) -> Unit,
-    onLogout: () -> Unit,
+    onLogin: () -> Unit,
     modifier: Modifier,
 ) {
     val busy = !storageReady ||
         state is LoginState.CheckingSession ||
         state is LoginState.SubmittingCredentials ||
         state is LoginState.LinkingAcademicSystem
-    val challenge = (state as? LoginState.AwaitingCaptcha)?.challenge
-    val canSubmit = challenge != null &&
-        username.isNotBlank() &&
-        password.isNotBlank() &&
-        captchaAnswer.isNotBlank()
+    val canLogin = username.isNotBlank() && password.isNotBlank() && !busy
 
     Card(
         modifier = modifier,
@@ -789,7 +837,7 @@ private fun LoginCard(    compact: Boolean,
         ) {
             Text("登录", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "先填写账号密码，再获取当前验证码。验证码刷新后，旧答案会立即失效。",
+                "输入学号和密码，验证码将自动识别。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -815,10 +863,7 @@ private fun LoginCard(    compact: Boolean,
                 onPasswordChange = onPasswordChange,
                 onPasswordImeAction = {
                     dismissPlatformKeyboard()
-                    when {
-                        canSubmit -> onSubmit(checkNotNull(challenge))
-                        challenge == null && !busy -> onLoadChallenge()
-                    }
+                    if (canLogin) onLogin()
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -849,21 +894,17 @@ private fun LoginCard(    compact: Boolean,
                 }
             }
 
-            // 验证码区块常驻：打开应用即自动加载，账号密码+登录区高度因此固定不跳动。
-            CaptchaBlock(
-                challenge = challenge,
-                loading = state is LoginState.CheckingSession,
-                answer = captchaAnswer,
-                enabled = !busy,
-                canSubmit = canSubmit,
-                onAnswerChange = onCaptchaAnswerChange,
-                onRefresh = onLoadChallenge,
-                onSubmit = { challenge?.let(onSubmit) },
-            )
+            Button(
+                onClick = onLogin,
+                enabled = canLogin,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+            ) {
+                Text(if (busy) "正在登录…" else "登录")
+            }
 
             when (state) {
                 LoginState.CheckingSession -> Unit
-                LoginState.SubmittingCredentials -> ProgressRow("正在验证账号与验证码…")
+                LoginState.SubmittingCredentials -> Unit
                 is LoginState.LinkingAcademicSystem -> ProgressRow("MIS 已通过，正在连接教务系统…")
                 is LoginState.Failed -> ErrorMessage(state.reason)
                 is LoginState.SignedIn -> Unit
@@ -940,7 +981,6 @@ private fun CaptchaBlock(
     loading: Boolean,
     answer: String,
     enabled: Boolean,
-    canSubmit: Boolean,
     onAnswerChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onSubmit: () -> Unit,
@@ -969,16 +1009,16 @@ private fun CaptchaBlock(
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     when {
+                        loading -> CircularProgressIndicator(
+                            modifier = Modifier.width(22.dp).height(22.dp),
+                            strokeWidth = 2.dp,
+                        )
                         bitmap != null -> Image(
                             bitmap = bitmap,
                             contentDescription = "验证码图片",
                             modifier = Modifier.fillMaxSize().padding(4.dp),
                             // Fit 保留像素比例，避免 FillBounds 拉糊。
                             contentScale = ContentScale.Fit,
-                        )
-                        loading -> CircularProgressIndicator(
-                            modifier = Modifier.width(22.dp).height(22.dp),
-                            strokeWidth = 2.dp,
                         )
                         else -> Text("点击刷新获取", style = MaterialTheme.typography.labelMedium)
                     }
@@ -993,7 +1033,7 @@ private fun CaptchaBlock(
                 },
                 enabled = enabled,
             ) {
-                Text("刷新")
+                Text("换一张")
             }
         }
         Row(
@@ -1036,23 +1076,10 @@ private fun CaptchaBlock(
                     onGo = {
                         focusManager.clearFocus(force = true)
                         dismissPlatformKeyboard()
-                        when {
-                            canSubmit -> onSubmit()
-                            enabled && challenge == null -> onRefresh()
-                        }
+                        if (enabled && answer.isNotBlank()) onSubmit()
                     },
                 ),
             )
-            Button(
-                onClick = {
-                    focusManager.clearFocus(force = true)
-                    dismissPlatformKeyboard()
-                    onSubmit()
-                },
-                enabled = enabled && canSubmit,
-            ) {
-                Text("登录")
-            }
         }
     }
 }
@@ -1071,25 +1098,26 @@ private fun ProgressRow(message: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ErrorMessage(reason: LoginFailure) {
-    val message = when (reason) {
-        LoginFailure.INVALID_CREDENTIALS -> "请完整填写学号、密码和验证码答案。"
-        LoginFailure.CAPTCHA_REJECTED -> "登录未通过。请刷新验证码，并检查账号、密码和答案。"
-        LoginFailure.CAPTCHA_RECOGNITION_FAILED -> "验证码自动识别未通过，请手动输入当前验证码答案。"
-        LoginFailure.SESSION_EXPIRED -> "检测到旧会话，但缺少可恢复资料。请清除会话后重试。"
-        LoginFailure.MALFORMED_RESPONSE -> "学校页面结构已变化，暂时无法继续登录。"
-        LoginFailure.NETWORK -> "无法连接学校登录服务，请检查网络后重试。"
-        LoginFailure.ACADEMIC_LINK_FAILED -> "MIS 已登录，但教务系统连接失败。"
-    }
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(
-            message,
+            loginFailureMessage(reason),
             modifier = Modifier.padding(14.dp),
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodyMedium,
         )
     }
+}
+
+private fun loginFailureMessage(reason: LoginFailure): String = when (reason) {
+    LoginFailure.INVALID_CREDENTIALS -> "请完整填写学号和密码。"
+    LoginFailure.CAPTCHA_REJECTED -> "登录未通过，请手动输入当前验证码。"
+    LoginFailure.CAPTCHA_RECOGNITION_FAILED -> "验证码自动识别未通过，请手动输入当前验证码。"
+    LoginFailure.SESSION_EXPIRED -> "检测到旧会话，但缺少可恢复资料。请清除会话后重试。"
+    LoginFailure.MALFORMED_RESPONSE -> "学校页面结构已变化，暂时无法继续登录。"
+    LoginFailure.NETWORK -> "无法连接学校登录服务，请检查网络后重试。"
+    LoginFailure.ACADEMIC_LINK_FAILED -> "MIS 已登录，但教务系统连接失败。"
 }

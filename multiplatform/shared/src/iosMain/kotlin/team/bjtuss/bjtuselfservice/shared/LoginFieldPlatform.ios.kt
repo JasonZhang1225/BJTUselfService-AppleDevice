@@ -1,12 +1,13 @@
 package team.bjtuss.bjtuselfservice.shared
 
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.interop.UIKitView
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -85,7 +86,9 @@ actual fun PlatformCredentialFields(
     val latestPasswordImeAction = rememberUpdatedState(onPasswordImeAction)
     UIKitView(
         modifier = modifier.height(128.dp),
-        background = Color.Transparent,
+        // iOS 的原生互操作承载层会把完全透明像素合成为黑色；直接使用登录卡片的
+        // surface 色，避免两个 UITextField 之间及四周出现整块黑色矩形。
+        background = MaterialTheme.colorScheme.surface,
         accessibilityEnabled = true,
         factory = {
             NativeCredentialFieldsView(
@@ -107,6 +110,7 @@ private class NativeCredentialFieldsView(
     private val onPasswordChange: (String) -> Unit,
     private val onPasswordImeAction: () -> Unit,
 ) : UIView(frame = CGRectMake(0.0, 0.0, 0.0, 0.0)), UITextFieldDelegateProtocol {
+    private var fieldsEnabled = true
     private val usernameField = nativeTextField("学号").apply {
         textContentType = UITextContentTypeUsername
         // 数字键盘没有 Return；ASCII 键盘保留“下一项”，同时仍阻止中文输入法联想。
@@ -155,8 +159,22 @@ private class NativeCredentialFieldsView(
     fun updateValues(username: String, password: String, enabled: Boolean) {
         if (usernameField.text != username) usernameField.text = username
         if (passwordField.text != password) passwordField.text = password
+        if (fieldsEnabled && !enabled) {
+            // 自动登录开始时先完整结束当前原生输入会话，再禁用字段。仅发送全局
+            // resignFirstResponder 有时会漏掉 Password AutoFill 的 field editor，
+            // 留下一个没有按键、但仍占用键盘安全区的空白“假键盘”。
+            passwordField.resignFirstResponder()
+            usernameField.resignFirstResponder()
+            UIApplication.sharedApplication.sendAction(
+                action = NSSelectorFromString("resignFirstResponder"),
+                to = null,
+                from = null,
+                forEvent = null,
+            )
+        }
         usernameField.enabled = enabled
         passwordField.enabled = enabled
+        fieldsEnabled = enabled
     }
 
     override fun textFieldShouldReturn(textField: UITextField): Boolean {
@@ -234,7 +252,8 @@ actual fun dismissPlatformKeyboard() {
     )
 }
 
-actual fun Modifier.platformLoginKeyboardAvoidance(): Modifier = this
+actual fun Modifier.platformLoginKeyboardAvoidance(enabled: Boolean): Modifier =
+    if (enabled) imePadding() else this
 
 actual val showsPasswordVisibilityToggle: Boolean
     get() = false

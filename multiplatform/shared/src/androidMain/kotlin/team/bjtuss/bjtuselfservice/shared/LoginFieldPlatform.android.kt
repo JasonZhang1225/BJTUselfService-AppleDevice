@@ -50,7 +50,8 @@ actual fun PlatformCredentialFields(
 
 actual fun dismissPlatformKeyboard() = Unit
 
-actual fun Modifier.platformLoginKeyboardAvoidance(): Modifier = imePadding()
+actual fun Modifier.platformLoginKeyboardAvoidance(enabled: Boolean): Modifier =
+    if (enabled) imePadding() else this
 
 /** Android 用 Compose 遮罩，可提供显示/隐藏切换。 */
 actual val showsPasswordVisibilityToggle: Boolean
