@@ -8,6 +8,7 @@ kotlinxDatetime = "0.8.0"
 ktor = "3.5.1"
 ksoup = "0.2.6"
 jna = "5.17.0"
+navigation = "2.9.2"
 sqldelight = "2.3.2"
 pytorchAndroid = "2.1.0"
 kotlinxCoroutines = "1.10.2"
@@ -24,6 +25,7 @@ compose-ui-tooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.r
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "navigation" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }

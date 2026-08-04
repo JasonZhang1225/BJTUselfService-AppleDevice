@@ -50,6 +50,7 @@ kotlin {
             implementation(libs.compose.material3)
             implementation(libs.compose.ui)
             implementation(libs.compose.resources)
+            implementation(libs.navigation.compose)
             implementation(libs.kotlinx.datetime)
             implementation(libs.ksoup)
             implementation(libs.ktor.client.core)

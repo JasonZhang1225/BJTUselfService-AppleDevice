@@ -1,14 +1,13 @@
 package team.bjtuss.bjtuselfservice.shared
 
 import kotlin.test.Test
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SmartPlatformPolicyTest {
     @Test
-    fun enablesOnlyAppleLegacyTransport() {
+    fun enablesLegacyTransportOnAllPlatforms() {
         assertTrue(usesLegacySmartTransportFor(PlatformFamily.IOS))
         assertTrue(usesLegacySmartTransportFor(PlatformFamily.MacOS))
-        assertFalse(usesLegacySmartTransportFor(PlatformFamily.Android))
+        assertTrue(usesLegacySmartTransportFor(PlatformFamily.Android))
     }
 }

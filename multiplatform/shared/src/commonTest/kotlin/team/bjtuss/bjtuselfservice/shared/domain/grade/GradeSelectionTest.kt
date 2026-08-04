@@ -103,6 +103,55 @@ class GradeSelectionTest {
         )
     }
 
+    @Test
+    fun clearingCourseTypesRemovesRecordsByMappedType() {
+        val grades = listOf(
+            grade(1, name = "C312009B高级英语视听说[04]"),
+            grade(2, name = "S1100120A计算机导论[01]"),
+            grade(3, name = "P110011B体育Ⅰ[01]"),
+        )
+        val records = selectionRecordsForGradeIds(grades, setOf(1, 2, 3))
+        val typeByCode = mapOf(
+            "C312009B" to CourseType.REQUIRED,
+            "S1100120A" to CourseType.ELECTIVE,
+            "P110011B" to CourseType.PHYSICAL_EDUCATION,
+        )
+
+        assertEquals(
+            listOf("C312009B高级英语视听说[04]", "P110011B体育Ⅰ[01]"),
+            selectionRecordsExcludingTypes(records, typeByCode, setOf(CourseType.ELECTIVE))
+                .map { it.courseName },
+        )
+        assertEquals(
+            records,
+            selectionRecordsExcludingTypes(records, typeByCode, setOf(CourseType.LIMITED)),
+        )
+        assertEquals(
+            listOf("C312009B高级英语视听说[04]"),
+            selectionRecordsExcludingTypes(
+                records,
+                typeByCode,
+                setOf(CourseType.ELECTIVE, CourseType.PHYSICAL_EDUCATION),
+            ).map { it.courseName },
+        )
+    }
+
+    @Test
+    fun clearingCourseTypesUsesSameGreedyCodeFallbackAsGradeLookup() {
+        val grades = listOf(grade(1, name = "M202015BC语言程序设计[01]"))
+        val records = selectionRecordsForGradeIds(grades, setOf(1))
+        val typeByCode = mapOf("M202015B" to CourseType.REQUIRED)
+
+        assertTrue(
+            selectionRecordsExcludingTypes(records, typeByCode, setOf(CourseType.REQUIRED))
+                .isEmpty(),
+        )
+        assertEquals(
+            records,
+            selectionRecordsExcludingTypes(records, typeByCode, setOf(CourseType.ELECTIVE)),
+        )
+    }
+
     private fun grade(
         id: Int,
         semester: String = "2025-2026-1",

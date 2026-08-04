@@ -38,3 +38,6 @@ local.properties
 *.hmap
 *.ipa
 *.dSYM/
+
+# Local packaged app builds (APK/app/DMG); do not commit.
+/builtapps/

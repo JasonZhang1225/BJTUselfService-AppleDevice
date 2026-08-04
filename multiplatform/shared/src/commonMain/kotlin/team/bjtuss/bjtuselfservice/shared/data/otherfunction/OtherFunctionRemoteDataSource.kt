@@ -1,6 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.data.otherfunction
 
 import kotlinx.coroutines.CancellationException
+import io.ktor.http.decodeURLPart
 import io.ktor.http.encodeURLPath
 import team.bjtuss.bjtuselfservice.shared.domain.homework.HomeworkFileContent
 import team.bjtuss.bjtuselfservice.shared.domain.otherfunction.ReportCardLanguage
@@ -25,6 +26,7 @@ class OtherFunctionRemoteException(
 
 interface OtherFunctionRemoteDataSource {
     suspend fun fetchCalendarFile(): HomeworkFileContent
+    suspend fun fetchCalendarFileName(): String
     suspend fun fetchReportCardFile(language: ReportCardLanguage): HomeworkFileContent
 }
 
@@ -39,18 +41,7 @@ class SchoolOtherFunctionRemoteDataSource(
 ) : OtherFunctionRemoteDataSource {
 
     override suspend fun fetchCalendarFile(): HomeworkFileContent {
-        val pageResponse = execute(
-            SchoolHttpRequest(
-                method = SchoolHttpMethod.GET,
-                url = CALENDAR_PAGE_URL,
-                headers = mapOf("Accept" to "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"),
-            ),
-        )
-        if (pageResponse.statusCode !in 200..299) network()
-        val postfix = when (val parsed = parseSchoolCalendarPostfix(pageResponse.bodyText())) {
-            is CalendarUrlParseResult.Failure -> parse()
-            is CalendarUrlParseResult.Success -> parsed.postfix
-        }
+        val postfix = fetchCalendarPostfix()
         val calendarUrl = postfix.toAllowedCalendarUrl() ?: parse()
         val fileResponse = execute(
             SchoolHttpRequest(
@@ -67,6 +58,29 @@ class SchoolOtherFunctionRemoteDataSource(
             contentType = fileResponse.contentTypeOrDefault(),
             bytes = fileResponse.body,
         )
+    }
+
+    /**
+     * 只解析校历页上的最新文件路径并返回文件名（如 "2024-2025校历.pdf"），
+     * 供页面在下载前展示“当前最新”信息；不下载文件本体。
+     */
+    override suspend fun fetchCalendarFileName(): String =
+        fetchCalendarPostfix().substringAfterLast('/').decodeURLPart()
+
+    /** 请求校历页并解析出文件路径尾部；页面非 200 或解析失败按既有语义抛错。 */
+    private suspend fun fetchCalendarPostfix(): String {
+        val pageResponse = execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.GET,
+                url = CALENDAR_PAGE_URL,
+                headers = mapOf("Accept" to "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"),
+            ),
+        )
+        if (pageResponse.statusCode !in 200..299) network()
+        return when (val parsed = parseSchoolCalendarPostfix(pageResponse.bodyText())) {
+            is CalendarUrlParseResult.Failure -> parse()
+            is CalendarUrlParseResult.Success -> parsed.postfix
+        }
     }
 
     override suspend fun fetchReportCardFile(language: ReportCardLanguage): HomeworkFileContent {

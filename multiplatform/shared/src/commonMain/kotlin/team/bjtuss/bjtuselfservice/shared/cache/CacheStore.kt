@@ -1,6 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.cache
 
 import app.cash.sqldelight.db.SqlDriver
+import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
 import team.bjtuss.bjtuselfservice.shared.cache.db.CacheDatabaseSql
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
@@ -67,16 +68,35 @@ class CacheStore(
 
     /**
      * 成绩与自选记录属于同一个可见快照，必须在同一事务内替换。
+     * 课程性质映射来自培养方案页：方案抓取成功时随快照整体替换，
+     * 抓取失败（null）时保留上一次成功的旧映射不动。
      */
     fun replaceGradeSnapshot(
         accountScope: String,
         grades: List<Grade>,
         selections: List<GradeSelectionRecord>,
+        courseTypes: Map<String, String>? = null,
     ) {
         val scope = requireAccountScope(accountScope)
         queries.transaction {
             replaceGradesInTransaction(scope, grades)
             replaceGradeSelectionsInTransaction(scope, selections)
+            if (courseTypes != null) {
+                replaceProgramCourseTypesInTransaction(scope, courseTypes)
+            }
+        }
+    }
+
+    /** 课程号 → 课程性质中文原文（必修/限选/任选），枚举转换在 data 层完成。 */
+    fun programCourseTypes(accountScope: String): Map<String, String> =
+        queries.selectProgramCourseTypesByAccount(requireAccountScope(accountScope))
+            .executeAsList()
+            .associate { it.course_id to it.course_type }
+
+    fun replaceProgramCourseTypes(accountScope: String, courseTypes: Map<String, String>) {
+        val scope = requireAccountScope(accountScope)
+        queries.transaction {
+            replaceProgramCourseTypesInTransaction(scope, courseTypes)
         }
     }
 
@@ -234,6 +254,29 @@ class CacheStore(
         queries.putMetadata(requireAccountScope(accountScope), requireKey(key), value)
     }
 
+    /**
+     * 登录成功后缓存的最小档案快照：下次冷启动时，自动登录完成前先用它渲染主界面。
+     */
+    fun cachedProfile(accountScope: String): StudentProfile? {
+        val scope = requireAccountScope(accountScope)
+        val name = metadata(scope, PROFILE_NAME_KEY)?.takeIf(String::isNotBlank) ?: return null
+        return StudentProfile(
+            name = name,
+            studentId = scope,
+            identity = metadata(scope, PROFILE_IDENTITY_KEY).orEmpty(),
+            department = metadata(scope, PROFILE_DEPARTMENT_KEY).orEmpty(),
+        )
+    }
+
+    fun saveCachedProfile(profile: StudentProfile) {
+        val scope = requireAccountScope(profile.studentId)
+        queries.transaction {
+            queries.putMetadata(scope, PROFILE_NAME_KEY, profile.name)
+            queries.putMetadata(scope, PROFILE_IDENTITY_KEY, profile.identity)
+            queries.putMetadata(scope, PROFILE_DEPARTMENT_KEY, profile.department)
+        }
+    }
+
     fun setting(key: String): String? = queries.selectSetting(requireKey(key)).executeAsOneOrNull()
 
     fun putSetting(key: String, value: String) {
@@ -286,6 +329,7 @@ class CacheStore(
             queries.deleteExamsByAccount(scope)
             queries.deleteHomeworkByAccount(scope)
             queries.deleteGradeSelectionsByAccount(scope)
+            queries.deleteProgramCourseTypesByAccount(scope)
             queries.deleteMetadataByAccount(scope)
         }
     }
@@ -297,6 +341,7 @@ class CacheStore(
             queries.deleteAllExams()
             queries.deleteAllHomework()
             queries.deleteAllGradeSelections()
+            queries.deleteAllProgramCourseTypes()
             queries.deleteAllMetadata()
             queries.deleteAllSettings()
         }
@@ -338,6 +383,17 @@ class CacheStore(
                 record.lastKnownCredits,
                 record.occurrence.toLong(),
             )
+        }
+    }
+
+    private fun replaceProgramCourseTypesInTransaction(
+        scope: String,
+        courseTypes: Map<String, String>,
+    ) {
+        queries.deleteProgramCourseTypesByAccount(scope)
+        courseTypes.forEach { (courseId, courseType) ->
+            if (courseId.isBlank() || courseType.isBlank()) return@forEach
+            queries.insertProgramCourseType(scope, courseId, courseType)
         }
     }
 
@@ -402,6 +458,9 @@ private object SettingKey {
 }
 
 private const val COURSE_CURRENT_WEEK_KEY = "course_current_week"
+private const val PROFILE_NAME_KEY = "profile_name"
+private const val PROFILE_IDENTITY_KEY = "profile_identity"
+private const val PROFILE_DEPARTMENT_KEY = "profile_department"
 
 private fun requireAccountScope(value: String): String = value.trim().also {
     require(it.isNotEmpty()) { "accountScope 不能为空。" }

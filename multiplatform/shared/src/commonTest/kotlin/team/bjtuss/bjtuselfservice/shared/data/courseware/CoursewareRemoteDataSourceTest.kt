@@ -100,7 +100,7 @@ class CoursewareRemoteDataSourceTest {
         val remote = SchoolCoursewareRemoteDataSource(
             transport = transport,
             requestDelayMillis = 0,
-            endpoint = SmartPlatformEndpoint.AppleLegacyHttp,
+            endpoint = SmartPlatformEndpoint.LegacyHttp,
         )
 
         assertEquals("resource", remote.downloadResource(resource()).bytes.decodeToString())

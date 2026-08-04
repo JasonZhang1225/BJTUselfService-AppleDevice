@@ -8,10 +8,12 @@ import team.bjtuss.bjtuselfservice.shared.data.grade.GradeRepository
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
 import team.bjtuss.bjtuselfservice.shared.domain.change.recordSafely
+import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeInfoResult
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSortOrder
 import team.bjtuss.bjtuselfservice.shared.domain.grade.calculateGradeInfo
+import team.bjtuss.bjtuselfservice.shared.domain.grade.courseTypeOfGrade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.filterGradesBySemester
 import team.bjtuss.bjtuselfservice.shared.domain.grade.gradesForCalculation
 import team.bjtuss.bjtuselfservice.shared.domain.grade.sortGrades
@@ -25,6 +27,7 @@ data class GradeUiState(
     val grades: List<Grade> = emptyList(),
     val selectedGradeIds: Set<Int> = emptySet(),
     val selectedSemesters: Set<String> = emptySet(),
+    val courseTypesByCode: Map<String, CourseType> = emptyMap(),
     val sortOrder: GradeSortOrder = GradeSortOrder.ORIGINAL,
     val selectionMode: Boolean = false,
     val selectedGradeId: Int? = null,
@@ -51,6 +54,36 @@ data class GradeUiState(
 
     val selectedGrade: Grade?
         get() = grades.firstOrNull { it.id == selectedGradeId }
+
+    /** 映射查不到课程号的按未知处理，UI 不显示标签。 */
+    fun courseTypeOf(grade: Grade): CourseType = courseTypeOfGrade(grade, courseTypesByCode)
+
+    val courseTypeCounts: Map<CourseType, Int>
+        get() = grades.groupingBy { grade -> courseTypeOf(grade) }.eachCount()
+
+    /**
+     * 某性质课程在自选模式下的三态：全部选中 / 部分选中 / 未选中。
+     * UNKNOWN（其他类别）同样参与，避免“勾了未知课程却没有入口取消”的误导。
+     */
+    fun selectionStateForType(type: CourseType): CourseTypeSelectionState {
+        val ofType = grades.filter { courseTypeOf(it) == type }
+        if (ofType.isEmpty()) return CourseTypeSelectionState.NONE
+        val selected = ofType.count { it.id in selectedGradeIds }
+        return when {
+            selected == 0 -> CourseTypeSelectionState.NONE
+            selected == ofType.size -> CourseTypeSelectionState.ALL
+            else -> CourseTypeSelectionState.PARTIAL
+        }
+    }
+
+    fun allSelectedForType(type: CourseType): Boolean =
+        selectionStateForType(type) == CourseTypeSelectionState.ALL
+}
+
+enum class CourseTypeSelectionState {
+    ALL,
+    PARTIAL,
+    NONE,
 }
 
 class GradeScreenModel(
@@ -71,6 +104,7 @@ class GradeScreenModel(
             mutableState.value = mutableState.value.copy(
                 grades = cached.grades,
                 selectedGradeIds = cached.selectedGradeIds,
+                courseTypesByCode = cached.courseTypesByCode,
                 isLoading = cached.grades.isEmpty(),
                 source = if (cached.grades.isEmpty()) null else GradeContentSource.CACHE,
                 failure = null,
@@ -104,6 +138,7 @@ class GradeScreenModel(
                     applySnapshot(
                         grades = result.snapshot.grades,
                         selectedIds = result.snapshot.selectedGradeIds,
+                        courseTypesByCode = result.snapshot.courseTypesByCode,
                         source = GradeContentSource.NETWORK,
                         failure = null,
                     )
@@ -111,6 +146,7 @@ class GradeScreenModel(
                 is GradeRefreshResult.Failure -> applySnapshot(
                     grades = result.snapshot.grades,
                     selectedIds = result.snapshot.selectedGradeIds,
+                    courseTypesByCode = result.snapshot.courseTypesByCode,
                     source = if (result.snapshot.grades.isEmpty()) null else GradeContentSource.CACHE,
                     failure = result.reason,
                 )
@@ -180,6 +216,35 @@ class GradeScreenModel(
         )
     }
 
+    fun selectAllByType(type: CourseType) {
+        val current = mutableState.value
+        val idsOfType = current.grades
+            .filter { current.courseTypeOf(it) == type }
+            .map(Grade::id)
+        if (idsOfType.isEmpty()) return
+        persistSelection(
+            grades = current.grades,
+            selectedIds = current.selectedGradeIds + idsOfType,
+        )
+    }
+
+    fun deselectByType(type: CourseType) {
+        val current = mutableState.value
+        if (current.courseTypeCounts[type] == null) return
+        runCatching {
+            repository.clearSelectedCourseTypes(setOf(type))
+        }.onSuccess { snapshot ->
+            mutableState.value = current.copy(
+                grades = snapshot.grades,
+                selectedGradeIds = snapshot.selectedGradeIds,
+                courseTypesByCode = snapshot.courseTypesByCode,
+                failure = null,
+            )
+        }.onFailure {
+            mutableState.value = current.copy(failure = GradeSyncFailure.CACHE)
+        }
+    }
+
     fun clearSelectedSemesters() {
         val current = mutableState.value
         if (current.selectedSemesters.isEmpty()) return
@@ -189,6 +254,7 @@ class GradeScreenModel(
             mutableState.value = current.copy(
                 grades = snapshot.grades,
                 selectedGradeIds = snapshot.selectedGradeIds,
+                courseTypesByCode = snapshot.courseTypesByCode,
                 failure = null,
             )
         }.onFailure {
@@ -202,6 +268,7 @@ class GradeScreenModel(
             mutableState.value = current.copy(
                 grades = snapshot.grades,
                 selectedGradeIds = snapshot.selectedGradeIds,
+                courseTypesByCode = snapshot.courseTypesByCode,
                 selectedSemesters = emptySet(),
                 sortOrder = GradeSortOrder.ORIGINAL,
                 failure = null,
@@ -231,6 +298,7 @@ class GradeScreenModel(
             mutableState.value = current.copy(
                 grades = snapshot.grades,
                 selectedGradeIds = snapshot.selectedGradeIds,
+                courseTypesByCode = snapshot.courseTypesByCode,
                 failure = null,
             )
         }.onFailure {
@@ -241,6 +309,7 @@ class GradeScreenModel(
     private fun applySnapshot(
         grades: List<Grade>,
         selectedIds: Set<Int>,
+        courseTypesByCode: Map<String, CourseType>,
         source: GradeContentSource?,
         failure: GradeSyncFailure?,
     ) {
@@ -249,6 +318,7 @@ class GradeScreenModel(
         mutableState.value = current.copy(
             grades = grades,
             selectedGradeIds = selectedIds,
+            courseTypesByCode = courseTypesByCode,
             selectedSemesters = current.selectedSemesters intersect semesters,
             selectedGradeId = current.selectedGradeId?.takeIf { id -> grades.any { it.id == id } },
             isLoading = false,

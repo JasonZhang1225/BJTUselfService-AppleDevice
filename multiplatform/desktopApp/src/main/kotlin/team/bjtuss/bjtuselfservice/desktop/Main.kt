@@ -108,7 +108,6 @@ fun main(args: Array<String>) {
                             Separator()
                             Item("作业", onClick = { appCommandBus.send(AppCommand.NAVIGATE_HOMEWORK) }, enabled = shellReady)
                             Item("课件", onClick = { appCommandBus.send(AppCommand.NAVIGATE_COURSEWARE) }, enabled = shellReady)
-                            Item("其他功能", onClick = { appCommandBus.send(AppCommand.NAVIGATE_OTHERS) }, enabled = shellReady)
                             Item("教室", onClick = { appCommandBus.send(AppCommand.NAVIGATE_CLASSROOMS) }, enabled = shellReady)
                             Item("邮箱", onClick = { appCommandBus.send(AppCommand.NAVIGATE_MAILBOX) }, enabled = shellReady)
                             Separator()

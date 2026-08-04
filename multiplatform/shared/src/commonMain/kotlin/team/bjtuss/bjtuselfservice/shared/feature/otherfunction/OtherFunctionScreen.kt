@@ -1,32 +1,34 @@
 package team.bjtuss.bjtuselfservice.shared.feature.otherfunction
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -37,11 +39,11 @@ import team.bjtuss.bjtuselfservice.shared.domain.otherfunction.OtherFunctionTask
 import team.bjtuss.bjtuselfservice.shared.domain.otherfunction.ReportCardLanguage
 
 /**
- * 其他功能：校历下载 + 成绩单下载。
- * 两个任务互不阻塞；保存取消不会显示为红色失败。
+ * 校历下载：独立页面，点进后才出现下载按钮。
+ * 保存取消不会显示为红色失败。
  */
 @Composable
-fun OtherFunctionWorkspace(
+fun CalendarDownloadWorkspace(
     model: OtherFunctionScreenModel,
     expanded: Boolean,
     modifier: Modifier = Modifier,
@@ -49,6 +51,83 @@ fun OtherFunctionWorkspace(
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
 
+    // 进入页面即拉取最新校历文件名展示；失败静默，下载按钮不受影响。
+    LaunchedEffect(Unit) {
+        model.refreshCalendarFileName()
+    }
+
+    DownloadPageScaffold(
+        title = "校历下载",
+        subtitle = "查看并下载学校最新的校历信息",
+        expanded = expanded,
+        modifier = modifier,
+    ) {
+        OtherFunctionCard(
+            title = "校历下载",
+            description = "查看并下载学校最新的校历信息",
+            actionLabel = "下载",
+            taskState = state.calendarState,
+            enabled = !state.isAnyTaskRunning,
+            onAction = { scope.launch { model.downloadCalendar() } },
+            onDismiss = { model.clearTaskState(OtherFunctionTask.CALENDAR) },
+            infoText = when {
+                state.calendarFileNameLoading && state.calendarFileName == null -> "正在获取最新校历…"
+                state.calendarFileName != null -> "当前最新：${state.calendarFileName}"
+                else -> null
+            },
+        )
+    }
+}
+
+/**
+ * 成绩单下载：独立页面，支持中英文版本切换。
+ */
+@Composable
+fun ReportCardDownloadWorkspace(
+    model: OtherFunctionScreenModel,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val state by model.state.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    DownloadPageScaffold(
+        title = "成绩单下载",
+        subtitle = "下载个人学习成绩单，支持中英文版本",
+        expanded = expanded,
+        modifier = modifier,
+    ) {
+        OtherFunctionCard(
+            title = "成绩单下载",
+            description = "下载个人学习成绩单，支持中英文版本",
+            actionLabel = "下载",
+            taskState = state.reportCardState,
+            enabled = !state.isAnyTaskRunning,
+            onAction = { scope.launch { model.downloadReportCard() } },
+            onDismiss = { model.clearTaskState(OtherFunctionTask.REPORT_CARD) },
+            extraContent = {
+                // 中文版/英文版二选一分段按钮：选中的一段填充主题色，不要开关。
+                ReportCardLanguageSelector(
+                    english = state.reportCardLanguage == ReportCardLanguage.ENGLISH,
+                    onSelect = { english ->
+                        model.setReportCardLanguage(
+                            if (english) ReportCardLanguage.ENGLISH else ReportCardLanguage.CHINESE,
+                        )
+                    },
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun DownloadPageScaffold(
+    title: String,
+    subtitle: String,
+    expanded: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
     Column(
         modifier = if (expanded) {
             modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -59,64 +138,67 @@ fun OtherFunctionWorkspace(
     ) {
         if (expanded) {
             Text(
-                "其他功能",
+                title,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "下载学校最新校历与中英文成绩单",
+                subtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        content()
+    }
+}
 
-        OtherFunctionCard(
-            title = "校历下载",
-            description = "查看并下载学校最新的校历信息",
-            actionLabel = "下载",
-            taskState = state.calendarState,
-            enabled = !state.isAnyTaskRunning,
-            onAction = { scope.launch { model.downloadCalendar() } },
-            onDismiss = { model.clearTaskState(OtherFunctionTask.CALENDAR) },
+@Composable
+private fun ReportCardLanguageSelector(english: Boolean, onSelect: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        LanguageSegment(
+            label = "中文版",
+            selected = !english,
+            onClick = { onSelect(false) },
+            modifier = Modifier.weight(1f),
         )
+        LanguageSegment(
+            label = "英文版",
+            selected = english,
+            onClick = { onSelect(true) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
 
-        OtherFunctionCard(
-            title = "成绩单下载",
-            description = "下载个人学习成绩单，支持中英文版本",
-            actionLabel = "下载",
-            taskState = state.reportCardState,
-            enabled = !state.isAnyTaskRunning,
-            onAction = { scope.launch { model.downloadReportCard() } },
-            onDismiss = { model.clearTaskState(OtherFunctionTask.REPORT_CARD) },
-            extraContent = {
-                val english = state.reportCardLanguage == ReportCardLanguage.ENGLISH
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .toggleable(
-                            value = english,
-                            role = Role.Switch,
-                            onValueChange = { checked ->
-                                model.setReportCardLanguage(
-                                    if (checked) ReportCardLanguage.ENGLISH else ReportCardLanguage.CHINESE,
-                                )
-                            },
-                        )
-                        .semantics(mergeDescendants = true) {}
-                        .padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (english) "英文版" else "中文版",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Switch(
-                        checked = english,
-                        onCheckedChange = null,
-                    )
-                }
+@Composable
+private fun LanguageSegment(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
             },
         )
     }
@@ -131,6 +213,7 @@ private fun OtherFunctionCard(
     enabled: Boolean,
     onAction: () -> Unit,
     onDismiss: () -> Unit,
+    infoText: String? = null,
     extraContent: @Composable (() -> Unit)? = null,
 ) {
     Card(
@@ -156,6 +239,14 @@ private fun OtherFunctionCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            infoText?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
 
             extraContent?.invoke()
 
@@ -197,20 +288,12 @@ private fun TaskStatusRow(
         OtherFunctionTaskState.SaveCancelled,
         -> Unit
         OtherFunctionTaskState.Downloading -> {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-                Text(
-                    "正在下载…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            // 转圈只在下载按钮内保留，这里只显示状态文字。
+            Text(
+                "正在下载…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         is OtherFunctionTaskState.Saved -> {
             Row(

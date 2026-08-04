@@ -3,6 +3,7 @@ package team.bjtuss.bjtuselfservice.shared.feature.home
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -77,6 +78,8 @@ fun HomeWorkspace(
     onClearAllChanges: () -> Unit,
     onClearChangeDomain: (HomeChangeDomain) -> Unit,
     onOpenChangeDomain: (HomeChangeDomain) -> Unit,
+    // 静默自动登录期间为 true：会话未就绪，初始化（含网络刷新）延后到登录完成。
+    holdNetwork: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val state by model.state.collectAsState()
@@ -85,7 +88,7 @@ fun HomeWorkspace(
     var dialog by remember { mutableStateOf<HomeDialog?>(null) }
     var selectedChangeDomain by remember { mutableStateOf<HomeChangeDomain?>(null) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(model) { model.initialize() }
+    LaunchedEffect(model, holdNetwork) { if (!holdNetwork) model.initialize() }
 
     when (dialog) {
         HomeDialog.CampusCard -> AlertDialog(
@@ -178,11 +181,6 @@ fun HomeWorkspace(
                     Text(if (isRefreshing) "同步中" else "刷新")
                 }
             }
-        } else {
-            Text(
-                "邮件与校园账户状态来自当前 MIS 会话",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
         if (isRefreshing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         state.failure?.let { failure ->
@@ -201,22 +199,37 @@ fun HomeWorkspace(
                 CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.weight(1f))
                 NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.weight(1f))
             }
+            HomeAgendaSection(
+                homework = homework,
+                exams = exams,
+                currentWeek = currentWeek,
+                now = now,
+                timeZone = timeZone,
+                isLoading = isAgendaLoading,
+                expanded = expanded,
+                onOpenHomework = onOpenHomework,
+                onOpenExams = onOpenExams,
+            )
         } else {
+            // 紧凑页：本周日程放第一栏，新邮件保持原尺寸，两张余额卡半宽并列，
+            // 尽量不用滚动就能看全（2026-08-04 真机反馈）。
+            HomeAgendaSection(
+                homework = homework,
+                exams = exams,
+                currentWeek = currentWeek,
+                now = now,
+                timeZone = timeZone,
+                isLoading = isAgendaLoading,
+                expanded = expanded,
+                onOpenHomework = onOpenHomework,
+                onOpenExams = onOpenExams,
+            )
             MailCard(status, onOpenMailbox, Modifier.fillMaxWidth())
-            CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.fillMaxWidth())
-            NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.weight(1f))
+                NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.weight(1f))
+            }
         }
-        HomeAgendaSection(
-            homework = homework,
-            exams = exams,
-            currentWeek = currentWeek,
-            now = now,
-            timeZone = timeZone,
-            isLoading = isAgendaLoading,
-            expanded = expanded,
-            onOpenHomework = onOpenHomework,
-            onOpenExams = onOpenExams,
-        )
         HomeChangeFeedSection(
             changes = changes,
             onSelectDomain = { selectedChangeDomain = it },
@@ -348,7 +361,12 @@ private fun StatusCard(
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) { Text(action) }
+            // 半宽卡片里按钮默认的水平内边距会挤压中文标签导致换行，收紧一些。
+            OutlinedButton(
+                onClick = onClick,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text(action, maxLines = 1) }
         }
     }
 }

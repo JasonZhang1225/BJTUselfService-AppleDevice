@@ -43,6 +43,15 @@ fun selectionRecordsExcludingSemesters(
     semesters: Set<String>,
 ): List<GradeSelectionRecord> = records.filterNot { it.semester in semesters }
 
+/** 把指定课程性质的已选记录剔除，映射查不到的课程（UNKNOWN）可以一并排除。 */
+fun selectionRecordsExcludingTypes(
+    records: List<GradeSelectionRecord>,
+    typeByCode: Map<String, CourseType>,
+    excludedTypes: Set<CourseType>,
+): List<GradeSelectionRecord> = records.filterNot { record ->
+    courseTypeForCourseName(record.courseName, typeByCode) in excludedTypes
+}
+
 /** 比较时忽略本地数据库生成的 ID，保持 Android v1.7.0 的同步判定。 */
 fun gradeDataNeedsSync(
     networkGrades: List<Grade>,

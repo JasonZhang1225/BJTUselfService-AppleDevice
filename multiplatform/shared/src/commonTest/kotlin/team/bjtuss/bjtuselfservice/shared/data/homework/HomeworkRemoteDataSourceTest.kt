@@ -71,7 +71,7 @@ class HomeworkRemoteDataSourceTest {
         val remote = SchoolHomeworkRemoteDataSource(
             transport = transport,
             requestDelayMillis = 0,
-            endpoint = SmartPlatformEndpoint.AppleLegacyHttp,
+            endpoint = SmartPlatformEndpoint.LegacyHttp,
         )
 
         assertEquals(3, remote.fetchHomework().size)
