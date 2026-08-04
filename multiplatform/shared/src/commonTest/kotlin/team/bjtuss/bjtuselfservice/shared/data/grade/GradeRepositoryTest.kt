@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSelectionRecord
 import team.bjtuss.bjtuselfservice.shared.domain.grade.selectionRecordsForGradeIds
@@ -21,6 +22,7 @@ class GradeRepositoryTest {
             accountScope = "student-a",
             local = local,
             remote = FakeRemote(listOf(grade(id = 0, score = "A,95"))),
+            programRemote = FakeProgramRemote(),
         )
 
         val result = assertIs<GradeRefreshResult.Success>(repository.refresh())
@@ -39,6 +41,7 @@ class GradeRepositoryTest {
             accountScope = "student-a",
             local = local,
             remote = FakeRemote(error = GradeRemoteException(GradeRemoteFailure.NETWORK)),
+            programRemote = FakeProgramRemote(),
         )
 
         val result = assertIs<GradeRefreshResult.Failure>(repository.refresh())
@@ -61,6 +64,7 @@ class GradeRepositoryTest {
             accountScope = "student-a",
             local = local,
             remote = FakeRemote(listOf(grade(id = 0, name = "远端新数据"))),
+            programRemote = FakeProgramRemote(),
         )
 
         val result = assertIs<GradeRefreshResult.Failure>(repository.refresh())
@@ -70,6 +74,43 @@ class GradeRepositoryTest {
         assertEquals(setOf(42), result.snapshot.selectedGradeIds)
         assertEquals(listOf(cached), local.storedGrades)
         assertEquals(selected, local.storedSelections)
+    }
+
+    @Test
+    fun programSuccessStoresMappingAndSnapshotCarriesIt() = runBlocking {
+        val local = FakeLocal()
+        val repository = DefaultGradeRepository(
+            accountScope = "student-a",
+            local = local,
+            remote = FakeRemote(listOf(grade(id = 0, name = "C312009B高级英语视听说[04]"))),
+            programRemote = FakeProgramRemote(mapOf("C312009B" to CourseType.ELECTIVE)),
+        )
+
+        val result = assertIs<GradeRefreshResult.Success>(repository.refresh())
+
+        assertEquals(mapOf("C312009B" to CourseType.ELECTIVE), result.snapshot.courseTypesByCode)
+        assertEquals(mapOf("C312009B" to CourseType.ELECTIVE), local.storedCourseTypes)
+        assertEquals(mapOf("C312009B" to CourseType.ELECTIVE), repository.load().courseTypesByCode)
+    }
+
+    @Test
+    fun programFailureStillReplacesGradesAndKeepsPreviousMapping() = runBlocking {
+        val local = FakeLocal(storedCourseTypes = mapOf("C312009B" to CourseType.REQUIRED))
+        val repository = DefaultGradeRepository(
+            accountScope = "student-a",
+            local = local,
+            remote = FakeRemote(listOf(grade(id = 0, name = "远端新数据"))),
+            programRemote = FakeProgramRemote(
+                error = GradeRemoteException(GradeRemoteFailure.SESSION_EXPIRED),
+            ),
+        )
+
+        val result = assertIs<GradeRefreshResult.Success>(repository.refresh())
+
+        assertEquals(listOf("远端新数据"), result.snapshot.grades.map(Grade::courseName))
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), local.storedCourseTypes)
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), result.snapshot.courseTypesByCode)
+        assertEquals(null, local.lastReplacedCourseTypes)
     }
 
     @Test
@@ -93,6 +134,7 @@ class GradeRepositoryTest {
             accountScope = "student-a",
             local = local,
             remote = FakeRemote(emptyList()),
+            programRemote = FakeProgramRemote(),
         )
 
         val selected = repository.persistSelected(listOf(first, second), setOf(1, 2))
@@ -107,6 +149,32 @@ class GradeRepositoryTest {
         assertTrue(local.storedSelections.isEmpty())
     }
 
+    @Test
+    fun clearingCourseTypesRemovesMatchingRecordsAndKeepsOthers() {
+        val required = grade(id = 1, name = "C312009B高级英语视听说[04]")
+        val elective = grade(id = 2, name = "S1100120A计算机导论[01]")
+        val local = FakeLocal(
+            storedGrades = listOf(required, elective),
+            storedSelections = selectionRecordsForGradeIds(listOf(required, elective), setOf(1, 2)),
+            storedCourseTypes = mapOf(
+                "C312009B" to CourseType.REQUIRED,
+                "S1100120A" to CourseType.ELECTIVE,
+            ),
+        )
+        val repository = DefaultGradeRepository(
+            accountScope = "student-a",
+            local = local,
+            remote = FakeRemote(emptyList()),
+            programRemote = FakeProgramRemote(),
+        )
+
+        val cleared = repository.clearSelectedCourseTypes(setOf(CourseType.ELECTIVE))
+
+        assertEquals(setOf(1), cleared.selectedGradeIds)
+        assertTrue(local.storedSelections.none { it.courseName.startsWith("S1100120A") })
+        assertTrue(local.storedSelections.any { it.courseName.startsWith("C312009B") })
+    }
+
     private class FakeRemote(
         private val grades: List<Grade> = emptyList(),
         private val error: Exception? = null,
@@ -117,26 +185,43 @@ class GradeRepositoryTest {
         }
     }
 
+    private class FakeProgramRemote(
+        private val courseTypes: Map<String, CourseType> = emptyMap(),
+        private val error: Exception? = null,
+    ) : TrainingProgramRemoteDataSource {
+        override suspend fun fetchCourseTypes(): Map<String, CourseType> {
+            error?.let { throw it }
+            return courseTypes
+        }
+    }
+
     private class FakeLocal(
         var storedGrades: List<Grade> = emptyList(),
         var storedSelections: List<GradeSelectionRecord> = emptyList(),
+        var storedCourseTypes: Map<String, CourseType> = emptyMap(),
         private val failSnapshotReplace: Boolean = false,
     ) : GradeLocalDataSource {
         val replacedSnapshotAccounts = mutableListOf<String>()
+        var lastReplacedCourseTypes: Map<String, CourseType>? = emptyMap()
 
         override fun grades(accountScope: String): List<Grade> = storedGrades
 
         override fun selections(accountScope: String): List<GradeSelectionRecord> = storedSelections
 
+        override fun courseTypes(accountScope: String): Map<String, CourseType> = storedCourseTypes
+
         override fun replaceSnapshot(
             accountScope: String,
             grades: List<Grade>,
             records: List<GradeSelectionRecord>,
+            courseTypes: Map<String, CourseType>?,
         ) {
             if (failSnapshotReplace) error("synthetic snapshot failure")
             replacedSnapshotAccounts += accountScope
+            lastReplacedCourseTypes = courseTypes
             storedGrades = grades.mapIndexed { index, grade -> grade.copy(id = 100 + index) }
             storedSelections = records
+            courseTypes?.let { storedCourseTypes = it }
         }
 
         override fun replaceSelections(

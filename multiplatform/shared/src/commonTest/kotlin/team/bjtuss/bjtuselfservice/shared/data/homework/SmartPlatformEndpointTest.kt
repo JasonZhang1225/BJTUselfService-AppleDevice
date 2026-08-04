@@ -18,7 +18,7 @@ class SmartPlatformEndpointTest {
 
     @Test
     fun legacyEndpointAllowsOnlyExactApiOriginAndVePath() {
-        val endpoint = SmartPlatformEndpoint.AppleLegacyHttp
+        val endpoint = SmartPlatformEndpoint.LegacyHttp
 
         assertTrue(endpoint.acceptsApiUrl("http://123.121.147.7:88/ve/back/course.shtml"))
         assertFalse(endpoint.acceptsApiUrl("http://123.121.147.7/ve/back/course.shtml"))
@@ -30,7 +30,7 @@ class SmartPlatformEndpointTest {
 
     @Test
     fun legacyCalendarIsRebuiltAtFixedOriginFromFiveSafeSegments() {
-        val endpoint = SmartPlatformEndpoint.AppleLegacyHttp
+        val endpoint = SmartPlatformEndpoint.LegacyHttp
 
         val resolved = endpoint.resolveTeachingCalendarUrl(
             "https://untrusted.example/root/2026/term/course/teacher/calendar.pdf?token=ignored",
@@ -53,7 +53,7 @@ class SmartPlatformEndpointTest {
 
     @Test
     fun legacyRedirectTargetOnlyFollowsWhitelistedCleartextApi() {
-        val endpoint = SmartPlatformEndpoint.AppleLegacyHttp
+        val endpoint = SmartPlatformEndpoint.LegacyHttp
 
         // 裸 302 指向明文第三方登录入口（/oauth/，非 /ve/）：握手阶段放行
         assertEquals(

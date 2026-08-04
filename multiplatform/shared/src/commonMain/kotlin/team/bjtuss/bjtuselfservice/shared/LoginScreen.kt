@@ -78,6 +78,7 @@ import team.bjtuss.bjtuselfservice.shared.auth.LoginEvent
 import team.bjtuss.bjtuselfservice.shared.auth.LoginFailure
 import team.bjtuss.bjtuselfservice.shared.auth.LoginState
 import team.bjtuss.bjtuselfservice.shared.auth.SchoolLoginProtocol
+import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
 import team.bjtuss.bjtuselfservice.shared.auth.reduceLoginState
 import team.bjtuss.bjtuselfservice.shared.cache.CacheOpenState
 import team.bjtuss.bjtuselfservice.shared.cache.AppPreferences
@@ -85,6 +86,7 @@ import team.bjtuss.bjtuselfservice.shared.cache.CacheStoreHandle
 import team.bjtuss.bjtuselfservice.shared.data.grade.CacheStoreGradeLocalDataSource
 import team.bjtuss.bjtuselfservice.shared.data.grade.DefaultGradeRepository
 import team.bjtuss.bjtuselfservice.shared.data.grade.SchoolGradeRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.data.grade.SchoolTrainingProgramRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.course.CacheStoreCourseScheduleLocalDataSource
 import team.bjtuss.bjtuselfservice.shared.data.course.DefaultCourseScheduleRepository
 import team.bjtuss.bjtuselfservice.shared.data.course.SchoolCourseScheduleRemoteDataSource
@@ -166,10 +168,14 @@ fun LoginRoute(
     var manualDialogChallenge by remember { mutableStateOf<CaptchaChallenge?>(null) }
     var manualDialogAttempts by remember { mutableStateOf(0) }
     var manualDialogMessage by remember { mutableStateOf<String?>(null) }
+    // 静默入场状态：账号之前登录过时，自动登录期间直接用缓存档案渲染主界面。
+    var autoEntryProfile by remember { mutableStateOf<StudentProfile?>(null) }
+    var silentAutoLogin by remember { mutableStateOf(false) }
+    var autoLoginFailureAttempts by remember { mutableStateOf<Int?>(null) }
     val cacheStore = cacheStoreHandle.store
 
     suspend fun finishLogin(
-        profile: team.bjtuss.bjtuselfservice.shared.auth.StudentProfile,
+        profile: StudentProfile,
         credentials: Credentials,
         persistCredentials: Boolean,
     ): LoginState {
@@ -181,6 +187,8 @@ fun LoginRoute(
         val cacheReady = runCatching {
             cacheStore.claimLegacyAccountData(profile.studentId)
         }.isSuccess
+        // 缓存档案快照：下次冷启动在自动登录完成前先用它渲染主界面。
+        runCatching { cacheStore.saveCachedProfile(profile) }
         val stored = if (credentials.isValid) {
             securityCoordinator.persistAfterLogin(
                 credentials = credentials,
@@ -264,22 +272,43 @@ fun LoginRoute(
                 persistCredentials = persistCredentials,
             )
             is AutomaticLoginResult.ManualRequired -> {
-                manualDialogAttempts = automaticResult.attempts
-                // 自动提交过的 challenge 可能已失效；进入手动恢复前始终再取一张新图。
-                // 只有“尚未提交、仅识别失败”的 challenge 可在刷新网络失败时临时保底。
-                manualDialogChallenge = automaticResult.challenge.takeIf {
-                    automaticResult.reason == LoginFailure.CAPTCHA_RECOGNITION_FAILED
+                if (silentAutoLogin) {
+                    // 静默入场时不打断主界面；改弹引导弹窗，由用户确认后回登录页。
+                    autoLoginFailureAttempts = automaticResult.attempts
+                    LoginState.SignedOut
+                } else {
+                    manualDialogAttempts = automaticResult.attempts
+                    // 自动提交过的 challenge 可能已失效；进入手动恢复前始终再取一张新图。
+                    // 只有“尚未提交、仅识别失败”的 challenge 可在刷新网络失败时临时保底。
+                    manualDialogChallenge = automaticResult.challenge.takeIf {
+                        automaticResult.reason == LoginFailure.CAPTCHA_RECOGNITION_FAILED
+                    }
+                    requestManualChallenge(
+                        credentials = credentials,
+                        persistCredentials = persistCredentials,
+                    )
                 }
-                requestManualChallenge(
-                    credentials = credentials,
-                    persistCredentials = persistCredentials,
-                )
             }
-            null -> LoginState.Failed(LoginFailure.NETWORK, canRetry = true)
+            null -> if (silentAutoLogin) {
+                autoLoginFailureAttempts = 0
+                LoginState.SignedOut
+            } else {
+                LoginState.Failed(LoginFailure.NETWORK, canRetry = true)
+            }
+        }
+        // 静默入场时主界面可见：若用户在登录途中已退出，保留退出状态，不要用登录结果覆盖。
+        val appliedState = if (state is LoginState.SignedOut && nextState !is LoginState.SignedOut) {
+            LoginState.SignedOut
+        } else {
+            nextState
+        }
+        if (appliedState is LoginState.SignedIn) {
+            silentAutoLogin = false
+            autoEntryProfile = null
         }
         automationMessage = null
-        state = nextState
-        return nextState
+        state = appliedState
+        return appliedState
     }
 
     fun startAutomaticLogin() {
@@ -325,6 +354,11 @@ fun LoginRoute(
         storageReady = true
 
         if (restoredCredentials != null) {
+            // 这个账号之前登录过：跳过登录页直接进主界面，顶栏先显示“登录中”。
+            autoEntryProfile = runCatching {
+                cacheStore.cachedProfile(restoredCredentials.username)
+            }.getOrNull()
+            silentAutoLogin = autoEntryProfile != null
             performAutomaticLogin(restoredCredentials, persistCredentials = true)
         }
     }
@@ -396,6 +430,9 @@ fun LoginRoute(
         manualDialogChallenge = null
         manualDialogAttempts = 0
         manualDialogMessage = null
+        autoEntryProfile = null
+        silentAutoLogin = false
+        autoLoginFailureAttempts = null
         storageMessage = null
         state = reduceLoginState(state, LoginEvent.Logout)
         scope.launch {
@@ -412,27 +449,62 @@ fun LoginRoute(
         }
     }
 
+    // 凭据恢复完成前不渲染任何内容：否则静默入场时登录页会先闪一帧。
+    if (!storageReady) return
+
+    // 静默入场且自动登录失败：在主界面上弹引导弹窗，确认后回到登录页。
+    val failureAttempts = autoLoginFailureAttempts
+    if (failureAttempts != null && autoEntryProfile != null) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("自动登录失败") },
+            text = {
+                Text(
+                    if (failureAttempts > 0) {
+                        "已自动尝试登录 $failureAttempts 次仍未成功。密码可能已修改，或验证码识别连续失败。" +
+                            "请回到登录页确认账号和密码后重新登录。"
+                    } else {
+                        "自动登录时网络连接失败。请回到登录页检查网络后重新登录。"
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        autoLoginFailureAttempts = null
+                        autoEntryProfile = null
+                        silentAutoLogin = false
+                        state = LoginState.SignedOut
+                    },
+                ) { Text("返回登录页") }
+            },
+        )
+    }
+
     val signedIn = state as? LoginState.SignedIn
-    if (signedIn != null && protocol.isInitialized()) {
+    // 静默入场：自动登录完成前，用缓存档案先把主界面渲染出来。
+    val shellProfile = signedIn?.profile ?: autoEntryProfile
+    if (shellProfile != null && protocol.isInitialized()) {
         val smartPlatformEndpoint = remember(platform.family) {
             smartPlatformEndpointFor(platform.family)
         }
-        val homeChangeFeed = remember(signedIn.profile.studentId, cacheStore) {
-            CacheStoreHomeChangeFeedRepository(signedIn.profile.studentId, cacheStore)
+        val homeChangeFeed = remember(shellProfile.studentId, cacheStore) {
+            CacheStoreHomeChangeFeedRepository(shellProfile.studentId, cacheStore)
         }
-        val gradeRepository = remember(signedIn.profile.studentId, cacheStore) {
+        val gradeRepository = remember(shellProfile.studentId, cacheStore) {
             DefaultGradeRepository(
-                accountScope = signedIn.profile.studentId,
+                accountScope = shellProfile.studentId,
                 local = CacheStoreGradeLocalDataSource(cacheStore),
                 remote = SchoolGradeRemoteDataSource(transport.value),
+                programRemote = SchoolTrainingProgramRemoteDataSource(transport.value),
             )
         }
         val gradeModel = remember(gradeRepository, homeChangeFeed) {
             GradeScreenModel(gradeRepository, gradeChangeRecorder(homeChangeFeed))
         }
-        val courseScheduleRepository = remember(signedIn.profile.studentId, cacheStore) {
+        val courseScheduleRepository = remember(shellProfile.studentId, cacheStore) {
             DefaultCourseScheduleRepository(
-                accountScope = signedIn.profile.studentId,
+                accountScope = shellProfile.studentId,
                 local = CacheStoreCourseScheduleLocalDataSource(cacheStore),
                 remote = SchoolCourseScheduleRemoteDataSource(transport.value),
             )
@@ -443,9 +515,9 @@ fun LoginRoute(
                 changeRecorder = courseChangeRecorder(homeChangeFeed),
             )
         }
-        val examScheduleRepository = remember(signedIn.profile.studentId, cacheStore) {
+        val examScheduleRepository = remember(shellProfile.studentId, cacheStore) {
             DefaultExamScheduleRepository(
-                accountScope = signedIn.profile.studentId,
+                accountScope = shellProfile.studentId,
                 local = CacheStoreExamScheduleLocalDataSource(cacheStore),
                 remote = SchoolExamScheduleRemoteDataSource(transport.value),
             )
@@ -453,9 +525,9 @@ fun LoginRoute(
         val examScheduleModel = remember(examScheduleRepository, homeChangeFeed) {
             ExamScheduleScreenModel(examScheduleRepository, examChangeRecorder(homeChangeFeed))
         }
-        val homeworkRepository = remember(signedIn.profile.studentId, cacheStore, smartPlatformEndpoint) {
+        val homeworkRepository = remember(shellProfile.studentId, cacheStore, smartPlatformEndpoint) {
             DefaultHomeworkRepository(
-                accountScope = signedIn.profile.studentId,
+                accountScope = shellProfile.studentId,
                 local = CacheStoreHomeworkLocalDataSource(cacheStore),
                 remote = SchoolHomeworkRemoteDataSource(
                     transport = transport.value,
@@ -466,9 +538,9 @@ fun LoginRoute(
         val homeworkModel = remember(homeworkRepository, homeChangeFeed) {
             HomeworkScreenModel(homeworkRepository, homeworkChangeRecorder(homeChangeFeed))
         }
-        val coursewareRepository = remember(signedIn.profile.studentId, cacheStore, smartPlatformEndpoint) {
+        val coursewareRepository = remember(shellProfile.studentId, cacheStore, smartPlatformEndpoint) {
             DefaultCoursewareRepository(
-                accountScope = signedIn.profile.studentId,
+                accountScope = shellProfile.studentId,
                 local = CacheStoreCoursewareLocalDataSource(cacheStore),
                 remote = SchoolCoursewareRemoteDataSource(
                     transport = transport.value,
@@ -495,30 +567,31 @@ fun LoginRoute(
         val classroomModel = remember(classroomRepository) {
             ClassroomScreenModel(classroomRepository)
         }
-        val settingsModel = remember(signedIn.profile.studentId, cacheStore) {
+        val settingsModel = remember(shellProfile.studentId, cacheStore) {
             SettingsScreenModel(
                 initialPreferences = appPreferences,
                 persistPreferences = onPreferencesChanged,
                 clearAccountCache = {
-                    runCatching { cacheStore.clearAccount(signedIn.profile.studentId) }.isSuccess
+                    runCatching { cacheStore.clearAccount(shellProfile.studentId) }.isSuccess
                 },
             )
         }
-        val mailboxModel = remember(signedIn.profile.studentId) {
+        val mailboxModel = remember(shellProfile.studentId) {
             MailboxScreenModel(transport.value)
         }
-        val homeStatusRepository = remember(signedIn.profile.studentId, cacheStore) {
+        val homeStatusRepository = remember(shellProfile.studentId, cacheStore) {
             DefaultHomeStatusRepository(
-                accountScope = signedIn.profile.studentId,
+                accountScope = shellProfile.studentId,
                 local = CacheStoreHomeStatusLocalDataSource(cacheStore),
                 remote = SchoolHomeStatusRemoteDataSource(transport.value),
             )
         }
         val homeModel = remember(homeStatusRepository) { HomeScreenModel(homeStatusRepository) }
         AuthenticatedAppShell(
-            profile = signedIn.profile,
+            profile = shellProfile,
             platform = platform,
             windowClass = windowClass,
+            entryLoggingIn = silentAutoLogin && signedIn == null,
             gradeModel = gradeModel,
             courseScheduleModel = courseScheduleModel,
             examScheduleModel = examScheduleModel,
@@ -534,7 +607,7 @@ fun LoginRoute(
             homeworkFileGateway = homeworkFileGateway,
             coursewareDirectoryGateway = coursewareDirectoryGateway,
             appCommandBus = appCommandBus,
-            onLogout = { logout(signedIn.profile.studentId) },
+            onLogout = { logout(shellProfile.studentId) },
         )
         return
     }

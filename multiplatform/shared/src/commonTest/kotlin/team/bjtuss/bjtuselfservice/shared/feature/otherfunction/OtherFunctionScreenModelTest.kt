@@ -109,6 +109,28 @@ class OtherFunctionScreenModelTest {
         )
     }
 
+    @Test
+    fun refreshCalendarFileNameShowsLatestName() = runBlocking {
+        val repository = FakeRepository(calendarFileName = "2024-2025校历.pdf")
+        val model = OtherFunctionScreenModel(repository, FakeFileGateway(HomeworkFileSaveResult.Saved))
+
+        model.refreshCalendarFileName()
+
+        assertEquals("2024-2025校历.pdf", model.state.value.calendarFileName)
+        assertEquals(false, model.state.value.calendarFileNameLoading)
+    }
+
+    @Test
+    fun refreshCalendarFileNameFailureKeepsNullSilently() = runBlocking {
+        val repository = FakeRepository(calendarFileName = null)
+        val model = OtherFunctionScreenModel(repository, FakeFileGateway(HomeworkFileSaveResult.Saved))
+
+        model.refreshCalendarFileName()
+
+        assertEquals(null, model.state.value.calendarFileName)
+        assertEquals(false, model.state.value.calendarFileNameLoading)
+    }
+
     private fun success(fileName: String) = OtherFunctionDownloadResult.Success(
         HomeworkFileContent(fileName, "application/pdf", "pdf".encodeToByteArray()),
     )
@@ -116,6 +138,7 @@ class OtherFunctionScreenModelTest {
     private class FakeRepository(
         private val calendar: OtherFunctionDownloadResult? = null,
         private val reportCard: OtherFunctionDownloadResult? = null,
+        private val calendarFileName: String? = null,
     ) : OtherFunctionRepository {
         var lastReportCardLanguage: ReportCardLanguage? = null
 
@@ -126,6 +149,8 @@ class OtherFunctionScreenModelTest {
             lastReportCardLanguage = language
             return reportCard ?: error("reportCard not stubbed")
         }
+
+        override suspend fun fetchCalendarFileName(): String? = calendarFileName
     }
 
     private class FakeFileGateway(

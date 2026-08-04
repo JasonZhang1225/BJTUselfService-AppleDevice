@@ -10,6 +10,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
 import team.bjtuss.bjtuselfservice.shared.cache.db.CacheDatabaseSql
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
@@ -73,6 +74,30 @@ class CacheStoreTest {
     }
 
     @Test
+    fun cachedProfileRoundTripAndClearAccount() {
+        val store = inMemoryStore()
+        try {
+            assertNull(store.cachedProfile("student-a"))
+
+            val profile = StudentProfile(
+                name = "张三",
+                studentId = "student-a",
+                identity = "本科生",
+                department = "计算机学院",
+            )
+            store.saveCachedProfile(profile)
+
+            assertEquals(profile, store.cachedProfile("student-a"))
+            assertNull(store.cachedProfile("student-b"))
+
+            store.clearAccount("student-a")
+            assertNull(store.cachedProfile("student-a"))
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
     fun fileDatabaseRestoresAfterCloseAndReopen() = withTemporaryDirectory { directory ->
         val first = createDesktopCacheStore(directory)
         assertEquals(CacheOpenState.OPENED, first.state)
@@ -117,11 +142,80 @@ class CacheStoreTest {
                 migrated.store.claimLegacyAccountData("student-a")
 
                 assertEquals("旧课程", migrated.store.grades("student-a").single().courseName)
-                assertEquals(CacheDatabaseSql.Schema.version, 2L)
+                assertEquals(CacheDatabaseSql.Schema.version, 3L)
             } finally {
                 migrated.store.close()
             }
         }
+
+    @Test
+    fun versionTwoDatabaseMigratesAndCourseTypeCacheBecomesAvailable() =
+        withTemporaryDirectory { directory ->
+            val databaseFile = File(directory, "bjtuselfservice_cache.db")
+            val legacyDriver = JdbcSqliteDriver("jdbc:sqlite:${databaseFile.absolutePath}")
+            createVersionTwoSchema(legacyDriver)
+            legacyDriver.execute(
+                identifier = null,
+                sql = """
+                    INSERT INTO grade_selection_cache (
+                        account_scope, course_name, course_teacher, course_year, semester,
+                        last_known_score, last_known_credits, occurrence
+                    ) VALUES ('student-a', '旧课程', '旧教师', '2025-2026', '1', '90', '2.0', 0)
+                """.trimIndent(),
+                parameters = 0,
+            ).value
+            legacyDriver.execute(null, "PRAGMA user_version = 2", 0).value
+            legacyDriver.close()
+
+            val migrated = createDesktopCacheStore(directory)
+            try {
+                assertEquals(CacheOpenState.OPENED, migrated.state)
+                assertEquals(
+                    "旧课程",
+                    migrated.store.gradeSelections("student-a").single().courseName,
+                )
+
+                migrated.store.replaceProgramCourseTypes("student-a", mapOf("C312009B" to "必修"))
+
+                assertEquals(
+                    mapOf("C312009B" to "必修"),
+                    migrated.store.programCourseTypes("student-a"),
+                )
+                assertEquals(CacheDatabaseSql.Schema.version, 3L)
+            } finally {
+                migrated.store.close()
+            }
+        }
+
+    @Test
+    fun programCourseTypesRoundTripAndAccountCleanup() {
+        val store = inMemoryStore()
+        try {
+            store.replaceProgramCourseTypes(
+                "student-a",
+                mapOf("C312009B" to "必修", "S1100120A" to "任选"),
+            )
+            store.replaceProgramCourseTypes("student-b", mapOf("M710033B" to "限选"))
+
+            assertEquals(
+                mapOf("C312009B" to "必修", "S1100120A" to "任选"),
+                store.programCourseTypes("student-a"),
+            )
+
+            // 重复替换整体覆盖，不残留旧键。
+            store.replaceProgramCourseTypes("student-a", mapOf("C312009B" to "限选"))
+            assertEquals(mapOf("C312009B" to "限选"), store.programCourseTypes("student-a"))
+
+            store.clearAccount("student-a")
+            assertTrue(store.programCourseTypes("student-a").isEmpty())
+            assertEquals(mapOf("M710033B" to "限选"), store.programCourseTypes("student-b"))
+
+            store.clearAll()
+            assertTrue(store.programCourseTypes("student-b").isEmpty())
+        } finally {
+            store.close()
+        }
+    }
 
     @Test
     fun corruptedFileIsDeletedAndRecreatedOnce() = withTemporaryDirectory { directory ->
@@ -170,6 +264,40 @@ class CacheStoreTest {
                 listOf(sampleSelection("snapshot")),
                 store.gradeSelections("student-a"),
             )
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun gradeSnapshotReplacesCourseTypesOnlyWhenProvided() {
+        val store = inMemoryStore()
+        try {
+            store.replaceGradeSnapshot(
+                accountScope = "student-a",
+                grades = listOf(sampleGrade("first")),
+                selections = emptyList(),
+                courseTypes = mapOf("C312009B" to "必修"),
+            )
+            assertEquals(mapOf("C312009B" to "必修"), store.programCourseTypes("student-a"))
+
+            // 方案抓取失败时映射传 null：成绩照常替换，旧映射保留。
+            store.replaceGradeSnapshot(
+                accountScope = "student-a",
+                grades = listOf(sampleGrade("second")),
+                selections = emptyList(),
+                courseTypes = null,
+            )
+            assertEquals("课程-second", store.grades("student-a").single().courseName)
+            assertEquals(mapOf("C312009B" to "必修"), store.programCourseTypes("student-a"))
+
+            store.replaceGradeSnapshot(
+                accountScope = "student-a",
+                grades = listOf(sampleGrade("third")),
+                selections = emptyList(),
+                courseTypes = mapOf("S1100120A" to "任选"),
+            )
+            assertEquals(mapOf("S1100120A" to "任选"), store.programCourseTypes("student-a"))
         } finally {
             store.close()
         }
@@ -253,6 +381,55 @@ class CacheStoreTest {
                     sub_status TEXT NOT NULL,
                     score_id INTEGER NOT NULL,
                     homework_type INTEGER NOT NULL
+                )
+            """,
+        ).forEach { sql -> driver.execute(null, sql.trimIndent(), 0).value }
+    }
+
+    /** v2 = v1 迁移完成后的结构：各表带 account_scope，无课程性质缓存表。 */
+    private fun createVersionTwoSchema(driver: SqlDriver) {
+        createVersionOneSchema(driver)
+        listOf(
+            "ALTER TABLE grade_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE course_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE exam_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE homework_cache ADD COLUMN account_scope TEXT NOT NULL DEFAULT ''",
+            "CREATE INDEX grade_cache_account_index ON grade_cache(account_scope)",
+            "CREATE INDEX course_cache_account_index ON course_cache(account_scope)",
+            "CREATE INDEX exam_cache_account_index ON exam_cache(account_scope)",
+            "CREATE INDEX homework_cache_account_index ON homework_cache(account_scope)",
+            """
+                CREATE TABLE grade_selection_cache (
+                    account_scope TEXT NOT NULL,
+                    course_name TEXT NOT NULL,
+                    course_teacher TEXT NOT NULL,
+                    course_year TEXT NOT NULL,
+                    semester TEXT NOT NULL,
+                    last_known_score TEXT NOT NULL,
+                    last_known_credits TEXT NOT NULL,
+                    occurrence INTEGER NOT NULL,
+                    PRIMARY KEY (
+                        account_scope,
+                        course_name,
+                        course_teacher,
+                        course_year,
+                        semester,
+                        occurrence
+                    )
+                )
+            """,
+            """
+                CREATE TABLE cache_metadata (
+                    account_scope TEXT NOT NULL,
+                    cache_key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    PRIMARY KEY (account_scope, cache_key)
+                )
+            """,
+            """
+                CREATE TABLE app_setting (
+                    setting_key TEXT NOT NULL PRIMARY KEY,
+                    value TEXT NOT NULL
                 )
             """,
         ).forEach { sql -> driver.execute(null, sql.trimIndent(), 0).value }

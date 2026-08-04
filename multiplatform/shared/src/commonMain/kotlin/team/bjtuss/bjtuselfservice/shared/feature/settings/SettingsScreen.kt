@@ -68,7 +68,10 @@ fun SettingsWorkspace(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("设置", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        // 紧凑布局下 shell 顶栏已显示“设置”，页内不再重复；宽屏侧栏布局没有顶栏，保留页内标题。
+        if (expanded) {
+            Text("设置", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
         SettingCard("账户", accountName.ifBlank { "未登录" })
 
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {

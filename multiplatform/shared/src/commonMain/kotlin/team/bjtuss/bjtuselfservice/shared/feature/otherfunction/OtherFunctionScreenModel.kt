@@ -19,6 +19,9 @@ data class OtherFunctionUiState(
     val reportCardLanguage: ReportCardLanguage = ReportCardLanguage.CHINESE,
     val calendarState: OtherFunctionTaskState = OtherFunctionTaskState.Idle,
     val reportCardState: OtherFunctionTaskState = OtherFunctionTaskState.Idle,
+    /** 校历页上的最新文件名，进入页面时拉取；失败保持 null。 */
+    val calendarFileName: String? = null,
+    val calendarFileNameLoading: Boolean = false,
 ) {
     val isAnyTaskRunning: Boolean
         get() = calendarState == OtherFunctionTaskState.Downloading ||
@@ -36,6 +39,19 @@ class OtherFunctionScreenModel(
 
     fun setReportCardLanguage(language: ReportCardLanguage) {
         mutableState.value = mutableState.value.copy(reportCardLanguage = language)
+    }
+
+    /** 进入校历页时拉取最新文件名用于展示；失败保持 null，不打扰用户。 */
+    suspend fun refreshCalendarFileName() {
+        if (mutableState.value.calendarFileNameLoading) return
+        mutableState.value = mutableState.value.copy(calendarFileNameLoading = true)
+        try {
+            mutableState.value = mutableState.value.copy(
+                calendarFileName = repository.fetchCalendarFileName(),
+            )
+        } finally {
+            mutableState.value = mutableState.value.copy(calendarFileNameLoading = false)
+        }
     }
 
     suspend fun downloadCalendar() {

@@ -2,15 +2,18 @@ package team.bjtuss.bjtuselfservice.shared.data.grade
 
 import kotlinx.coroutines.CancellationException
 import team.bjtuss.bjtuselfservice.shared.cache.CacheStore
+import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSelectionRecord
 import team.bjtuss.bjtuselfservice.shared.domain.grade.gradeIdsForSelectionRecords
 import team.bjtuss.bjtuselfservice.shared.domain.grade.selectionRecordsExcludingSemesters
+import team.bjtuss.bjtuselfservice.shared.domain.grade.selectionRecordsExcludingTypes
 import team.bjtuss.bjtuselfservice.shared.domain.grade.selectionRecordsForGradeIdsPreservingUnmatched
 
 data class GradeSnapshot(
     val grades: List<Grade>,
     val selectedGradeIds: Set<Int>,
+    val courseTypesByCode: Map<String, CourseType> = emptyMap(),
 )
 
 enum class GradeSyncFailure {
@@ -31,10 +34,12 @@ sealed interface GradeRefreshResult {
 interface GradeLocalDataSource {
     fun grades(accountScope: String): List<Grade>
     fun selections(accountScope: String): List<GradeSelectionRecord>
+    fun courseTypes(accountScope: String): Map<String, CourseType>
     fun replaceSnapshot(
         accountScope: String,
         grades: List<Grade>,
         records: List<GradeSelectionRecord>,
+        courseTypes: Map<String, CourseType>? = null,
     )
     fun replaceSelections(accountScope: String, records: List<GradeSelectionRecord>)
 }
@@ -47,12 +52,25 @@ class CacheStoreGradeLocalDataSource(
     override fun selections(accountScope: String): List<GradeSelectionRecord> =
         cacheStore.gradeSelections(accountScope)
 
+    override fun courseTypes(accountScope: String): Map<String, CourseType> =
+        cacheStore.programCourseTypes(accountScope).mapNotNull { (courseId, storedText) ->
+            courseTypeForStoredText(storedText)?.let { courseId to it }
+        }.toMap()
+
     override fun replaceSnapshot(
         accountScope: String,
         grades: List<Grade>,
         records: List<GradeSelectionRecord>,
+        courseTypes: Map<String, CourseType>?,
     ) {
-        cacheStore.replaceGradeSnapshot(accountScope, grades, records)
+        cacheStore.replaceGradeSnapshot(
+            accountScope = accountScope,
+            grades = grades,
+            selections = records,
+            courseTypes = courseTypes?.mapNotNull { (courseId, courseType) ->
+                courseType.storedText()?.let { courseId to it }
+            }?.toMap(),
+        )
     }
 
     override fun replaceSelections(accountScope: String, records: List<GradeSelectionRecord>) {
@@ -65,6 +83,7 @@ interface GradeRepository {
     suspend fun refresh(): GradeRefreshResult
     fun persistSelected(grades: List<Grade>, selectedGradeIds: Set<Int>): GradeSnapshot
     fun clearSelectedSemesters(semesters: Set<String>): GradeSnapshot
+    fun clearSelectedCourseTypes(courseTypes: Set<CourseType>): GradeSnapshot
     fun clearAllSelections(): GradeSnapshot
 }
 
@@ -72,6 +91,7 @@ class DefaultGradeRepository(
     accountScope: String,
     private val local: GradeLocalDataSource,
     private val remote: GradeRemoteDataSource,
+    private val programRemote: TrainingProgramRemoteDataSource,
 ) : GradeRepository {
     private val accountScope = accountScope.trim().also {
         require(it.isNotEmpty()) { "accountScope cannot be blank" }
@@ -94,6 +114,15 @@ class DefaultGradeRepository(
             return GradeRefreshResult.Failure(fallback, GradeSyncFailure.NETWORK)
         }
 
+        // 培养方案抓取失败仅降级：成绩照常替换，性质映射保留上一次成功的旧数据。
+        val remoteCourseTypes = try {
+            programRemote.fetchCourseTypes()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+
         return try {
             val storedRecords = local.selections(accountScope)
             val temporaryGrades = remoteGrades.mapIndexed { index, grade ->
@@ -105,10 +134,12 @@ class DefaultGradeRepository(
                 storedRecords = storedRecords,
                 selectedGradeIds = temporarySelectedIds,
             )
-            local.replaceSnapshot(accountScope, remoteGrades, normalizedRecords)
+            local.replaceSnapshot(accountScope, remoteGrades, normalizedRecords, remoteCourseTypes)
             val persistedGrades = local.grades(accountScope)
             val selectedIds = gradeIdsForSelectionRecords(persistedGrades, normalizedRecords)
-            GradeRefreshResult.Success(GradeSnapshot(persistedGrades, selectedIds))
+            GradeRefreshResult.Success(
+                GradeSnapshot(persistedGrades, selectedIds, local.courseTypes(accountScope)),
+            )
         } catch (_: Exception) {
             GradeRefreshResult.Failure(
                 snapshot = runCatching(::load).getOrElse { fallback },
@@ -130,7 +161,7 @@ class DefaultGradeRepository(
             selectedGradeIds = selected,
         )
         local.replaceSelections(accountScope, records)
-        return GradeSnapshot(grades, selected)
+        return GradeSnapshot(grades, selected, local.courseTypes(accountScope))
     }
 
     override fun clearSelectedSemesters(semesters: Set<String>): GradeSnapshot {
@@ -143,9 +174,20 @@ class DefaultGradeRepository(
         return snapshot(grades, records)
     }
 
+    override fun clearSelectedCourseTypes(courseTypes: Set<CourseType>): GradeSnapshot {
+        val grades = local.grades(accountScope)
+        val records = selectionRecordsExcludingTypes(
+            records = local.selections(accountScope),
+            typeByCode = local.courseTypes(accountScope),
+            excludedTypes = courseTypes,
+        )
+        local.replaceSelections(accountScope, records)
+        return snapshot(grades, records)
+    }
+
     override fun clearAllSelections(): GradeSnapshot {
         local.replaceSelections(accountScope, emptyList())
-        return GradeSnapshot(local.grades(accountScope), emptySet())
+        return GradeSnapshot(local.grades(accountScope), emptySet(), local.courseTypes(accountScope))
     }
 
     private fun snapshot(
@@ -154,6 +196,7 @@ class DefaultGradeRepository(
     ): GradeSnapshot = GradeSnapshot(
         grades = grades,
         selectedGradeIds = gradeIdsForSelectionRecords(grades, records),
+        courseTypesByCode = local.courseTypes(accountScope),
     )
 }
 

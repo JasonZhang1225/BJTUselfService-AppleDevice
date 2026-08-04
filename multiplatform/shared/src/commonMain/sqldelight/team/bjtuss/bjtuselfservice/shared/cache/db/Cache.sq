@@ -81,6 +81,13 @@ CREATE TABLE grade_selection_cache (
     )
 );
 
+CREATE TABLE program_course_type_cache (
+    account_scope TEXT NOT NULL,
+    course_id TEXT NOT NULL,
+    course_type TEXT NOT NULL,
+    PRIMARY KEY (account_scope, course_id)
+);
+
 CREATE TABLE cache_metadata (
     account_scope TEXT NOT NULL,
     cache_key TEXT NOT NULL,
@@ -100,6 +107,7 @@ SELECT
     (SELECT count(*) FROM exam_cache) +
     (SELECT count(*) FROM homework_cache) +
     (SELECT count(*) FROM grade_selection_cache) +
+    (SELECT count(*) FROM program_course_type_cache) +
     (SELECT count(*) FROM cache_metadata) +
     (SELECT count(*) FROM app_setting);
 
@@ -194,6 +202,20 @@ INSERT OR REPLACE INTO grade_selection_cache (
 deleteGradeSelectionsByAccount:
 DELETE FROM grade_selection_cache WHERE account_scope = ?;
 
+selectProgramCourseTypesByAccount:
+SELECT course_id, course_type
+FROM program_course_type_cache
+WHERE account_scope = ?
+ORDER BY course_id;
+
+insertProgramCourseType:
+INSERT OR REPLACE INTO program_course_type_cache (
+    account_scope, course_id, course_type
+) VALUES (?, ?, ?);
+
+deleteProgramCourseTypesByAccount:
+DELETE FROM program_course_type_cache WHERE account_scope = ?;
+
 selectMetadata:
 SELECT value FROM cache_metadata WHERE account_scope = ? AND cache_key = ?;
 
@@ -226,6 +248,9 @@ DELETE FROM homework_cache;
 
 deleteAllGradeSelections:
 DELETE FROM grade_selection_cache;
+
+deleteAllProgramCourseTypes:
+DELETE FROM program_course_type_cache;
 
 deleteAllMetadata:
 DELETE FROM cache_metadata;

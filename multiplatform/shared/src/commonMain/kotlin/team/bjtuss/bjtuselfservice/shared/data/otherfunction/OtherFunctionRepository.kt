@@ -18,6 +18,8 @@ sealed interface OtherFunctionDownloadResult {
 interface OtherFunctionRepository {
     suspend fun downloadCalendar(): OtherFunctionDownloadResult
     suspend fun downloadReportCard(language: ReportCardLanguage): OtherFunctionDownloadResult
+    /** 校历页解析出的最新文件名；失败返回 null，UI 静默降级。 */
+    suspend fun fetchCalendarFileName(): String?
 }
 
 class DefaultOtherFunctionRepository(
@@ -32,6 +34,14 @@ class DefaultOtherFunctionRepository(
         OtherFunctionDownloadResult.Failure(error.reason.toSyncFailure())
     } catch (_: Exception) {
         OtherFunctionDownloadResult.Failure(OtherFunctionSyncFailure.NETWORK)
+    }
+
+    override suspend fun fetchCalendarFileName(): String? = try {
+        remote.fetchCalendarFileName()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
     }
 
     override suspend fun downloadReportCard(

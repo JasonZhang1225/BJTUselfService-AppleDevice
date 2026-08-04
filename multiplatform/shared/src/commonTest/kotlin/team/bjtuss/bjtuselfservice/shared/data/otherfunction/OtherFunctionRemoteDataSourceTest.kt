@@ -81,6 +81,58 @@ class OtherFunctionRemoteDataSourceTest {
     }
 
     @Test
+    fun reportsLatestCalendarFileNameFromPage() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://bksy.bjtu.edu.cn/Admin/SemesterTranPage.aspx",
+                body = calendarPageHtml().encodeToByteArray(),
+            ),
+        )
+        val remote = SchoolOtherFunctionRemoteDataSource(transport)
+
+        val name = remote.fetchCalendarFileName()
+
+        assertEquals("2024-2025校历.pdf", name)
+        assertEquals(
+            "https://bksy.bjtu.edu.cn/Admin/SemesterTranPage.aspx?noRemark=1",
+            transport.requests.single().url,
+        )
+    }
+
+    @Test
+    fun calendarFileNameDecodesEncodedPath() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://bksy.bjtu.edu.cn/Admin/SemesterTranPage.aspx",
+                body = "<script>var rows = [{ url: \"/New/Semester/2024-2025%E6%A0%A1%E5%8E%86.pdf\" }];</script>"
+                    .encodeToByteArray(),
+            ),
+        )
+        val remote = SchoolOtherFunctionRemoteDataSource(transport)
+
+        assertEquals("2024-2025校历.pdf", remote.fetchCalendarFileName())
+    }
+
+    @Test
+    fun calendarFileNameParseFailureThrows() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://bksy.bjtu.edu.cn/Admin/SemesterTranPage.aspx",
+                body = "<html><body>no script</body></html>".encodeToByteArray(),
+            ),
+        )
+        val remote = SchoolOtherFunctionRemoteDataSource(transport)
+
+        val error = assertFailsWith<OtherFunctionRemoteException> {
+            remote.fetchCalendarFileName()
+        }
+        assertEquals(OtherFunctionRemoteFailure.PARSE, error.reason)
+    }
+
+    @Test
     fun downloadsChineseReportCardWithSession() = runBlocking {
         val transport = QueueTransport(
             SchoolHttpResponse(

@@ -9,15 +9,16 @@ import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpResponse
 
 enum class SmartPlatformTransport {
     VERIFIED_HTTPS,
-    LEGACY_APPLE_HTTP,
+    LEGACY_HTTP,
 }
 
 /**
  * 智慧教学平台的封闭端点策略。
  *
- * 默认策略只允许已验证的 HTTPS 域名。旧 HTTP 策略仅供 Apple 平台在用户明确授权后注入，
- * 且只能访问旧 Android 1.7.0 已使用的固定 IP、端口和路径前缀；它不会改变应用其余
- * 网络请求的安全策略，也不会把 sessionid 持久化。
+ * 默认策略只允许已验证的 HTTPS 域名。旧 HTTP 策略由用户在 2026-08-01（Apple）与
+ * 2026-08-04（Android）明确授权后注入，且只能访问旧 Android 1.7.0 已使用的固定
+ * IP、端口和路径前缀；它不会改变应用其余网络请求的安全策略，也不会把
+ * sessionid 持久化。
  */
 class SmartPlatformEndpoint private constructor(
     val transport: SmartPlatformTransport,
@@ -25,7 +26,7 @@ class SmartPlatformEndpoint private constructor(
     private val calendarOrigin: String,
 ) {
     val isLegacyInsecure: Boolean
-        get() = transport == SmartPlatformTransport.LEGACY_APPLE_HTTP
+        get() = transport == SmartPlatformTransport.LEGACY_HTTP
 
     fun apiUrl(path: String, query: LinkedHashMap<String, String>): String {
         require(path.startsWith("/ve/")) { "Smart-platform API path must stay under /ve/" }
@@ -55,7 +56,7 @@ class SmartPlatformEndpoint private constructor(
     }
 
     /**
-     * HTTPS 策略只接受同源地址。旧 Apple 策略从 iframe 路径提取旧版所需的末 5 段，
+     * HTTPS 策略只接受同源地址。旧明文策略从 iframe 路径提取旧版所需的末 5 段，
      * 再重建为固定的 1936/kk/rp 地址，绝不沿用 iframe 提供的主机或端口。
      */
     fun resolveTeachingCalendarUrl(rawUrl: String): String? {
@@ -122,8 +123,8 @@ class SmartPlatformEndpoint private constructor(
             calendarOrigin = "https://bksycenter.bjtu.edu.cn",
         )
 
-        val AppleLegacyHttp = SmartPlatformEndpoint(
-            transport = SmartPlatformTransport.LEGACY_APPLE_HTTP,
+        val LegacyHttp = SmartPlatformEndpoint(
+            transport = SmartPlatformTransport.LEGACY_HTTP,
             apiOrigin = "http://123.121.147.7:88",
             calendarOrigin = "http://123.121.147.7:1936",
         )

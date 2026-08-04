@@ -10,9 +10,11 @@ import team.bjtuss.bjtuselfservice.shared.data.grade.GradeRefreshResult
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeRepository
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeSnapshot
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeSyncFailure
+import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeInfoResult
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSortOrder
+import team.bjtuss.bjtuselfservice.shared.domain.grade.courseTypeOfGrade
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
 
 class GradeScreenModelTest {
@@ -99,6 +101,125 @@ class GradeScreenModelTest {
         assertEquals(listOf(updated), captured?.second)
     }
 
+    @Test
+    fun courseTypesFlowIntoStateAndUnknownGradesStayUnlabeled() = runBlocking {
+        val required = grade(1, name = "C312009B高级英语视听说[04]")
+        val unknown = grade(2, name = "英语认定")
+        val snapshot = GradeSnapshot(
+            grades = listOf(required, unknown),
+            selectedGradeIds = emptySet(),
+            courseTypesByCode = mapOf("C312009B" to CourseType.REQUIRED),
+        )
+        val model = GradeScreenModel(
+            FakeRepository(loaded = snapshot, refreshed = GradeRefreshResult.Success(snapshot)),
+        )
+
+        model.initialize()
+
+        val state = model.state.value
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), state.courseTypesByCode)
+        assertEquals(CourseType.REQUIRED, state.courseTypeOf(required))
+        assertEquals(CourseType.UNKNOWN, state.courseTypeOf(unknown))
+        assertEquals(mapOf(CourseType.REQUIRED to 1, CourseType.UNKNOWN to 1), state.courseTypeCounts)
+    }
+
+    @Test
+    fun typeChipsSelectAndDeselectWholeTypeAndSurviveRefresh() = runBlocking {        val required = grade(1, name = "C312009B高级英语视听说[04]")
+        val elective = grade(2, name = "S1100120A计算机导论[01]")
+        val courseTypes = mapOf(
+            "C312009B" to CourseType.REQUIRED,
+            "S1100120A" to CourseType.ELECTIVE,
+        )
+        val cached = GradeSnapshot(
+            grades = listOf(required, elective),
+            selectedGradeIds = emptySet(),
+            courseTypesByCode = courseTypes,
+        )
+        val refreshed = GradeSnapshot(
+            grades = listOf(
+                required.copy(id = 101),
+                elective.copy(id = 102),
+            ),
+            selectedGradeIds = setOf(101),
+            courseTypesByCode = courseTypes,
+        )
+        val model = GradeScreenModel(
+            FakeRepository(loaded = cached, refreshed = GradeRefreshResult.Success(refreshed)),
+        )
+        model.initialize()
+        model.toggleSelectionMode()
+
+        // 刷新后选择记录恢复（101 即刷新前的 1），性质映射仍在。
+        assertEquals(setOf(101), model.state.value.selectedGradeIds)
+        assertTrue(model.state.value.allSelectedForType(CourseType.REQUIRED))
+
+        // 取消必修 → 只剩任选可选；全选任选 → 只剩任选被选中。
+        model.deselectByType(CourseType.REQUIRED)
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+
+        model.selectAllByType(CourseType.ELECTIVE)
+        assertEquals(setOf(102), model.state.value.selectedGradeIds)
+        assertTrue(model.state.value.allSelectedForType(CourseType.ELECTIVE))
+
+        model.deselectByType(CourseType.ELECTIVE)
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+    }
+
+    @Test
+    fun typeChipSelectionStateCoversPartialAndUnknownCategory() = runBlocking {
+        val requiredA = grade(1, name = "C312009B高级英语视听说[04]")
+        val requiredB = grade(2, name = "M710033B大学物理[01]")
+        val physical = grade(3, name = "P110011B体育Ⅰ[01]")
+        val unknown = grade(4, name = "英语认定")
+        val snapshot = GradeSnapshot(
+            grades = listOf(requiredA, requiredB, physical, unknown),
+            selectedGradeIds = emptySet(),
+            courseTypesByCode = mapOf(
+                "C312009B" to CourseType.REQUIRED,
+                "M710033B" to CourseType.REQUIRED,
+                "P110011B" to CourseType.PHYSICAL_EDUCATION,
+            ),
+        )
+        val model = GradeScreenModel(
+            FakeRepository(loaded = snapshot, refreshed = GradeRefreshResult.Success(snapshot)),
+        )
+        model.initialize()
+        model.toggleSelectionMode()
+
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.REQUIRED))
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.UNKNOWN))
+        assertEquals(1, model.state.value.courseTypeCounts[CourseType.PHYSICAL_EDUCATION])
+
+        // 部分选中是独立状态，不能被误认为“全选”而被一键清空提示所掩盖。
+        model.setGradeSelected(1, true)
+        assertEquals(CourseTypeSelectionState.PARTIAL, model.state.value.selectionStateForType(CourseType.REQUIRED))
+
+        model.selectAllByType(CourseType.REQUIRED)
+        assertEquals(setOf(1, 2), model.state.value.selectedGradeIds)
+        assertEquals(CourseTypeSelectionState.ALL, model.state.value.selectionStateForType(CourseType.REQUIRED))
+
+        model.deselectByType(CourseType.REQUIRED)
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.REQUIRED))
+
+        // “体育” chip：独立类别的全选与取消与其余 chips 一致。
+        model.selectAllByType(CourseType.PHYSICAL_EDUCATION)
+        assertEquals(setOf(3), model.state.value.selectedGradeIds)
+        assertEquals(CourseTypeSelectionState.ALL, model.state.value.selectionStateForType(CourseType.PHYSICAL_EDUCATION))
+        model.deselectByType(CourseType.PHYSICAL_EDUCATION)
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.PHYSICAL_EDUCATION))
+
+        // “其他类别” chip：UNKNOWN 课程同样能全选与取消。
+        model.selectAllByType(CourseType.UNKNOWN)
+        assertEquals(setOf(4), model.state.value.selectedGradeIds)
+        assertEquals(CourseTypeSelectionState.ALL, model.state.value.selectionStateForType(CourseType.UNKNOWN))
+
+        model.deselectByType(CourseType.UNKNOWN)
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.UNKNOWN))
+    }
+
     private class FakeRepository(
         private val loaded: GradeSnapshot,
         private val refreshed: GradeRefreshResult,
@@ -117,11 +238,24 @@ class GradeScreenModelTest {
         override fun persistSelected(
             grades: List<Grade>,
             selectedGradeIds: Set<Int>,
-        ): GradeSnapshot = GradeSnapshot(grades, selectedGradeIds).also { snapshot = it }
+        ): GradeSnapshot = snapshot.copy(
+            grades = grades,
+            selectedGradeIds = selectedGradeIds,
+        ).also { snapshot = it }
 
         override fun clearSelectedSemesters(semesters: Set<String>): GradeSnapshot {
             val ids = snapshot.grades
                 .filterNot { it.semester in semesters }
+                .mapTo(mutableSetOf(), Grade::id)
+            return snapshot.copy(selectedGradeIds = snapshot.selectedGradeIds intersect ids)
+                .also { snapshot = it }
+        }
+
+        override fun clearSelectedCourseTypes(courseTypes: Set<CourseType>): GradeSnapshot {
+            val ids = snapshot.grades
+                .filterNot { grade ->
+                    courseTypeOfGrade(grade, snapshot.courseTypesByCode) in courseTypes
+                }
                 .mapTo(mutableSetOf(), Grade::id)
             return snapshot.copy(selectedGradeIds = snapshot.selectedGradeIds intersect ids)
                 .also { snapshot = it }
@@ -135,9 +269,10 @@ class GradeScreenModelTest {
         id: Int,
         semester: String = "2025-2026-1",
         score: String = "B,79",
+        name: String = "课程$id",
     ) = Grade(
         id = id,
-        courseName = "课程$id",
+        courseName = name,
         courseTeacher = "教师",
         courseScore = score,
         courseCredits = "2.0",

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 明文流量只放行智慧教学平台旧端点的固定 IP（用户 2026-08-04 授权，与 Apple 端一致），
+     其余域名保持默认 HTTPS 基线。 -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">123.121.147.7</domain>
+    </domain-config>
+</network-security-config>

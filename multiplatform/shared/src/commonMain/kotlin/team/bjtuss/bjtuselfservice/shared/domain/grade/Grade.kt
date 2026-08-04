@@ -33,6 +33,20 @@ enum class GradeSortOrder {
     DESCENDING,
 }
 
+/**
+ * 课程性质来自培养方案页。数据库缓存存中文原文，枚举与原文的转换集中在 data 层；
+ * 映射查不到的课程一律按 UNKNOWN 处理。
+ * PHYSICAL_EDUCATION：学校在培养方案 PDF/教务系统/成绩单对体育课口径不一致
+ * （专项课记“任选”、体育Ⅰ记“必修”），用户拍板体育课在 App 内独立为一类。
+ */
+enum class CourseType {
+    REQUIRED,
+    LIMITED,
+    ELECTIVE,
+    PHYSICAL_EDUCATION,
+    UNKNOWN,
+}
+
 sealed interface GradeInfoResult {
     data object NoGrades : GradeInfoResult
 
