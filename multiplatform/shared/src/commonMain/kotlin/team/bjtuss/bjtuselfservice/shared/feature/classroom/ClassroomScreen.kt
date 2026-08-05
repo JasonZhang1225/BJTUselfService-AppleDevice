@@ -44,6 +44,7 @@ import team.bjtuss.bjtuselfservice.shared.data.classroom.ClassroomFetchFailure
 import team.bjtuss.bjtuselfservice.shared.domain.classroom.ClassroomCapacity
 import team.bjtuss.bjtuselfservice.shared.domain.classroom.ClassroomSortDirection
 import team.bjtuss.bjtuselfservice.shared.domain.classroom.ClassroomSortField
+import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 
 /** iPhone 两级列表、macOS 列表—详情的共享教室人数评估页面。 */
 @Composable
@@ -134,8 +135,9 @@ private fun BuildingList(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             )
+            // 明文风险已在作业/课件的统一授权 banner 说明，此处不再重复。
             Text(
-                "人数来自第三方明文接口的实时评估，仅作找空教室参考。",
+                "人数为实时评估，仅作找空教室参考。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -337,19 +339,15 @@ private fun ClassroomRow(room: ClassroomCapacity) {
 
 @Composable
 private fun ErrorCard(reason: ClassroomFetchFailure) {
-    val message = when (reason) {
-        ClassroomFetchFailure.NETWORK -> "教室接口暂时不可达，请稍后重试。"
-        ClassroomFetchFailure.PARSE -> "教室接口返回格式已变化，暂时无法解析。"
-        ClassroomFetchFailure.SECURE_CHANNEL_UNAVAILABLE ->
-            "该第三方教室接口只支持明文 HTTP，不满足当前系统安全要求。"
-    }
-    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
-        Text(
-            message,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-        )
-    }
+    AppErrorBanner(
+        message = when (reason) {
+            ClassroomFetchFailure.NETWORK -> "教室接口暂时不可达，请稍后重试。"
+            ClassroomFetchFailure.PARSE -> "教室接口返回格式已变化，暂时无法解析。"
+            // 平台未放行教室明文时（如 Android 未加域名例外）给出简短说明，不重复作业/课件授权长文。
+            ClassroomFetchFailure.SECURE_CHANNEL_UNAVAILABLE ->
+                "当前平台未允许教室人数接口的明文访问。"
+        },
+    )
 }
 
 private fun formatPercent(value: Double): String = "${(value * 100).toInt().coerceIn(0, 999)}%"

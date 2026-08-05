@@ -65,7 +65,9 @@ class GradeScreenModelTest {
         val model = GradeScreenModel(repository)
         model.initialize()
 
-        model.toggleSemester("2025-2026-1")
+        // 加载后默认全选学期；取消 2025-2026-2 后只剩第一学期。
+        assertEquals(setOf("2025-2026-1", "2025-2026-2"), model.state.value.selectedSemesters)
+        model.toggleSemester("2025-2026-2")
         model.cycleSortOrder()
         assertEquals(GradeSortOrder.ASCENDING, model.state.value.sortOrder)
         assertEquals(listOf(1), model.state.value.visibleGrades.map(Grade::id))
@@ -78,8 +80,29 @@ class GradeScreenModelTest {
 
         model.toggleSelectionMode()
         assertFalse(model.state.value.selectionMode)
-        assertTrue(model.state.value.selectedSemesters.isEmpty())
-        assertEquals(GradeSortOrder.ORIGINAL, model.state.value.sortOrder)
+        // 关闭自选不再清空学期筛选。
+        assertEquals(setOf("2025-2026-1"), model.state.value.selectedSemesters)
+    }
+
+    @Test
+    fun courseTypeCapsuleFiltersWithoutSelectionMode() = runBlocking {
+        val required = grade(1, name = "C312009B必修课[01]", score = "A,90")
+        val elective = grade(2, name = "X1000001任选课[01]", score = "B,80")
+        val types = mapOf(
+            "C312009B" to CourseType.REQUIRED,
+            "X1000001" to CourseType.ELECTIVE,
+        )
+        val snapshot = GradeSnapshot(listOf(required, elective), emptySet(), types)
+        val model = GradeScreenModel(
+            FakeRepository(loaded = snapshot, refreshed = GradeRefreshResult.Success(snapshot)),
+        )
+        model.initialize()
+
+        model.toggleCourseTypeIncluded(CourseType.ELECTIVE)
+        assertEquals(listOf(1), model.state.value.visibleGrades.map(Grade::id))
+        val calculated = assertIs<GradeInfoResult.Calculated>(model.state.value.gradeInfo)
+        assertEquals(90.0, calculated.averageScore)
+        assertFalse(model.state.value.selectionMode)
     }
 
     @Test

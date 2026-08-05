@@ -15,6 +15,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSortOrder
 import team.bjtuss.bjtuselfservice.shared.domain.grade.calculateGradeInfo
 import team.bjtuss.bjtuselfservice.shared.domain.grade.courseTypeOfGrade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.filterGradesBySemester
+import team.bjtuss.bjtuselfservice.shared.domain.grade.filterGradesByType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.gradesForCalculation
 import team.bjtuss.bjtuselfservice.shared.domain.grade.sortGrades
 
@@ -26,7 +27,16 @@ enum class GradeContentSource {
 data class GradeUiState(
     val grades: List<Grade> = emptyList(),
     val selectedGradeIds: Set<Int> = emptySet(),
+    /**
+     * 勾选的学期。默认在数据加载后填满全部学期；
+     * 与 domain 约定对齐：传给筛选函数时「全选 / 空」都视为不过滤。
+     */
     val selectedSemesters: Set<String> = emptySet(),
+    /**
+     * 排除的课程性质（未勾选的类别）。默认空 = 全部类别参与列表与加权。
+     * 自选模式关闭时即可勾选/取消必修等胶囊，无需打开逐门勾选。
+     */
+    val excludedCourseTypes: Set<CourseType> = emptySet(),
     /** null = 性质映射未加载（从未同步成功），此时不应把全部课程当“其他类别”。 */
     val courseTypesByCode: Map<String, CourseType>? = null,
     val sortOrder: GradeSortOrder = GradeSortOrder.ORIGINAL,
@@ -40,16 +50,42 @@ data class GradeUiState(
     val semesterOptions: List<String>
         get() = grades.map(Grade::semester).filter(String::isNotBlank).distinct()
 
+    /**
+     * 交给 domain 的学期筛选：全选时传空集合（不过滤）；
+     * 部分勾选传具体集合；一个都不勾时传占位，列表结果为空。
+     */
+    val semesterFilterForQuery: Set<String>
+        get() {
+            val options = semesterOptions.toSet()
+            if (options.isEmpty()) return emptySet()
+            if (selectedSemesters.containsAll(options)) return emptySet()
+            return selectedSemesters
+        }
+
     val visibleGrades: List<Grade>
-        get() = sortGrades(filterGradesBySemester(grades, selectedSemesters), sortOrder)
+        get() {
+            // 有学期数据却一个未勾选：明确为空列表（与「全选=不过滤」区分）。
+            if (semesterOptions.isNotEmpty() && selectedSemesters.isEmpty()) {
+                return emptyList()
+            }
+            val bySemester = filterGradesBySemester(grades, semesterFilterForQuery)
+            val byType = if (courseTypesByCode == null || excludedCourseTypes.isEmpty()) {
+                bySemester
+            } else {
+                filterGradesByType(bySemester, courseTypesByCode, excludedCourseTypes)
+            }
+            return sortGrades(byType, sortOrder)
+        }
 
     val gradeInfo: GradeInfoResult
         get() = calculateGradeInfo(
             gradesForCalculation(
                 grades = grades,
-                selectedSemesters = selectedSemesters,
+                selectedSemesters = semesterFilterForQuery,
                 isCourseSelectionMode = selectionMode,
                 selectedGradeIds = selectedGradeIds,
+                typeByCode = courseTypesByCode.orEmpty(),
+                excludedTypes = excludedCourseTypes,
             ),
         )
 
@@ -111,10 +147,12 @@ class GradeScreenModel(
         initialized = true
         val cached = runCatching(repository::load).getOrNull()
         if (cached != null) {
+            val semesterOptions = cached.grades.map(Grade::semester).filter(String::isNotBlank).toSet()
             mutableState.value = mutableState.value.copy(
                 grades = cached.grades,
                 selectedGradeIds = cached.selectedGradeIds,
                 courseTypesByCode = cached.courseTypesByCode,
+                selectedSemesters = semesterOptions,
                 isLoading = cached.grades.isEmpty(),
                 source = if (cached.grades.isEmpty()) null else GradeContentSource.CACHE,
                 failure = null,
@@ -172,23 +210,39 @@ class GradeScreenModel(
 
     fun toggleSemester(semester: String) {
         val current = mutableState.value
+        val next = if (semester in current.selectedSemesters) {
+            current.selectedSemesters - semester
+        } else {
+            current.selectedSemesters + semester
+        }
+        mutableState.value = current.copy(selectedSemesters = next)
+    }
+
+    /** 恢复为全部学期勾选。 */
+    fun clearSemesterFilter() {
+        val current = mutableState.value
+        mutableState.value = current.copy(selectedSemesters = current.semesterOptions.toSet())
+    }
+
+    /**
+     * 切换某课程性质是否参与列表/加权（胶囊选中 = 参与）。
+     * 不依赖自选模式。
+     */
+    fun toggleCourseTypeIncluded(type: CourseType) {
+        val current = mutableState.value
+        val excluded = current.excludedCourseTypes
         mutableState.value = current.copy(
-            selectedSemesters = if (semester in current.selectedSemesters) {
-                current.selectedSemesters - semester
-            } else {
-                current.selectedSemesters + semester
-            },
+            excludedCourseTypes = if (type in excluded) excluded - type else excluded + type,
         )
     }
 
-    fun clearSemesterFilter() {
-        mutableState.value = mutableState.value.copy(selectedSemesters = emptySet())
-    }
+    fun isCourseTypeIncluded(type: CourseType): Boolean =
+        type !in mutableState.value.excludedCourseTypes
 
     fun cycleSortOrder() {
         val current = mutableState.value
-        mutableState.value = current.copy(
-            sortOrder = when (current.sortOrder) {
+        setSortOrder(
+            when (current.sortOrder) {
                 GradeSortOrder.ORIGINAL -> GradeSortOrder.ASCENDING
                 GradeSortOrder.ASCENDING -> GradeSortOrder.DESCENDING
                 GradeSortOrder.DESCENDING -> GradeSortOrder.ORIGINAL
@@ -196,20 +250,20 @@ class GradeScreenModel(
         )
     }
 
-    fun toggleSelectionMode() {
+    fun setSortOrder(order: GradeSortOrder) {
+        if (mutableState.value.sortOrder == order) return
+        mutableState.value = mutableState.value.copy(sortOrder = order)
+    }
+
+    fun setSelectionMode(enabled: Boolean) {
         val current = mutableState.value
-        mutableState.value = if (current.selectionMode) {
-            current.copy(
-                selectionMode = false,
-                selectedSemesters = emptySet(),
-                sortOrder = GradeSortOrder.ORIGINAL,
-            )
-        } else {
-            current.copy(
-                selectionMode = true,
-                sortOrder = GradeSortOrder.ORIGINAL,
-            )
-        }
+        if (current.selectionMode == enabled) return
+        // 开关只控制列表是否显示逐门勾选框；学期/性质筛选保持不动。
+        mutableState.value = current.copy(selectionMode = enabled)
+    }
+
+    fun toggleSelectionMode() {
+        setSelectionMode(!mutableState.value.selectionMode)
     }
 
     fun setGradeSelected(gradeId: Int, selected: Boolean) {
@@ -283,8 +337,6 @@ class GradeScreenModel(
                 grades = snapshot.grades,
                 selectedGradeIds = snapshot.selectedGradeIds,
                 courseTypesByCode = snapshot.courseTypesByCode,
-                selectedSemesters = emptySet(),
-                sortOrder = GradeSortOrder.ORIGINAL,
                 failure = null,
             )
         }.onFailure {
@@ -328,12 +380,15 @@ class GradeScreenModel(
         failure: GradeSyncFailure?,
     ) {
         val current = mutableState.value
-        val semesters = grades.map(Grade::semester).toSet()
+        val semesterOptions = grades.map(Grade::semester).filter(String::isNotBlank).toSet()
+        // 首次或筛选结果被数据更新掏空时，默认勾选全部学期。
+        val nextSemesters = (current.selectedSemesters intersect semesterOptions)
+            .ifEmpty { semesterOptions }
         mutableState.value = current.copy(
             grades = grades,
             selectedGradeIds = selectedIds,
             courseTypesByCode = courseTypesByCode,
-            selectedSemesters = current.selectedSemesters intersect semesters,
+            selectedSemesters = nextSemesters,
             selectedGradeId = current.selectedGradeId?.takeIf { id -> grades.any { it.id == id } },
             isLoading = false,
             isRefreshing = false,

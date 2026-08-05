@@ -69,6 +69,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.homework.typeLabel
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFilePickResult
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
+import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 import team.bjtuss.bjtuselfservice.shared.feature.shell.LegacySmartTransportWarning
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -169,7 +170,7 @@ fun HomeworkWorkspace(
                         HomeworkSyncFailure.NETWORK -> "上传失败，请检查网络后重试。"
                         HomeworkSyncFailure.SESSION_EXPIRED -> "登录会话已失效，请重新登录。"
                         HomeworkSyncFailure.MALFORMED_RESPONSE -> "学校平台没有确认提交成功，请稍后重试。"
-                        HomeworkSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "学校平台没有提供可验证的安全通道。"
+                        HomeworkSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "该资源地址不在允许的学校通道范围内。"
                         HomeworkSyncFailure.CACHE -> "提交已停止，本地缓存不可用。"
                     }
                 }
@@ -214,13 +215,10 @@ fun HomeworkWorkspace(
             }
         }
 
-        // 明文通道提示由 shell 控制显隐、随页面内容一起参与转场；旧参数保留给未接入新开关的调用方。
+        // 明文通道提示由 shell 控制显隐；宽度跟随父 Column 水平 padding，勿再叠 16.dp。
         if (usesLegacySmartTransport && !legacyWarningVisible) LegacySmartTransportWarning()
         if (legacyWarningVisible) {
-            LegacySmartTransportWarning(
-                onDismiss = onDismissLegacyWarning,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            LegacySmartTransportWarning(onDismiss = onDismissLegacyWarning)
         }
 
         if (state.isRefreshing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -918,36 +916,23 @@ private fun HomeworkFailureBanner(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                when (failure) {
-                    HomeworkSyncFailure.NETWORK -> if (hasContent) {
-                        "同步失败，正在显示本地作业。"
-                    } else {
-                        "无法连接智慧教学平台，请检查网络后重试。"
-                    }
-                    HomeworkSyncFailure.SESSION_EXPIRED -> "智慧教学平台会话已失效，请退出后重新登录。"
-                    HomeworkSyncFailure.MALFORMED_RESPONSE -> "智慧教学平台响应结构已变化，暂时无法解析。"
-                    HomeworkSyncFailure.SECURE_CHANNEL_UNAVAILABLE ->
-                        "学校平台未提供可验证的 HTTPS 通道，已拒绝降级到明文连接。"
-                    HomeworkSyncFailure.CACHE -> "本地作业缓存操作失败。"
-                },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (failure != HomeworkSyncFailure.CACHE) TextButton(onClick = onRetry) { Text("重试") }
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        }
-    }
+    AppErrorBanner(
+        message = when (failure) {
+            HomeworkSyncFailure.NETWORK -> if (hasContent) {
+                "同步失败，正在显示本地作业。"
+            } else {
+                "无法连接智慧教学平台，请检查网络后重试。"
+            }
+            HomeworkSyncFailure.SESSION_EXPIRED -> "智慧教学平台会话已失效，请退出后重新登录。"
+            HomeworkSyncFailure.MALFORMED_RESPONSE -> "智慧教学平台响应结构已变化，暂时无法解析。"
+            // 已授权明文后仍可能因 URL 白名单失败；勿再写「没有 HTTPS」与顶栏授权提示打架。
+            HomeworkSyncFailure.SECURE_CHANNEL_UNAVAILABLE ->
+                "该资源地址不在允许的学校通道范围内。"
+            HomeworkSyncFailure.CACHE -> "本地作业缓存操作失败。"
+        },
+        onRetry = if (failure != HomeworkSyncFailure.CACHE) onRetry else null,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable

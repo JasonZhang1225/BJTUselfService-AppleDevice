@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.exam.ExamScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
+import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -329,36 +330,20 @@ private fun ExamFailureBanner(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                when (failure) {
-                    ExamScheduleSyncFailure.NETWORK -> if (hasContent) {
-                        "同步失败，正在显示本地考试安排。"
-                    } else {
-                        "无法连接教务系统，请检查网络后重试。"
-                    }
-                    ExamScheduleSyncFailure.SESSION_EXPIRED -> "教务会话已失效，请退出后重新登录。"
-                    ExamScheduleSyncFailure.MALFORMED_RESPONSE -> "教务考试页面结构已变化，暂时无法解析。"
-                    ExamScheduleSyncFailure.CACHE -> "本地考试缓存操作失败。"
-                },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (failure != ExamScheduleSyncFailure.CACHE) {
-                TextButton(onClick = onRetry) { Text("重试") }
+    AppErrorBanner(
+        message = when (failure) {
+            ExamScheduleSyncFailure.NETWORK -> if (hasContent) {
+                "同步失败，正在显示本地考试安排。"
+            } else {
+                "无法连接教务系统，请检查网络后重试。"
             }
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        }
-    }
+            ExamScheduleSyncFailure.SESSION_EXPIRED -> "教务会话已失效，请退出后重新登录。"
+            ExamScheduleSyncFailure.MALFORMED_RESPONSE -> "教务考试页面结构已变化，暂时无法解析。"
+            ExamScheduleSyncFailure.CACHE -> "本地考试缓存操作失败。"
+        },
+        onRetry = if (failure != ExamScheduleSyncFailure.CACHE) onRetry else null,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable
