@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
+import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 
 /** 详情/网格等完整日名。 */
 private val dayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -605,36 +606,20 @@ private fun CourseFailureBanner(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                when (failure) {
-                    CourseScheduleSyncFailure.NETWORK -> if (hasContent) {
-                        "同步失败，正在显示本地课表。"
-                    } else {
-                        "无法连接教务系统，请检查网络后重试。"
-                    }
-                    CourseScheduleSyncFailure.SESSION_EXPIRED -> "教务会话已失效，请退出后重新登录。"
-                    CourseScheduleSyncFailure.MALFORMED_RESPONSE -> "教务课表页面结构已变化，暂时无法解析。"
-                    CourseScheduleSyncFailure.CACHE -> "本地课表缓存操作失败。"
-                },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (failure != CourseScheduleSyncFailure.CACHE) {
-                TextButton(onClick = onRetry) { Text("重试") }
+    AppErrorBanner(
+        message = when (failure) {
+            CourseScheduleSyncFailure.NETWORK -> if (hasContent) {
+                "同步失败，正在显示本地课表。"
+            } else {
+                "无法连接教务系统，请检查网络后重试。"
             }
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        }
-    }
+            CourseScheduleSyncFailure.SESSION_EXPIRED -> "教务会话已失效，请退出后重新登录。"
+            CourseScheduleSyncFailure.MALFORMED_RESPONSE -> "教务课表页面结构已变化，暂时无法解析。"
+            CourseScheduleSyncFailure.CACHE -> "本地课表缓存操作失败。"
+        },
+        onRetry = if (failure != CourseScheduleSyncFailure.CACHE) onRetry else null,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable

@@ -56,6 +56,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.courseware.VisibleCoursewareNod
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
 import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
+import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 import team.bjtuss.bjtuselfservice.shared.feature.shell.LegacySmartTransportWarning
 
 @Composable
@@ -195,13 +196,10 @@ fun CoursewareWorkspace(
         }
 
 
-        // 明文通道提示由 shell 控制显隐、随页面内容一起参与转场；旧参数保留给未接入新开关的调用方。
+        // 明文通道提示由 shell 控制显隐；宽度跟随父 Column 水平 padding，勿再叠 16.dp。
         if (usesLegacySmartTransport && !legacyWarningVisible) LegacySmartTransportWarning()
         if (legacyWarningVisible) {
-            LegacySmartTransportWarning(
-                onDismiss = onDismissLegacyWarning,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            LegacySmartTransportWarning(onDismiss = onDismissLegacyWarning)
         }
 
         if (!expanded && state.courses.isNotEmpty()) {
@@ -785,49 +783,25 @@ private fun CoursewareFailureBanner(
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                failureMessage(failure, hasContent),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (failure != CoursewareSyncFailure.CACHE) TextButton(onClick = onRetry) { Text("重试") }
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        }
-    }
+    AppErrorBanner(
+        message = failureMessage(failure, hasContent),
+        onRetry = if (failure != CoursewareSyncFailure.CACHE) onRetry else null,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable
 private fun CoursewareFileFailureBanner(failure: CoursewareSyncFailure, onDismiss: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        shape = RoundedCornerShape(14.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when (failure) {
-                    CoursewareSyncFailure.NETWORK -> "文件下载失败，请检查网络后重试。"
-                    CoursewareSyncFailure.SESSION_EXPIRED -> "登录会话已失效，请退出后重新登录。"
-                    CoursewareSyncFailure.MALFORMED_RESPONSE -> "学校平台返回了无效的文件信息。"
-                    CoursewareSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "文件地址不在允许的学校 HTTPS 范围内。"
-                    CoursewareSyncFailure.CACHE -> "本地课件缓存不可用。"
-                },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            TextButton(onClick = onDismiss) { Text("关闭") }
-        }
-    }
+    AppErrorBanner(
+        message = when (failure) {
+            CoursewareSyncFailure.NETWORK -> "文件下载失败，请检查网络后重试。"
+            CoursewareSyncFailure.SESSION_EXPIRED -> "登录会话已失效，请退出后重新登录。"
+            CoursewareSyncFailure.MALFORMED_RESPONSE -> "学校平台返回了无效的文件信息。"
+            CoursewareSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "该资源地址不在允许的学校通道范围内。"
+            CoursewareSyncFailure.CACHE -> "本地课件缓存不可用。"
+        },
+        onDismiss = onDismiss,
+    )
 }
 
 private fun failureMessage(failure: CoursewareSyncFailure, hasContent: Boolean): String = when (failure) {
@@ -838,7 +812,8 @@ private fun failureMessage(failure: CoursewareSyncFailure, hasContent: Boolean):
     }
     CoursewareSyncFailure.SESSION_EXPIRED -> "智慧教学平台会话已失效，请退出后重新登录。"
     CoursewareSyncFailure.MALFORMED_RESPONSE -> "学校课件数据结构已变化，暂时无法解析。"
-    CoursewareSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "学校平台没有提供可验证的 HTTPS 通道。"
+    // 已授权明文后勿再写「没有 HTTPS」，与顶部授权 banner 矛盾。
+    CoursewareSyncFailure.SECURE_CHANNEL_UNAVAILABLE -> "该资源地址不在允许的学校通道范围内。"
     CoursewareSyncFailure.CACHE -> "本地课件缓存操作失败。"
 }
 
