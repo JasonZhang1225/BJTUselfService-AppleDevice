@@ -1,5 +1,6 @@
 package team.bjtuss.bjtuselfservice.shared.feature.course
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -11,6 +12,10 @@ import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.course.coursesForWeek
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
 import team.bjtuss.bjtuselfservice.shared.domain.change.recordSafely
+
+/** 登录后自动同步：首轮 + 失败后再试 2 次（瞬时网络抖动常见）。 */
+internal const val AUTO_SYNC_MAX_ATTEMPTS = 3
+internal const val AUTO_SYNC_RETRY_DELAY_MILLIS = 700L
 
 enum class CourseScheduleType {
     CURRENT,
@@ -74,12 +79,16 @@ class CourseScheduleScreenModel(
             )
         }
         if (refreshFromNetwork) {
-            refresh()
+            // 自动同步失败时多试 1～2 次，避免首包抖动就弹「同步失败」。
+            refreshWithRetry(maxAttempts = AUTO_SYNC_MAX_ATTEMPTS)
         } else {
             mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
         }
     }
 
+    /**
+     * 手动刷新：单次请求。自动同步请用 [refreshWithRetry] 或 [initialize]。
+     */
     suspend fun refresh() {
         if (refreshInFlight) return
         refreshInFlight = true
@@ -103,6 +112,27 @@ class CourseScheduleScreenModel(
             }
         } finally {
             refreshInFlight = false
+            // 协程取消时 applySnapshot 不会执行，须清掉 isRefreshing，否则首页 OR 聚合会一直「同步中」。
+            val current = mutableState.value
+            if (current.isRefreshing || current.isLoading) {
+                mutableState.value = current.copy(isRefreshing = false, isLoading = false)
+            }
+        }
+    }
+
+    /**
+     * 连续刷新最多 [maxAttempts] 次；任一次成功即停。
+     * 用于登录后自动同步：中间失败不长期停留，最后一次失败才保留 failure 横幅。
+     */
+    suspend fun refreshWithRetry(
+        maxAttempts: Int = AUTO_SYNC_MAX_ATTEMPTS,
+        delayMillis: Long = AUTO_SYNC_RETRY_DELAY_MILLIS,
+    ) {
+        require(maxAttempts >= 1)
+        repeat(maxAttempts) { index ->
+            refresh()
+            if (mutableState.value.failure == null) return
+            if (index < maxAttempts - 1) delay(delayMillis)
         }
     }
 

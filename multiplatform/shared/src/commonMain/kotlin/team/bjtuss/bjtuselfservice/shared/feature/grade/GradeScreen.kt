@@ -104,6 +104,7 @@ import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
 import team.bjtuss.bjtuselfservice.shared.cache.AppPreferences
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeSyncFailure
 import team.bjtuss.bjtuselfservice.shared.data.home.HomeChangeFeedRepository
+import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleContentSource
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleScreenModel
@@ -338,11 +339,8 @@ fun AuthenticatedAppShell(
                 }
             }
             launch {
+                // 课表自动同步的重试在 ScreenModel.initialize 内完成（最多 3 次）。
                 courseScheduleModel.initialize(loginSyncPreferences.autoSyncSchedule)
-                if (loginSyncPreferences.autoSyncSchedule && courseScheduleModel.state.value.failure != null) {
-                    delay(LOGIN_SYNC_RETRY_DELAY_MILLIS)
-                    courseScheduleModel.refresh()
-                }
             }
         }
     }
@@ -361,6 +359,8 @@ fun AuthenticatedAppShell(
         isRefreshing: Boolean,
         showBack: Boolean,
         modifier: Modifier,
+        /** 空闲时右上角状态文案（如课表「已同步/未同步」）；登录中/同步中优先覆盖。 */
+        idleStatusText: String? = null,
         content: @Composable () -> Unit,
     ) {
         val showsCompactBottomBar = !expanded && !showBack && compactBottomBarOverlayPadding > 0.dp
@@ -375,6 +375,7 @@ fun AuthenticatedAppShell(
                         title = title,
                         isRefreshing = isRefreshing,
                         isLoggingIn = entryLoggingIn,
+                        idleStatusText = idleStatusText,
                         onBack = if (showBack) {
                             popBackStack
                         } else {
@@ -469,6 +470,13 @@ fun AuthenticatedAppShell(
                 isRefreshing = courseState.isRefreshing,
                 showBack = false,
                 modifier = modifier,
+                // 同步状态放在顶栏右上；有失败横幅时不要仍显示「已同步」。
+                idleStatusText = when {
+                    courseState.failure != null -> "同步失败"
+                    courseState.source == CourseScheduleContentSource.NETWORK -> "已同步"
+                    courseState.source == CourseScheduleContentSource.CACHE -> "已同步"
+                    else -> "未同步"
+                },
             ) {
                 CourseScheduleWorkspace(
                     state = courseState,
@@ -957,6 +965,8 @@ private fun CompactAppTopBar(
     title: String,
     isRefreshing: Boolean,
     isLoggingIn: Boolean = false,
+    /** 非登录/非刷新时右上角文案（课表等页的「已同步/未同步」）；其它页保持 null。 */
+    idleStatusText: String? = null,
     onBack: (() -> Unit)? = null,
 ) {
     // 顶栏与页面背景同色：iOS 的 SwiftUI 根视图在状态栏下方铺的就是 background，
@@ -999,20 +1009,26 @@ private fun CompactAppTopBar(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
-            // “登录中”优先于“同步中”：静默自动登录完成后才会开始数据同步。
-            val statusText = when {
+            // “登录中”优先于“同步中”，再回落到页面提供的空闲状态（如课表已同步）。
+            val busyText = when {
                 isLoggingIn -> "登录中"
                 isRefreshing -> "同步中"
                 else -> null
             }
-            if (statusText != null) {
+            if (busyText != null) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp,
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    statusText,
+                    busyText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (idleStatusText != null) {
+                Text(
+                    idleStatusText,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

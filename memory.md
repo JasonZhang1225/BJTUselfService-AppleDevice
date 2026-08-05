@@ -9,6 +9,8 @@
 
 ## 1. 本阶段已做到（≤10 行）
 
+- 2026-08-05 修复「同步中」假死：HomeScreenModel 曾用 isRefreshing 当互斥，协程取消（切后台）后标志不清、后续 refresh 永久 return；首页顶栏 OR 了 home/homework/exam/course 四态。现改 Mutex + finally 清标志；课表/考试/作业/成绩/课件同样 finally 收尾。另：Ktor 会话请求串行化修并发 Cookie 竞态（LiveCourseScheduleProbe 并发 8/8）。HomeScreenModelTest 含取消用例通过。
+- 2026-08-05 iOS 原生导航修复 leading-edge 侧滑返回：`NativeNavigationController` 隐藏系统导航栏后 UIKit 默认关掉 `interactivePopGestureRecognizer`；现自管 delegate——栈深>1 才允许开始，并 `shouldBeRequiredToFailBy` 让 pop 手势优先于 Compose 滚动。iOS Simulator `xcodebuild` 通过，侧滑手势待用户目视。
 - 2026-08-05 成绩页新增课程性质功能（M9，真实教务页面验证后实施）：成绩接口表格本身无课程性质列（8 列为序号/学年/课程/学分/成绩/加分成绩/教师/详情），课程性质从培养方案页交叉比对获得——每次手动刷新成绩时抓 `/training/training/program/` 列表页与全部 `stuview/<id>/` 详情页（rowspan/colspan 课组跟踪解析，实测 943 门课、成绩匹配率 100%），产出"课程号→必修/限选/任选/体育"映射，与成绩、自选记录同事务落库（新表 `program_course_type_cache`，`2.sqm` v2→v3 迁移）；成绩行不冗余存类别，计算时按课程名前缀课程号 join，查不到安全降级"其他类别"。自选课程模式新增 5 个三态 chips（必修/限选/任选/体育/其他类别，全选/部分/未选配色+计数），支持按类别批量勾选与排除（保研口径=必修+限选可一键达成）；体育课因学校培养方案 PDF/教务系统方案页/官方成绩单三层口径不一致（环节必修 vs 课程任选），独立为"体育"类别（体育Ⅰ/92 门专项课/体测课全覆盖）；修复课程号贪婪匹配吞课程名首字母 bug（`M202015BC语言`→`M202015B`）。desktopTest/assembleDebug 全绿，修订记录见 `docs/migration/m9-grade-course-type-plan.md`，待办见根目录 `体育课疑惑.md`（待问学校确认体育专项课是否计入保研）。
 
 - 2026-08-05 三端导航迁移到 Compose Multiplatform Navigation 3 `1.1.1`：删除 Navigation 2 `NavController/NavHost`，改为应用自持类型安全 `AppRoute` 返回栈与 `NavDisplay`；底栏并入各一级 scene，场景始终全屏，显隐不再改变内容高度。教训：`NavEntry.contentKey` 默认是路由 `toString()` 字符串，强转为 `AppRoute` 的门控曾让 Android 退化为极短淡化、iOS 落入 `None`，移除后恢复平台空间过渡。该共享返回栈的 Compose 模拟动画后经用户多轮主观验收判定"不够原生"，紧凑端二/三级页已被平台原生导航取代（见下条），NavDisplay 现只承担宽屏/回退路径与一级 tab 容器。

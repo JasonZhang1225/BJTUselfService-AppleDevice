@@ -127,16 +127,24 @@ class HomeworkScreenModel(
             failure = null,
             now = nowProvider(),
         )
-        when (val result = repository.refresh()) {
-            is HomeworkRefreshResult.Success -> {
-                changeRecorder.recordSafely(before.homework, result.snapshot.homework)
-                applySnapshot(result.snapshot, HomeworkContentSource.NETWORK, null)
+        try {
+            when (val result = repository.refresh()) {
+                is HomeworkRefreshResult.Success -> {
+                    changeRecorder.recordSafely(before.homework, result.snapshot.homework)
+                    applySnapshot(result.snapshot, HomeworkContentSource.NETWORK, null)
+                }
+                is HomeworkRefreshResult.Failure -> applySnapshot(
+                    result.snapshot,
+                    if (result.snapshot.homework.isEmpty()) null else HomeworkContentSource.CACHE,
+                    result.reason,
+                )
             }
-            is HomeworkRefreshResult.Failure -> applySnapshot(
-                result.snapshot,
-                if (result.snapshot.homework.isEmpty()) null else HomeworkContentSource.CACHE,
-                result.reason,
-            )
+        } finally {
+            // 取消/异常时也结束 loading，避免首页「同步中」假死。
+            val current = mutableState.value
+            if (current.isRefreshing || current.isLoading) {
+                mutableState.value = current.copy(isRefreshing = false, isLoading = false)
+            }
         }
     }
 
