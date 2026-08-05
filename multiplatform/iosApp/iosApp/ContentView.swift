@@ -12,7 +12,7 @@ private let appBackgroundColor = Color(
     }
 )
 
-private final class NativeNavigationController: UINavigationController, UINavigationControllerDelegate {
+private final class NativeNavigationController: UINavigationController, UINavigationControllerDelegate, UIGestureRecognizerDelegate {
     private var authenticatedSession: AuthenticatedSession?
 
     /// 本项目暂不开放实验性的 Compose iOS 无障碍语义树。iOS 26 的辅助功能客户端（含
@@ -25,15 +25,29 @@ private final class NativeNavigationController: UINavigationController, UINaviga
         controller.view.backgroundColor = UIColor(appBackgroundColor)
     }
 
+    /// 导航栏隐藏后，UIKit 默认会关掉 interactivePopGestureRecognizer（内部 delegate
+    /// 认为没有返回按钮就不该 pop）。二级页仍用 Compose 顶栏返回，因此必须自己接管
+    /// 手势：仅在栈深 > 1 时允许开始，并优先于 Compose 的滚动/拖动手势。
+    private func configureInteractivePopGesture() {
+        interactivePopGestureRecognizer?.isEnabled = true
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    private func updateInteractivePopEnabled() {
+        interactivePopGestureRecognizer?.isEnabled = viewControllers.count > 1
+    }
+
     init() {
         super.init(nibName: nil, bundle: nil)
         delegate = self
         setNavigationBarHidden(true, animated: false)
+        configureInteractivePopGesture()
         let rootController = MainViewControllerKt.NativeMainViewController(
             onAuthenticatedSessionChanged: { [weak self] session in
                 self?.authenticatedSession = session
                 if session == nil, (self?.viewControllers.count ?? 0) > 1 {
                     self?.popToRootViewController(animated: false)
+                    self?.updateInteractivePopEnabled()
                 }
             },
             onOpenNativeRoute: { [weak self] routeId in
@@ -42,6 +56,7 @@ private final class NativeNavigationController: UINavigationController, UINaviga
         )
         hideComposeAccessibilitySubtree(in: rootController)
         setViewControllers([rootController], animated: false)
+        updateInteractivePopEnabled()
     }
 
     @available(*, unavailable)
@@ -65,6 +80,39 @@ private final class NativeNavigationController: UINavigationController, UINaviga
         destination.restorationIdentifier = routeId
         hideComposeAccessibilitySubtree(in: destination)
         pushViewController(destination, animated: true)
+    }
+
+    // MARK: - UINavigationControllerDelegate
+
+    func navigationController(
+        _ navigationController: UINavigationController,
+        didShow viewController: UIViewController,
+        animated: Bool
+    ) {
+        // push/pop 动画结束后再同步开关，避免根页仍能半截手势卡住导航栈。
+        updateInteractivePopEnabled()
+        // 部分系统版本在 didShow 后会把 delegate 重置；每次确认仍由本类接管。
+        if interactivePopGestureRecognizer?.delegate !== self {
+            configureInteractivePopGesture()
+            updateInteractivePopEnabled()
+        }
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === interactivePopGestureRecognizer else { return true }
+        // 根页禁止 pop；二级及以上（更多→设置/考试/课件…）允许 leading-edge 跟手返回。
+        return viewControllers.count > 1
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        // 边缘返回优先：Compose 列表滚动/水平拖动须等 pop 手势失败后再开始，
+        // 否则 Skia 层会吃掉左缘触摸，导致“更多”子页无法侧滑返回。
+        gestureRecognizer === interactivePopGestureRecognizer
     }
 }
 

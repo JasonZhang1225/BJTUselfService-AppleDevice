@@ -4,10 +4,12 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleRefreshResult
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleRepository
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSnapshot
+import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
 
@@ -38,6 +40,43 @@ class CourseScheduleScreenModelTest {
         assertEquals(0, repository.refreshCount)
         assertEquals(CourseScheduleContentSource.CACHE, model.state.value.source)
         assertFalse(model.state.value.isLoading)
+    }
+
+    @Test
+    fun autoSyncInitializeRetriesUntilSuccess() = runBlocking {
+        // 失败回落快照的 currentWeek 置 0，避免中途失败先“锁定”教学周导致成功后不再跟随。
+        val cached = CourseScheduleSnapshot(listOf(course(1, week = 2)), 0)
+        val success = CourseScheduleSnapshot(listOf(course(9, week = 5)), 5)
+        val repository = FakeRepository(
+            loaded = cached,
+            refreshed = success,
+            failFirstN = 2,
+        )
+        val model = CourseScheduleScreenModel(repository)
+
+        model.initialize()
+
+        assertEquals(3, repository.refreshCount)
+        assertEquals(CourseScheduleContentSource.NETWORK, model.state.value.source)
+        assertNull(model.state.value.failure)
+        assertEquals(5, model.state.value.selectedWeek)
+    }
+
+    @Test
+    fun autoSyncInitializeStopsAfterMaxFailedAttempts() = runBlocking {
+        val cached = CourseScheduleSnapshot(listOf(course(1, week = 2)), 2)
+        val repository = FakeRepository(
+            loaded = cached,
+            refreshed = cached,
+            failFirstN = 10,
+        )
+        val model = CourseScheduleScreenModel(repository)
+
+        model.initialize()
+
+        assertEquals(AUTO_SYNC_MAX_ATTEMPTS, repository.refreshCount)
+        assertEquals(CourseScheduleSyncFailure.NETWORK, model.state.value.failure)
+        assertEquals(CourseScheduleContentSource.CACHE, model.state.value.source)
     }
 
     @Test
@@ -97,12 +136,20 @@ class CourseScheduleScreenModelTest {
     private class FakeRepository(
         private val loaded: CourseScheduleSnapshot,
         private var refreshed: CourseScheduleSnapshot,
+        private val failFirstN: Int = 0,
     ) : CourseScheduleRepository {
         var refreshCount = 0
         override fun load(): CourseScheduleSnapshot = loaded
         override suspend fun refresh(): CourseScheduleRefreshResult {
             refreshCount += 1
-            return CourseScheduleRefreshResult.Success(refreshed)
+            return if (refreshCount <= failFirstN) {
+                CourseScheduleRefreshResult.Failure(
+                    snapshot = loaded,
+                    reason = CourseScheduleSyncFailure.NETWORK,
+                )
+            } else {
+                CourseScheduleRefreshResult.Success(refreshed)
+            }
         }
     }
 

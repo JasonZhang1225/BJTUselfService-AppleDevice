@@ -314,7 +314,7 @@ private fun NetworkPaymentInstruction(family: PlatformFamily) {
 private fun MailCard(status: HomeStatus?, onClick: () -> Unit, modifier: Modifier) = StatusCard(
     title = "新邮件",
     value = status?.newMailCount ?: "—",
-    detail = if (status?.hasNewMail == true) "有新邮件，记得查看" else "当前 MIS 邮箱状态",
+    detail = if (status?.hasNewMail == true) "有新邮件，记得查看" else "当前 BJTU 邮箱状态",
     action = "查看邮箱",
     onClick = onClick,
     modifier = modifier,

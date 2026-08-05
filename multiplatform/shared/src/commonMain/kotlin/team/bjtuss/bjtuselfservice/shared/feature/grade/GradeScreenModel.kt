@@ -163,6 +163,10 @@ class GradeScreenModel(
             }
         } finally {
             refreshInFlight = false
+            val current = mutableState.value
+            if (current.isRefreshing || current.isLoading) {
+                mutableState.value = current.copy(isRefreshing = false, isLoading = false)
+            }
         }
     }
 

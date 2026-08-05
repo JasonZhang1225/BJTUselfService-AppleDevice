@@ -110,17 +110,24 @@ class CoursewareScreenModel(
                     isRefreshing = before.courses.isNotEmpty(),
                     failure = null,
                 )
-                when (val result = repository.refresh()) {
-                    is CoursewareRefreshResult.Success -> {
-                        freshCourseIds.clear()
-                        applySnapshot(result.snapshot, CoursewareContentSource.NETWORK, null)
-                        mutableState.value.selectedCourseId?.let { loadCourseLocked(it) }
+                try {
+                    when (val result = repository.refresh()) {
+                        is CoursewareRefreshResult.Success -> {
+                            freshCourseIds.clear()
+                            applySnapshot(result.snapshot, CoursewareContentSource.NETWORK, null)
+                            mutableState.value.selectedCourseId?.let { loadCourseLocked(it) }
+                        }
+                        is CoursewareRefreshResult.Failure -> applySnapshot(
+                            result.snapshot,
+                            if (result.snapshot.courses.isEmpty()) null else CoursewareContentSource.CACHE,
+                            result.reason,
+                        )
                     }
-                    is CoursewareRefreshResult.Failure -> applySnapshot(
-                        result.snapshot,
-                        if (result.snapshot.courses.isEmpty()) null else CoursewareContentSource.CACHE,
-                        result.reason,
-                    )
+                } finally {
+                    val current = mutableState.value
+                    if (current.isRefreshing || current.isLoading) {
+                        mutableState.value = current.copy(isRefreshing = false, isLoading = false)
+                    }
                 }
             }
         } finally {

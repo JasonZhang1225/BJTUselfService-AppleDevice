@@ -1,6 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.feature.course
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -22,19 +24,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,16 +43,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 
+/** 详情/网格等完整日名。 */
 private val dayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+/**
+ * 紧凑端日选择：单字保证任意机型单行七等分；比「周一」或 Mon 更省宽。
+ * 选中态用容器色区分，不依赖长文案。
+ */
+private val compactDayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 private val slotLabels = listOf(
     "第一节\n08:00–09:50",
     "第二节\n10:10–12:00",
@@ -72,7 +81,7 @@ fun CourseScheduleWorkspace(
     onRefresh: () -> Unit,
     modifier: Modifier,
 ) {
-    var showWeekSelector by remember { mutableStateOf(false) }
+    var showSchedulePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(model) {
         model.initialize()
@@ -120,11 +129,9 @@ fun CourseScheduleWorkspace(
         when {
             state.isLoading && state.courses.isEmpty() -> CourseLoadingState()
             else -> {
-                CourseSummary(state)
-                ScheduleControls(
+                CourseSummary(
                     state = state,
-                    model = model,
-                    onSelectWeek = { showWeekSelector = true },
+                    onOpenPicker = { showSchedulePicker = true },
                 )
                 if (state.scheduleCourses.isEmpty()) {
                     CourseEmptyState(state.scheduleType, onRefresh)
@@ -168,15 +175,42 @@ fun CourseScheduleWorkspace(
         }
     }
 
-    if (showWeekSelector) {
-        ModalBottomSheet(onDismissRequest = { showWeekSelector = false }) {
+    if (showSchedulePicker) {
+        // skipPartiallyExpanded：打开即全高，周数芯片不用先拖一下才能看全。
+        val pickerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showSchedulePicker = false },
+            sheetState = pickerSheetState,
+        ) {
             Column(
                 modifier = Modifier.fillMaxWidth()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text("选择周数", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("课表与周数", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "课表类型",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.scheduleType == CourseScheduleType.CURRENT,
+                        onClick = { model.selectScheduleType(CourseScheduleType.CURRENT) },
+                        label = { Text("本学期课表") },
+                    )
+                    FilterChip(
+                        selected = state.scheduleType == CourseScheduleType.SELECTION,
+                        onClick = { model.selectScheduleType(CourseScheduleType.SELECTION) },
+                        label = { Text("选课课表") },
+                    )
+                }
+                Text(
+                    "教学周",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Text(
                     "“全部”显示该课表中的所有课程；本学期首次进入会优先跟随当前周。",
                     style = MaterialTheme.typography.bodyMedium,
@@ -186,14 +220,33 @@ fun CourseScheduleWorkspace(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    (0..26).forEach { week ->
+                    FilterChip(
+                        selected = state.selectedWeek == 0,
+                        onClick = {
+                            model.selectWeek(0)
+                            showSchedulePicker = false
+                        },
+                        label = { Text("全部") },
+                    )
+                    // 紧挨「全部」：快捷选到学校当前教学周（括号标明第几周）。
+                    if (state.currentWeek in 1..26) {
+                        FilterChip(
+                            selected = state.selectedWeek == state.currentWeek,
+                            onClick = {
+                                model.selectWeek(state.currentWeek)
+                                showSchedulePicker = false
+                            },
+                            label = { Text("当前（第${state.currentWeek}周）") },
+                        )
+                    }
+                    (1..26).forEach { week ->
                         FilterChip(
                             selected = state.selectedWeek == week,
                             onClick = {
                                 model.selectWeek(week)
-                                showWeekSelector = false
+                                showSchedulePicker = false
                             },
-                            label = { Text(if (week == 0) "全部" else "第${week}周") },
+                            label = { Text("第${week}周") },
                         )
                     }
                 }
@@ -204,76 +257,59 @@ fun CourseScheduleWorkspace(
 }
 
 @Composable
-private fun CourseSummary(state: CourseScheduleUiState) {
+private fun CourseSummary(
+    state: CourseScheduleUiState,
+    onOpenPicker: () -> Unit,
+) {
+    val typeLabel = if (state.scheduleType == CourseScheduleType.CURRENT) "本学期课表" else "选课课表"
+    val weekLabel = if (state.selectedWeek == 0) "全部教学周" else "第 ${state.selectedWeek} 周"
+    // 副行只保留当前教学周提示；条数对用户无意义，已去掉。
+    val subtitle = if (state.currentWeek > 0) "当前第 ${state.currentWeek} 周" else null
+
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         shape = RoundedCornerShape(18.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 13.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onOpenPicker)
+                    .padding(vertical = 2.dp, horizontal = 4.dp),
+            ) {
                 Text(
-                    if (state.selectedWeek == 0) "全部教学周" else "第 ${state.selectedWeek} 周",
+                    "$typeLabel·$weekLabel",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    buildString {
-                        append(if (state.scheduleType == CourseScheduleType.CURRENT) "本学期课表" else "选课课表")
-                        if (state.currentWeek > 0) append(" · 当前第 ${state.currentWeek} 周")
-                        append(" · ${state.visibleCourses.size} 条安排")
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
-                )
+                if (subtitle != null) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
+                    )
+                }
             }
             Surface(
+                onClick = onOpenPicker,
                 color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
                 shape = RoundedCornerShape(999.dp),
             ) {
                 Text(
-                    when {
-                        state.isRefreshing -> "正在同步"
-                        state.source == CourseScheduleContentSource.CACHE -> "本地缓存"
-                        state.source == CourseScheduleContentSource.NETWORK -> "已同步"
-                        else -> "尚未同步"
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    "切换",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ScheduleControls(
-    state: CourseScheduleUiState,
-    model: CourseScheduleScreenModel,
-    onSelectWeek: () -> Unit,
-) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        FilterChip(
-            selected = state.scheduleType == CourseScheduleType.CURRENT,
-            onClick = { model.selectScheduleType(CourseScheduleType.CURRENT) },
-            label = { Text("本学期") },
-        )
-        FilterChip(
-            selected = state.scheduleType == CourseScheduleType.SELECTION,
-            onClick = { model.selectScheduleType(CourseScheduleType.SELECTION) },
-            label = { Text("选课课表") },
-        )
-        OutlinedButton(onClick = onSelectWeek) {
-            Text(if (state.selectedWeek == 0) "周数：全部" else "周数：第${state.selectedWeek}周")
         }
     }
 }
@@ -381,19 +417,50 @@ private fun CourseGridCell(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CompactDaySelector(selectedDay: Int, onSelect: (Int) -> Unit) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+    // 固定单行七等分，不随字号/机型折成两行（原 FlowRow +「周一」会在 Pro Max 上折行）。
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.48f),
+        shape = RoundedCornerShape(14.dp),
     ) {
-        dayLabels.forEachIndexed { index, label ->
-            FilterChip(
-                selected = selectedDay == index,
-                onClick = { onSelect(index) },
-                label = { Text(label) },
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            compactDayLabels.forEachIndexed { index, label ->
+                val selected = selectedDay == index
+                Surface(
+                    onClick = { onSelect(index) },
+                    modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        Color.Transparent
+                    },
+                    contentColor = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    shape = RoundedCornerShape(11.dp),
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp),
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -423,17 +490,15 @@ private fun DayScheduleList(
                 )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     if (slotCourses.isEmpty()) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.42f),
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Text(
-                                "无课",
-                                modifier = Modifier.padding(14.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        // 单层淡底 + 弱化文字，避免「外圈深、内块浅」的双层方框感。
+                        Text(
+                            "无课",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 14.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.accessibleAlpha(0.55f),
+                        )
                     } else {
                         slotCourses.forEach { course ->
                             CourseListCard(course, onOpen)
@@ -447,22 +512,31 @@ private fun DayScheduleList(
 
 @Composable
 private fun CourseListCard(course: Course, onOpen: (Int) -> Unit) {
-    ElevatedCard(
+    // 扁平 Surface：无 elevation 阴影描边，避免外圈偏深、正文区又叠浅色矩形的双层感。
+    Surface(
         onClick = { onOpen(course.id) },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.accessibleAlpha(0.66f),
-        ),
+        color = MaterialTheme.colorScheme.primaryContainer.accessibleAlpha(0.72f),
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(13.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
             Text(course.courseName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
                 "${course.coursePlace} · ${course.courseTeacher.ifBlank { "教师未知" }}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
             )
-            Text(course.courseTime, style = MaterialTheme.typography.labelMedium)
+            Text(
+                course.courseTime,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.72f),
+            )
         }
     }
 }

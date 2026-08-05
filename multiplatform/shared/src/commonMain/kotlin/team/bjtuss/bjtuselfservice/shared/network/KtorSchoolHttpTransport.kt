@@ -19,6 +19,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.Parameters
 import io.ktor.http.Url
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 expect fun schoolHttpEngineFactory(): HttpClientEngineFactory<*>
 
@@ -31,6 +33,13 @@ class KtorSchoolHttpTransport(
 ) : SchoolHttpTransport {
     private var cookieStorage = AcceptAllCookiesStorage()
     private var client = newClient(cookieStorage)
+    /**
+     * 登录后课表/作业/考试/首页会并行刷新，共享同一 Cookie jar。
+     * Ktor AcceptAllCookiesStorage 非线程安全：并发 execute 会偶发 NETWORK 失败
+     *（单独拉课表稳定成功，并发则大量失败——已用 LiveCourseScheduleProbe 复现）。
+     * 串行化会话请求，换正确性；模块仍可并行编排，只是底层排队。
+     */
+    private val requestMutex = Mutex()
 
     companion object {
         /**
@@ -42,55 +51,57 @@ class KtorSchoolHttpTransport(
                 "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0"
     }
 
-    override suspend fun execute(request: SchoolHttpRequest): SchoolHttpResponse = try {
-        val response = client.request(request.url) {
-            method = when (request.method) {
-                SchoolHttpMethod.GET -> HttpMethod.Get
-                SchoolHttpMethod.POST -> HttpMethod.Post
+    override suspend fun execute(request: SchoolHttpRequest): SchoolHttpResponse = requestMutex.withLock {
+        try {
+            val response = client.request(request.url) {
+                method = when (request.method) {
+                    SchoolHttpMethod.GET -> HttpMethod.Get
+                    SchoolHttpMethod.POST -> HttpMethod.Post
+                }
+                headers {
+                    request.headers.forEach { (name, value) -> append(name, value) }
+                }
+                if (request.multipartFiles.isNotEmpty()) {
+                    setBody(
+                        MultiPartFormDataContent(
+                            formData {
+                                request.multipartFiles.forEach { file ->
+                                    append(
+                                        file.fieldName,
+                                        file.bytes,
+                                        KtorHeaders.build {
+                                            append(
+                                                HttpHeaders.ContentDisposition,
+                                                "filename=\"${file.fileName.safeMultipartFileName()}\"",
+                                            )
+                                            append(HttpHeaders.ContentType, file.contentType)
+                                        },
+                                    )
+                                }
+                            },
+                        ),
+                    )
+                } else if (request.formFields.isNotEmpty()) {
+                    setBody(
+                        FormDataContent(
+                            Parameters.build {
+                                request.formFields.forEach { (name, value) -> append(name, value) }
+                            },
+                        ),
+                    )
+                }
             }
-            headers {
-                request.headers.forEach { (name, value) -> append(name, value) }
-            }
-            if (request.multipartFiles.isNotEmpty()) {
-                setBody(
-                    MultiPartFormDataContent(
-                        formData {
-                            request.multipartFiles.forEach { file ->
-                                append(
-                                    file.fieldName,
-                                    file.bytes,
-                                    KtorHeaders.build {
-                                        append(
-                                            HttpHeaders.ContentDisposition,
-                                            "filename=\"${file.fileName.safeMultipartFileName()}\"",
-                                        )
-                                        append(HttpHeaders.ContentType, file.contentType)
-                                    },
-                                )
-                            }
-                        },
-                    ),
-                )
-            } else if (request.formFields.isNotEmpty()) {
-                setBody(
-                    FormDataContent(
-                        Parameters.build {
-                            request.formFields.forEach { (name, value) -> append(name, value) }
-                        },
-                    ),
-                )
-            }
+            SchoolHttpResponse(
+                statusCode = response.status.value,
+                finalUrl = response.call.request.url.toString(),
+                headers = response.headers.entries().associate { it.key to it.value },
+                body = response.bodyAsBytes(),
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            throw SchoolNetworkException("School request failed", error)
         }
-        SchoolHttpResponse(
-            statusCode = response.status.value,
-            finalUrl = response.call.request.url.toString(),
-            headers = response.headers.entries().associate { it.key to it.value },
-            body = response.bodyAsBytes(),
-        )
-    } catch (error: CancellationException) {
-        throw error
-    } catch (error: Throwable) {
-        throw SchoolNetworkException("School request failed", error)
     }
 
     override fun clearSession() {
@@ -100,13 +111,15 @@ class KtorSchoolHttpTransport(
     }
 
     override suspend fun sessionCookiesFor(url: String): List<SchoolSessionCookie> =
-        cookieStorage.get(Url(url)).map { cookie ->
-            SchoolSessionCookie(
-                name = cookie.name,
-                value = cookie.value,
-                path = cookie.path ?: "/",
-                secure = cookie.secure,
-            )
+        requestMutex.withLock {
+            cookieStorage.get(Url(url)).map { cookie ->
+                SchoolSessionCookie(
+                    name = cookie.name,
+                    value = cookie.value,
+                    path = cookie.path ?: "/",
+                    secure = cookie.secure,
+                )
+            }
         }
 
     private fun newClient(storage: AcceptAllCookiesStorage): HttpClient = HttpClient(engineFactory) {
