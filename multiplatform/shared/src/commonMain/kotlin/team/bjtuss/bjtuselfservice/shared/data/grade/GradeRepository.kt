@@ -13,7 +13,8 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.selectionRecordsForGradeI
 data class GradeSnapshot(
     val grades: List<Grade>,
     val selectedGradeIds: Set<Int>,
-    val courseTypesByCode: Map<String, CourseType> = emptyMap(),
+    /** null = 课程性质映射从未成功同步（培养方案未刷新/缓存为空/抓取失败且无旧数据）。 */
+    val courseTypesByCode: Map<String, CourseType>? = null,
 )
 
 enum class GradeSyncFailure {
@@ -34,7 +35,7 @@ sealed interface GradeRefreshResult {
 interface GradeLocalDataSource {
     fun grades(accountScope: String): List<Grade>
     fun selections(accountScope: String): List<GradeSelectionRecord>
-    fun courseTypes(accountScope: String): Map<String, CourseType>
+    fun courseTypes(accountScope: String): Map<String, CourseType>?
     fun replaceSnapshot(
         accountScope: String,
         grades: List<Grade>,
@@ -52,10 +53,17 @@ class CacheStoreGradeLocalDataSource(
     override fun selections(accountScope: String): List<GradeSelectionRecord> =
         cacheStore.gradeSelections(accountScope)
 
-    override fun courseTypes(accountScope: String): Map<String, CourseType> =
-        cacheStore.programCourseTypes(accountScope).mapNotNull { (courseId, storedText) ->
+    /**
+     * 培养方案正常时约 940 行；缓存表无行即从未成功同步过，返回 null 表示“未加载”，
+     * 避免把全部课程误当成“其他类别”。
+     */
+    override fun courseTypes(accountScope: String): Map<String, CourseType>? {
+        val raw = cacheStore.programCourseTypes(accountScope)
+        if (raw.isEmpty()) return null
+        return raw.mapNotNull { (courseId, storedText) ->
             courseTypeForStoredText(storedText)?.let { courseId to it }
         }.toMap()
+    }
 
     override fun replaceSnapshot(
         accountScope: String,
@@ -178,7 +186,7 @@ class DefaultGradeRepository(
         val grades = local.grades(accountScope)
         val records = selectionRecordsExcludingTypes(
             records = local.selections(accountScope),
-            typeByCode = local.courseTypes(accountScope),
+            typeByCode = local.courseTypes(accountScope).orEmpty(),
             excludedTypes = courseTypes,
         )
         local.replaceSelections(accountScope, records)

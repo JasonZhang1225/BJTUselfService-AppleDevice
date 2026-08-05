@@ -27,7 +27,8 @@ data class GradeUiState(
     val grades: List<Grade> = emptyList(),
     val selectedGradeIds: Set<Int> = emptySet(),
     val selectedSemesters: Set<String> = emptySet(),
-    val courseTypesByCode: Map<String, CourseType> = emptyMap(),
+    /** null = 性质映射未加载（从未同步成功），此时不应把全部课程当“其他类别”。 */
+    val courseTypesByCode: Map<String, CourseType>? = null,
     val sortOrder: GradeSortOrder = GradeSortOrder.ORIGINAL,
     val selectionMode: Boolean = false,
     val selectedGradeId: Int? = null,
@@ -55,11 +56,20 @@ data class GradeUiState(
     val selectedGrade: Grade?
         get() = grades.firstOrNull { it.id == selectedGradeId }
 
-    /** 映射查不到课程号的按未知处理，UI 不显示标签。 */
-    fun courseTypeOf(grade: Grade): CourseType = courseTypeOfGrade(grade, courseTypesByCode)
+    /**
+     * null = 映射未加载（未同步），课程不归属任何类别；非 null 时查不到课程号的按未知处理。
+     */
+    fun courseTypeOf(grade: Grade): CourseType? {
+        val typeByCode = courseTypesByCode ?: return null
+        return courseTypeOfGrade(grade, typeByCode)
+    }
 
     val courseTypeCounts: Map<CourseType, Int>
-        get() = grades.groupingBy { grade -> courseTypeOf(grade) }.eachCount()
+        get() = if (courseTypesByCode == null) {
+            emptyMap()
+        } else {
+            grades.groupingBy { grade -> courseTypeOf(grade) ?: CourseType.UNKNOWN }.eachCount()
+        }
 
     /**
      * 某性质课程在自选模式下的三态：全部选中 / 部分选中 / 未选中。
@@ -309,7 +319,7 @@ class GradeScreenModel(
     private fun applySnapshot(
         grades: List<Grade>,
         selectedIds: Set<Int>,
-        courseTypesByCode: Map<String, CourseType>,
+        courseTypesByCode: Map<String, CourseType>?,
         source: GradeContentSource?,
         failure: GradeSyncFailure?,
     ) {

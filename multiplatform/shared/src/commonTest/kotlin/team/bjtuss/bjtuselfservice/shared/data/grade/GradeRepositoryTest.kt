@@ -114,6 +114,18 @@ class GradeRepositoryTest {
     }
 
     @Test
+    fun unsyncedProgramMappingLoadsAsNull() = runBlocking {
+        val repository = DefaultGradeRepository(
+            accountScope = "student-a",
+            local = FakeLocal(storedGrades = listOf(grade(id = 1))),
+            remote = FakeRemote(emptyList()),
+            programRemote = FakeProgramRemote(),
+        )
+
+        assertEquals(null, repository.load().courseTypesByCode)
+    }
+
+    @Test
     fun selectionActionsPreserveDormantRecordsAndCanClearScopedOrAll() {
         val first = grade(id = 1, name = "课程A", semester = "2025-2026-1")
         val second = grade(id = 2, name = "课程B", semester = "2025-2026-2")
@@ -198,7 +210,7 @@ class GradeRepositoryTest {
     private class FakeLocal(
         var storedGrades: List<Grade> = emptyList(),
         var storedSelections: List<GradeSelectionRecord> = emptyList(),
-        var storedCourseTypes: Map<String, CourseType> = emptyMap(),
+        var storedCourseTypes: Map<String, CourseType>? = null,
         private val failSnapshotReplace: Boolean = false,
     ) : GradeLocalDataSource {
         val replacedSnapshotAccounts = mutableListOf<String>()
@@ -208,7 +220,7 @@ class GradeRepositoryTest {
 
         override fun selections(accountScope: String): List<GradeSelectionRecord> = storedSelections
 
-        override fun courseTypes(accountScope: String): Map<String, CourseType> = storedCourseTypes
+        override fun courseTypes(accountScope: String): Map<String, CourseType>? = storedCourseTypes
 
         override fun replaceSnapshot(
             accountScope: String,

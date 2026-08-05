@@ -12,8 +12,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
 import team.bjtuss.bjtuselfservice.shared.cache.db.CacheDatabaseSql
+import team.bjtuss.bjtuselfservice.shared.data.grade.CacheStoreGradeLocalDataSource
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
+import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSelectionRecord
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
@@ -314,6 +316,24 @@ class CacheStoreTest {
             assertEquals(8, store.courseCurrentWeek("student-a"))
             assertEquals("课程-B", store.courses("student-b").single().courseName)
             assertEquals(12, store.courseCurrentWeek("student-b"))
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
+    fun programMappingDataSourceIsNullUntilRowsExist() {
+        val store = inMemoryStore()
+        try {
+            val local = CacheStoreGradeLocalDataSource(store)
+            assertEquals(null, local.courseTypes("student-a"))
+
+            store.replaceProgramCourseTypes("student-a", mapOf("C312009B" to "必修"))
+
+            assertEquals(
+                mapOf("C312009B" to CourseType.REQUIRED),
+                local.courseTypes("student-a"),
+            )
         } finally {
             store.close()
         }

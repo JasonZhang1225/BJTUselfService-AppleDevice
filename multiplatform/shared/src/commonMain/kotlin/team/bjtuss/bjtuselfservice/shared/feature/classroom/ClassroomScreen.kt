@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +50,8 @@ import team.bjtuss.bjtuselfservice.shared.domain.classroom.ClassroomSortField
 fun ClassroomWorkspace(
     model: ClassroomScreenModel,
     expanded: Boolean,
+    // compact 下选中教学楼后由 shell push 出第三级详情页；expanded 列表-详情并排，用不到。
+    onOpenBuilding: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val state by model.state.collectAsState()
@@ -72,26 +75,43 @@ fun ClassroomWorkspace(
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             )
         }
-    } else if (state.selectedBuilding == null) {
+    } else {
+        // compact 只列教学楼，选中后由 NavHost push 出详情页（ClassroomBuildingWorkspace）。
         BuildingList(
             buildings = state.buildings,
             selected = null,
-            onSelect = { building -> scope.launch { model.selectBuilding(building) } },
+            onSelect = { building ->
+                scope.launch { model.selectBuilding(building) }
+                onOpenBuilding()
+            },
             modifier = modifier.fillMaxSize(),
         )
-    } else {
-        Column(modifier = modifier.fillMaxSize()) {
-            OutlinedButton(
-                onClick = model::clearSelection,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            ) { Text("返回教学楼") }
-            ClassroomDetail(
-                state = state,
-                model = model,
-                onRefresh = { scope.launch { model.refresh() } },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-        }
+    }
+}
+
+/** 教室详情的第三级页面：返回（含系统返回/手势 pop）时清除教学楼选中。 */
+@Composable
+fun ClassroomBuildingWorkspace(
+    model: ClassroomScreenModel,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val state by model.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    DisposableEffect(Unit) {
+        onDispose { model.clearSelection() }
+    }
+    Column(modifier = modifier.fillMaxSize()) {
+        OutlinedButton(
+            onClick = onBack,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        ) { Text("返回教学楼") }
+        ClassroomDetail(
+            state = state,
+            model = model,
+            onRefresh = { scope.launch { model.refresh() } },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
     }
 }
 

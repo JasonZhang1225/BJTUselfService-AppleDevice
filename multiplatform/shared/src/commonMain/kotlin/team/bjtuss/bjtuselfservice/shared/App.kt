@@ -81,6 +81,9 @@ fun App(
     coursewareDirectoryGateway: CoursewareDirectoryGateway = UnavailableCoursewareDirectoryGateway,
     appCommandBus: AppCommandBus? = null,
     captchaRecognizer: CaptchaRecognizer = UnavailableCaptchaRecognizer,
+    nativeNavigationEnabled: Boolean = false,
+    onOpenNativeRoute: (String) -> Unit = {},
+    onAuthenticatedSessionChanged: (AuthenticatedSession?) -> Unit = {},
 ) {
     val cacheStore = cacheStoreHandle.store
     var appPreferences by remember(cacheStore) {
@@ -94,6 +97,69 @@ fun App(
         }
     }
 
+    PlatformAppTheme(useDarkTheme = useDarkTheme) { effectiveFontScale ->
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                LoginRoute(
+                    platform = currentPlatform(),
+                    windowClass = adaptiveWindowClassFor(
+                        widthDp = maxWidth.value.toInt(),
+                        fontScale = effectiveFontScale,
+                    ),
+                    accountSecurityStore = accountSecurityStore,
+                    cacheStoreHandle = cacheStoreHandle,
+                    homeworkFileGateway = homeworkFileGateway,
+                    coursewareDirectoryGateway = coursewareDirectoryGateway,
+                    appCommandBus = appCommandBus,
+                    appPreferences = appPreferences,
+                    onPreferencesChanged = onPreferencesChanged,
+                    captchaRecognizer = captchaRecognizer,
+                    nativeNavigationEnabled = nativeNavigationEnabled,
+                    onOpenNativeRoute = onOpenNativeRoute,
+                    onAuthenticatedSessionChanged = onAuthenticatedSessionChanged,
+                )
+            }
+        }
+    }
+}
+
+/** 平台 Activity/UIViewController 中渲染单个原生导航目的地。 */
+@Composable
+fun AuthenticatedDestinationApp(
+    session: AuthenticatedSession,
+    routeId: String,
+    homeworkFileGateway: HomeworkFileGateway = session.homeworkFileGateway,
+    coursewareDirectoryGateway: CoursewareDirectoryGateway = session.coursewareDirectoryGateway,
+    onOpenNativeRoute: (String) -> Unit,
+    onCloseNativeRoute: () -> Unit,
+) {
+    PlatformAppTheme(useDarkTheme = isSystemInDarkTheme()) { effectiveFontScale ->
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                team.bjtuss.bjtuselfservice.shared.feature.grade.AuthenticatedAppShell(
+                    session = session,
+                    platform = currentPlatform(),
+                    windowClass = adaptiveWindowClassFor(
+                        widthDp = maxWidth.value.toInt(),
+                        fontScale = effectiveFontScale,
+                    ),
+                    nativeNavigationEnabled = true,
+                    onOpenNativeRoute = onOpenNativeRoute,
+                    forcedRouteId = routeId,
+                    onCloseNativeRoute = onCloseNativeRoute,
+                    homeworkFileGatewayOverride = homeworkFileGateway,
+                    coursewareDirectoryGatewayOverride = coursewareDirectoryGateway,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlatformAppTheme(
+    useDarkTheme: Boolean,
+    content: @Composable (effectiveFontScale: Float) -> Unit,
+) {
     val systemDensity = LocalDensity.current
     val effectiveFontScale = rememberPlatformFontScale(systemDensity.fontScale)
     val increasedContrast = rememberPlatformIncreasedContrast()
@@ -107,31 +173,14 @@ fun App(
     }
     CompositionLocalProvider(
         LocalDensity provides Density(systemDensity.density, effectiveFontScale),
+        LocalReduceMotion provides reduceMotion,
         LocalReduceTransparency provides reduceTransparency,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
             motionScheme = if (reduceMotion) ReducedMotionScheme else MotionScheme.standard(),
         ) {
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    LoginRoute(
-                        platform = currentPlatform(),
-                        windowClass = adaptiveWindowClassFor(
-                            widthDp = maxWidth.value.toInt(),
-                            fontScale = effectiveFontScale,
-                        ),
-                        accountSecurityStore = accountSecurityStore,
-                        cacheStoreHandle = cacheStoreHandle,
-                        homeworkFileGateway = homeworkFileGateway,
-                        coursewareDirectoryGateway = coursewareDirectoryGateway,
-                        appCommandBus = appCommandBus,
-                        appPreferences = appPreferences,
-                        onPreferencesChanged = onPreferencesChanged,
-                        captchaRecognizer = captchaRecognizer,
-                    )
-                }
-            }
+            content(effectiveFontScale)
         }
     }
 }

@@ -11,7 +11,9 @@
 
 - 2026-08-05 成绩页新增课程性质功能（M9，真实教务页面验证后实施）：成绩接口表格本身无课程性质列（8 列为序号/学年/课程/学分/成绩/加分成绩/教师/详情），课程性质从培养方案页交叉比对获得——每次手动刷新成绩时抓 `/training/training/program/` 列表页与全部 `stuview/<id>/` 详情页（rowspan/colspan 课组跟踪解析，实测 943 门课、成绩匹配率 100%），产出"课程号→必修/限选/任选/体育"映射，与成绩、自选记录同事务落库（新表 `program_course_type_cache`，`2.sqm` v2→v3 迁移）；成绩行不冗余存类别，计算时按课程名前缀课程号 join，查不到安全降级"其他类别"。自选课程模式新增 5 个三态 chips（必修/限选/任选/体育/其他类别，全选/部分/未选配色+计数），支持按类别批量勾选与排除（保研口径=必修+限选可一键达成）；体育课因学校培养方案 PDF/教务系统方案页/官方成绩单三层口径不一致（环节必修 vs 课程任选），独立为"体育"类别（体育Ⅰ/92 门专项课/体测课全覆盖）；修复课程号贪婪匹配吞课程名首字母 bug（`M202015BC语言`→`M202015B`）。desktopTest/assembleDebug 全绿，修订记录见 `docs/migration/m9-grade-course-type-plan.md`，待办见根目录 `体育课疑惑.md`（待问学校确认体育专项课是否计入保研）。
 
-- 2026-08-05 导航重构为 CMP Navigation 2.9.2 NavHost：引入 `navigation-compose` 依赖；删除 `var section` 状态，`rememberNavController` + backstack 驱动；一级页走标准 tab 模式（popUpTo(HOME){saveState}+restoreState，切走保存/切回恢复各页状态），"更多"子页压栈 push，顶栏返回箭头与系统返回（keyevent/预测性返回手势）pop 回上一级；compact 分支 NavHost 带 iOS 风格过渡动画（进子页右滑入、返回右滑出、tab 切换淡入淡出），expanded 分支无动画；Android targetSdk 34→35 + manifest `enableOnBackInvokedCallback=true`，dumpsys 确认 Navigation 的 OnBackInvokedCallback 已注册（预测性返回生效）；二级页隐藏底栏且不再留导航条安全区占位（实测无遮挡）；NavHost 冷启动落首页、force-stop 后不恢复 backstack（uiautomator 验证：更多→子页→返回/系统返回→根→首页、tab 往返、成绩页正常显示）。模拟器"启动落设置页"疑云实为 install -r 不杀旧进程 + uiautomator dump 失败读旧文件叠加，非代码问题。
+- 2026-08-05 三端导航迁移到 Compose Multiplatform Navigation 3 `1.1.1`：删除 Navigation 2 `NavController/NavHost`，改为应用自持类型安全 `AppRoute` 返回栈与 `NavDisplay`；底栏并入各一级 scene，场景始终全屏，显隐不再改变内容高度。教训：`NavEntry.contentKey` 默认是路由 `toString()` 字符串，强转为 `AppRoute` 的门控曾让 Android 退化为极短淡化、iOS 落入 `None`，移除后恢复平台空间过渡。该共享返回栈的 Compose 模拟动画后经用户多轮主观验收判定"不够原生"，紧凑端二/三级页已被平台原生导航取代（见下条），NavDisplay 现只承担宽屏/回退路径与一级 tab 容器。
+- 2026-08-05 平台原生导航迁移完成并经用户目视确认（M10，细节已归档 `history_full.md`）：紧凑端二/三级页交给平台原生容器——Android 系统 Activity（cross-activity + predictive-back 系统动画）、iOS Swift `NativeNavigationController` push/pop（系统边缘返回手势）；底栏一级 tab 只即时切换、永不触发原生 push；macOS 维持 JVM 桌面即时切换，SwiftUI 宿主未开始。同批修复 iOS 26 无障碍崩溃（Swift 侧 `accessibilityElementsHidden = true`，CMP 1.11.1 无公开关闭 API）与 push 转场状态栏截开（SwiftUI 宿主四边全屏 + 顶栏恢复 statusBarsPadding）；同批含成绩课程性质映射可空化（区分"未同步"与"其他类别"）。assembleDebug/desktopTest/iOS 构建全绿。注意：AX 自动化已读不到 iOS App 内容，且 macOS 录屏隐私下 simctl/sky 截图读黑帧，iOS 界面验证只能靠用户目视或真机录屏。
+- 2026-08-05 邮箱首进卡顿修正：Android MainActivity 预热 WebView、iOS MainViewController 常驻 prewarmedWebView，MailboxWorkspace 首进延迟 450ms 等页面转场结束再初始化；Android 模拟器实测点击后约 0.6s 进入加载页、约 6s 显示真实邮箱内容，会话注入正常；邮箱 WebView 随 Apple placement 版页面转场的真机观感仍待目视。
 - 2026-08-05 "更多"子页隐藏底栏（二级页语义，对应 iOS push 后 tab bar 收起）：`isMoreSubPage` 统一判断，隐藏时以 `navigationBarsPadding()` 占位保证 Android edge-to-edge 下内容不被手势条遮挡，返回箭头回"更多"根后底栏恢复。模拟器验证：首页/更多根有底栏，校历下载/设置子页无底栏、返回恢复、设置页底部按钮不被手势条遮挡。
 - 2026-08-05 校历下载页新增"当前最新"文件名展示：Remote 增加只解析页面不发 PDF 的 `fetchCalendarFileName()`（复用 fetchCalendarPostfix，文件名做 URL 解码），Repository 失败返 null 静默降级，Model 加 `calendarFileName/calendarFileNameLoading` 状态，进入页面 LaunchedEffect 自动拉取，卡片内以主题色小字显示"当前最新：2024-2025校历.pdf"，加载中显示"正在获取最新校历…"；Remote 3 个新用例 + Model 2 个新用例，desktopTest 通过，Android 模拟器真实数据验证（解析出 2024-2025校历.pdf）。
 - 2026-08-05 成绩单下载页语言选择由 Switch 改为中文版/英文版分段按钮（选中段填主题色）；下载进行中 TaskStatusRow 的"正在下载…"去掉转圈只留文字，转圈仅保留在下载按钮内。用户实机确认无问题。
@@ -46,8 +48,7 @@
 ## 3. 接下来 1～3 个阶段
 
 1. **M5.5 登录页与凭据收尾**：在 iPhone 真机专项验证 Keychain 保存、重启读取和退出清理，并目视密码键盘/自动填充；等待自然自动登录失败时目视手动验证码弹框，不为此故意提交错误密码；macOS 待用户用真实系统密码条目复验一次选择填充。
-2. **自然样本补证**：课程出现真实文件夹时验证首次展开按需请求；学校布置新作业时再验证上传；服务器自然产生变化时验证信息流新增/修改/删除。
-3. **M5.5/M5.6 后续**：验证码公版前补至少 300 张独立留出集；UI 人工确认已恢复，当前处于逐页核对阶段（框架改造 2026-08-04 完成，页内细节按用户逐页指定推进）。
+2. **自然样本补证与公版门禁**：课程出现真实文件夹时验证首次展开按需请求；学校布置新作业时再验证上传；服务器自然产生变化时验证信息流新增/修改/删除；验证码公版前补至少 300 张独立留出集；UI 逐页核对按用户指定推进。
 
 ## 维护规则
 

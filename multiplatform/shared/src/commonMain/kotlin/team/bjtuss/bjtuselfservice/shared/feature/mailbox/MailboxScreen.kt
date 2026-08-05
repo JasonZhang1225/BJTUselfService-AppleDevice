@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
@@ -35,7 +36,14 @@ fun MailboxWorkspace(
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
-    LaunchedEffect(model) { model.initialize() }
+    LaunchedEffect(model) {
+        if (model.state.value == MailboxUiState.Idle) {
+            // 首次进入先等进页转场播完再准备会话/创建 WebView：WKWebView/WebView 的首次初始化
+            // 在主线程耗时明显，若与转场同帧进行会把整个进入动画卡住（2026-08-05 真机反馈）。
+            delay(450)
+        }
+        model.initialize()
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         if (expanded) {

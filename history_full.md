@@ -176,6 +176,18 @@
 - 2026-08-01 小组件范围调整：删除 `CourseScheduleWidget` target、宿主 WidgetKit 监听、App Group、共享课表 JSON 发布链路、预览入口和专项测试；发布脚本改为反向校验旧 `.appex` 不得残留。移除后 Desktop 233 项与 iOS Simulator 218 项测试零失败；Android debug/release、iOS framework、arm64 Xcode 宿主、macOS 自包含应用和 Apple 元数据脚本通过，最终 iOS `.app` 没有 `PlugIns` 目录；重新安装到 iPhone 17 Pro Simulator 后，Computer Use 确认既有登录页正常显示。公版完成前不要恢复这些代码或相关验收任务。
 - 可编辑草稿已写入 `docs/migration/m8-release-notes-draft.md`；正式版本号、日期、支持/隐私网址和已知限制仍须发布者审阅，当前没有执行任何提交、标签、推送或发布操作。
 
+## M10：平台原生导航与动效（2026-08-05）
+
+- 背景：Navigation 3 `NavDisplay` 的 Compose 模拟动画经用户多轮主观验收判定"不够原生"（Android 只有渐变/缩放、前景动后景不动；iOS 也不如系统）。决定把紧凑端二/三级页导航交给平台原生容器，共享 `NavDisplay` 退居宽屏与回退路径。计划与强制语义见 `docs/migration/native-platform-navigation-plan.md`。
+- 共享层：新增 `AuthenticatedSession` 集中登录后 profile、各 ScreenModel、偏好、文件网关与退出能力，`LoginRoute` 唯一发布与撤销会话；`AuthenticatedDestinationApp(routeId)` 渲染单个二级目的地；`isNativeDetailRoute` 白名单仅含 EXAMS/COURSEWARE/CLASSROOMS/CLASSROOM_DETAIL/MAILBOX/CALENDAR_DOWNLOAD/REPORT_CARD_DOWNLOAD/SETTINGS。`nativeNavigationEnabled` 时紧凑端二级页不再压共享 NavDisplay（转场 None）；底栏五个一级 tab（首页/课表/成绩/作业/更多）与 MoreGroupSections 除 MORE 外不相交，只清栈即时切换，永不触发原生 push。
+- Android：新增 `NativeDetailActivity`（`enableOnBackInvokedCallback=true`，系统 cross-activity 与 predictive-back 动画，不拦截系统返回；`onStart/onStop` 观察会话，会话撤销即 finish）与进程内 `AndroidAuthenticatedSessionRegistry`（不落盘；registry 缺失时 detail 立即 finish 回根，不伪造会话）；`MainActivity` 发布会话、对二级路由 `startActivity`，并预热 WebView 内核。
+- iOS：Swift 新增 `NativeNavigationController`（隐藏导航栏）：登录态经 `onAuthenticatedSessionChanged` 传入、登出 `popToRootViewController(animated: false)`；二级入口创建 Kotlin `NativeDestinationViewController` 并系统 push（`restorationIdentifier` 去重防连点），Compose 返回箭头接 `popViewController(animated: true)`，leading-edge 返回由 UIKit `interactivePopGestureRecognizer` 提供。
+- 修复 iOS 26 启动/转场闪退：崩溃报告为 Compose iOS `AccessibilityElement.cachedProperties` 的 `EXC_BAD_ACCESS`（`KERN_INVALID_ADDRESS at 0x18`）——辅助功能客户端（含 Computer Use 自动化 AX 查询）在原生 push/pop 移除宿主控制器后继续查询已失效的 Compose 无障碍元素。查证 CMP 1.11.1 klib 无 `accessibilitySyncOptions`/`accessibilityEnabled` 公开 API，K/N UIKit 绑定也不暴露 `accessibilityElementsHidden`，最终在 Swift 侧对所有 Compose 宿主视图设 `view.accessibilityElementsHidden = true`（与"无障碍专项移出当前范围"决策一致）。代价：AX 自动化读不到 App 内容，iOS 界面验证只能靠截图/目视。
+- 修复 iOS push 转场状态栏区域截开：SwiftUI 宿主此前只对底边 `ignoresSafeArea`，导航控制器被约束在状态栏下方，push 页面盖不住状态栏。改为四边全屏 `.ignoresSafeArea(.all)`；同步移除 `CompactAppTopBar` 中"iOS 不加 `statusBarsPadding`"的 2026-08-04 特判（该特判建立在旧宿主假设上，教训：宿主 inset 假设不要固化进共享平台特判）；紧凑登录页仅 iOS 补 `statusBarsPadding` 保持原居中布局；宿主底色对齐页面背景防深色首帧闪白。Android/macOS 行为不变。
+- macOS：维持 JVM `desktopApp` 侧栏即时切换；SwiftUI 原生宿主未开始，旧桌面包保留。
+- 验证：`:androidApp:assembleDebug`、`:shared:desktopTest`、iOS Simulator `xcodebuild` 构建/安装/运行全部通过，无新崩溃报告；用户目视确认 iOS push 转场（含状态栏覆盖修复）OK。工具边界：macOS 录屏隐私限制下 `simctl io screenshot` 与 Computer Use 截图读黑帧（App 实际正常）；Computer Use 坐标无法可靠起始于设备屏幕边缘，边缘手势与转场观感以用户目视/真机录屏为准。
+- 同批修正：成绩课程性质映射 `courseTypesByCode` 改为可空，区分"从未成功同步培养方案"与"全部落入其他类别"，避免方案未刷新时误导分类筛选；`GradeRepository`/数据源/Model/测试同步调整。
+
 ## 决策记录
 
 - 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。
@@ -190,3 +202,4 @@
 - 2026-08-01：iOS/macOS 小组件（WidgetKit/App Group/共享快照）移出当前公版范围，公版主应用完成后再开发。
 - 2026-08-01：进一步无障碍专项（VoiceOver、最大字号手势等）暂时移出当前范围，不作为完成门禁。
 - 2026-08-01：真实作业上传延期到学校后续布置作业时再做；不制造作业或上传无关文件。
+- 2026-08-05：紧凑端二/三级页导航交给平台原生容器（Android 系统 Activity、iOS UIKit `UINavigationController`），Compose `NavDisplay` 只保留宽屏/回退路径与一级 tab 容器；底栏一级 tab 永不触发原生 push。

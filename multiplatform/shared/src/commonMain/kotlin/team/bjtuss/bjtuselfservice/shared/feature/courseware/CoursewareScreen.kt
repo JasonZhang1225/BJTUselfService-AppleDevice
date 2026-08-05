@@ -64,6 +64,8 @@ fun CoursewareWorkspace(
     state: CoursewareUiState,
     expanded: Boolean,
     usesLegacySmartTransport: Boolean = false,
+    legacyWarningVisible: Boolean = false,
+    onDismissLegacyWarning: () -> Unit = {},
     model: CoursewareScreenModel,
     fileGateway: HomeworkFileGateway,
     directoryGateway: CoursewareDirectoryGateway,
@@ -193,7 +195,14 @@ fun CoursewareWorkspace(
         }
 
 
-        if (usesLegacySmartTransport) LegacySmartTransportWarning()
+        // 明文通道提示由 shell 控制显隐、随页面内容一起参与转场；旧参数保留给未接入新开关的调用方。
+        if (usesLegacySmartTransport && !legacyWarningVisible) LegacySmartTransportWarning()
+        if (legacyWarningVisible) {
+            LegacySmartTransportWarning(
+                onDismiss = onDismissLegacyWarning,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
 
         if (!expanded && state.courses.isNotEmpty()) {
             OutlinedButton(

@@ -123,3 +123,9 @@
 - 解析规则变更：撤销上一轮"体育类课程组的任选→限选"，改为**最内层课组名含"体育"的课程，无论课程性质列写的是什么（必修/任选），一律记为"体育"**。课组跟踪（rowspan carry）直接复用，覆盖体育Ⅰ（必修）、92 门专项课（任选）、体育健康教育与测试上/下（必修）等组内所有行。
 - `courseTypeByStoredText` 白名单加 `"体育"`，`storedText()` 相应支持。
 - UI：自选模式 chips 由 4 个变 5 个，顺序 必修/限选/任选/**体育**/其他类别，三态逻辑（全选/部分/未选中、颜色、已选/总数文案）对体育 chip 同样生效；成绩行标签按 `displayName()` 通用渲染"体育"。
+
+### 修订记录 3（2026-08-05 第二轮）
+
+1. **排序文案**：`GradeSortOrder.ORIGINAL` 的按钮文案由"排序：原始"改为"排序：成绩更新顺序"（全仓唯一展示点）。
+2. **分类未加载时不要全部归为"其他"**：此前 `courseTypesByCode` 空 map 时所有成绩解析为 UNKNOWN，chips 显示"其他类别 N/N"误导用户。改为显式三态——`GradeSnapshot.courseTypesByCode` 与 `GradeUiState.courseTypesByCode` 类型改为可空（null = 映射从未成功同步）；`CacheStoreGradeLocalDataSource.courseTypes()` 缓存表无行时返回 null（培养方案正常约 940 行，空表即从未同步成功）；`GradeUiState.courseTypeOf` 返回 `CourseType?`（null = 未同步，非 null 查不到才为 UNKNOWN），`courseTypeCounts` 未加载时为 emptyMap；`GradeSelectionActions` 在未加载时渲染一行提示"课程性质未同步，下拉刷新后可用分类筛选"，不渲染分类 chips。domain 层 `courseTypeOfGrade`/`filterGradesByType` 签名不变。
+3. **课程性质配色（浅色+深色）**：新增 `feature/grade/GradeTypeColors.kt`，按 `CourseType` 返回 (container, onContainer, border)，用 `isSystemInDarkTheme()` 区分深浅色（与 App.kt 跟随系统深浅色一致）。必修深红/限选浅红/任选靛蓝/体育绿/其他类别灰，深色模式为低饱和深底+亮字保证对比度与不刺眼。应用：成绩行标签 Surface 按类别取色；自选模式 chips 全选态填该类别实色底+onContainer 文字，部分选中态改"浅底描边"（container 35% 透明度 + 类别色 border + 已选/总数文案），未选中态默认样式。

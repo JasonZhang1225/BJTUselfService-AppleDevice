@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -37,11 +38,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,6 +145,9 @@ fun LoginRoute(
     appPreferences: AppPreferences,
     onPreferencesChanged: (AppPreferences) -> Boolean,
     captchaRecognizer: CaptchaRecognizer,
+    nativeNavigationEnabled: Boolean,
+    onOpenNativeRoute: (String) -> Unit,
+    onAuthenticatedSessionChanged: (AuthenticatedSession?) -> Unit,
 ) {
     val transport = remember {
         lazy(LazyThreadSafetyMode.NONE) { createSchoolHttpTransport() }
@@ -587,27 +593,58 @@ fun LoginRoute(
             )
         }
         val homeModel = remember(homeStatusRepository) { HomeScreenModel(homeStatusRepository) }
+        val authenticatedSession = remember(
+            shellProfile,
+            silentAutoLogin,
+            signedIn,
+            gradeModel,
+            courseScheduleModel,
+            examScheduleModel,
+            homeworkModel,
+            coursewareModel,
+            otherFunctionModel,
+            classroomModel,
+            settingsModel,
+            appPreferences,
+            mailboxModel,
+            homeModel,
+            homeChangeFeed,
+            homeworkFileGateway,
+            coursewareDirectoryGateway,
+        ) {
+            AuthenticatedSession(
+                profile = shellProfile,
+                entryLoggingIn = silentAutoLogin && signedIn == null,
+                gradeModel = gradeModel,
+                courseScheduleModel = courseScheduleModel,
+                examScheduleModel = examScheduleModel,
+                homeworkModel = homeworkModel,
+                coursewareModel = coursewareModel,
+                otherFunctionModel = otherFunctionModel,
+                classroomModel = classroomModel,
+                settingsModel = settingsModel,
+                loginSyncPreferences = appPreferences,
+                mailboxModel = mailboxModel,
+                homeModel = homeModel,
+                homeChangeFeed = homeChangeFeed,
+                homeworkFileGateway = homeworkFileGateway,
+                coursewareDirectoryGateway = coursewareDirectoryGateway,
+                onLogout = { logout(shellProfile.studentId) },
+            )
+        }
+        SideEffect {
+            onAuthenticatedSessionChanged(authenticatedSession)
+        }
+        DisposableEffect(onAuthenticatedSessionChanged) {
+            onDispose { onAuthenticatedSessionChanged(null) }
+        }
         AuthenticatedAppShell(
-            profile = shellProfile,
+            session = authenticatedSession,
             platform = platform,
             windowClass = windowClass,
-            entryLoggingIn = silentAutoLogin && signedIn == null,
-            gradeModel = gradeModel,
-            courseScheduleModel = courseScheduleModel,
-            examScheduleModel = examScheduleModel,
-            homeworkModel = homeworkModel,
-            coursewareModel = coursewareModel,
-            otherFunctionModel = otherFunctionModel,
-            classroomModel = classroomModel,
-            settingsModel = settingsModel,
-            loginSyncPreferences = appPreferences,
-            mailboxModel = mailboxModel,
-            homeModel = homeModel,
-            homeChangeFeed = homeChangeFeed,
-            homeworkFileGateway = homeworkFileGateway,
-            coursewareDirectoryGateway = coursewareDirectoryGateway,
             appCommandBus = appCommandBus,
-            onLogout = { logout(shellProfile.studentId) },
+            nativeNavigationEnabled = nativeNavigationEnabled,
+            onOpenNativeRoute = onOpenNativeRoute,
         )
         return
     }
@@ -785,6 +822,15 @@ fun LoginScreen(
                 .platformLoginKeyboardAvoidance(enabled = !busy)
                 .then(dismissKeyboardModifier)
                 .verticalScroll(scroll, enabled = !busy)
+                // iOS 宿主已全屏延伸到状态栏后方；这里补回状态栏内边距，
+                // 保持与此前“宿主位于状态栏下方”一致的居中布局。Android 维持原状。
+                .then(
+                    if (platform.family == PlatformFamily.IOS) {
+                        Modifier.statusBarsPadding()
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.Center,
         ) {
