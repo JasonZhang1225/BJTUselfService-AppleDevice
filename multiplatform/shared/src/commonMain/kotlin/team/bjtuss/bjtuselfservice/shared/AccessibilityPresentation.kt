@@ -9,6 +9,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 internal val LocalReduceTransparency = staticCompositionLocalOf { false }
+internal val LocalReduceMotion = staticCompositionLocalOf { false }
 
 @Composable
 internal fun Color.accessibleAlpha(normalAlpha: Float): Color =

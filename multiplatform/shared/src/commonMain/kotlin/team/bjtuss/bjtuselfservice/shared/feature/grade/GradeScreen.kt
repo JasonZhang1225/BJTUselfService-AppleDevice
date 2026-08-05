@@ -2,12 +2,21 @@ package team.bjtuss.bjtuselfservice.shared.feature.grade
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,11 +25,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -54,11 +66,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -72,14 +86,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import androidx.navigation.NavGraphBuilder
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
+import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.ui.NavDisplay
+import androidx.navigationevent.NavigationEvent
+import team.bjtuss.bjtuselfservice.shared.LocalReduceMotion
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 import team.bjtuss.bjtuselfservice.shared.WindowClass
@@ -101,6 +116,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScr
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.CalendarDownloadWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.ReportCardDownloadWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
+import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomBuildingWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsWorkspace
@@ -111,7 +127,6 @@ import team.bjtuss.bjtuselfservice.shared.feature.home.HomeScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommand
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommandBus
-import team.bjtuss.bjtuselfservice.shared.feature.shell.LegacySmartTransportWarning
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
 import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
@@ -123,7 +138,9 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.displayName
 import team.bjtuss.bjtuselfservice.shared.domain.grade.scoreForSorting
 import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeDomain
 
-private enum class AppSection(val title: String) {
+private sealed interface AppRoute : NavKey
+
+private enum class AppSection(val title: String) : AppRoute {
     HOME("首页"),
     GRADES("成绩"),
     SCHEDULE("课程表"),
@@ -160,32 +177,44 @@ private val MoreGroupSections = setOf(
 )
 
 private const val LOGIN_SYNC_RETRY_DELAY_MILLIS = 700L
+/** 教室详情的第三级路由：独立于一级/二级 section。 */
+private data object ClassroomDetailRoute : AppRoute
+const val CLASSROOM_DETAIL_ROUTE_ID = "CLASSROOM_DETAIL"
+
+/** Google predictive-back full-screen surface 的 SystemUI 插值。 */
+private val androidPredictiveEasing = CubicBezierEasing(0.1f, 0.1f, 0f, 1f)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthenticatedAppShell(
-    profile: StudentProfile,
+    session: team.bjtuss.bjtuselfservice.shared.AuthenticatedSession,
     platform: PlatformInfo,
     windowClass: WindowClass,
-    gradeModel: GradeScreenModel,
-    courseScheduleModel: CourseScheduleScreenModel,
-    examScheduleModel: ExamScheduleScreenModel,
-    homeworkModel: HomeworkScreenModel,
-    coursewareModel: CoursewareScreenModel,
-    otherFunctionModel: OtherFunctionScreenModel,
-    classroomModel: ClassroomScreenModel,
-    settingsModel: SettingsScreenModel,
-    loginSyncPreferences: AppPreferences,
-    mailboxModel: MailboxScreenModel,
-    homeModel: HomeScreenModel,
-    homeChangeFeed: HomeChangeFeedRepository,
-    homeworkFileGateway: HomeworkFileGateway,
-    coursewareDirectoryGateway: CoursewareDirectoryGateway,
-    appCommandBus: AppCommandBus?,
-    // 静默自动登录进行中：主界面已可见但会话尚未就绪，顶栏显示“登录中”，数据初始化延后到登录完成。
-    entryLoggingIn: Boolean = false,
-    onLogout: () -> Unit,
+    appCommandBus: AppCommandBus? = null,
+    nativeNavigationEnabled: Boolean = false,
+    onOpenNativeRoute: (String) -> Unit = {},
+    forcedRouteId: String? = null,
+    onCloseNativeRoute: () -> Unit = {},
+    homeworkFileGatewayOverride: HomeworkFileGateway? = null,
+    coursewareDirectoryGatewayOverride: CoursewareDirectoryGateway? = null,
 ) {
+    val profile = session.profile
+    val entryLoggingIn = session.entryLoggingIn
+    val gradeModel = session.gradeModel
+    val courseScheduleModel = session.courseScheduleModel
+    val examScheduleModel = session.examScheduleModel
+    val homeworkModel = session.homeworkModel
+    val coursewareModel = session.coursewareModel
+    val otherFunctionModel = session.otherFunctionModel
+    val classroomModel = session.classroomModel
+    val settingsModel = session.settingsModel
+    val loginSyncPreferences = session.loginSyncPreferences
+    val mailboxModel = session.mailboxModel
+    val homeModel = session.homeModel
+    val homeChangeFeed = session.homeChangeFeed
+    val homeworkFileGateway = homeworkFileGatewayOverride ?: session.homeworkFileGateway
+    val coursewareDirectoryGateway = coursewareDirectoryGatewayOverride ?: session.coursewareDirectoryGateway
+    val onLogout = session.onLogout
     val gradeState by gradeModel.state.collectAsState()
     val courseState by courseScheduleModel.state.collectAsState()
     val examState by examScheduleModel.state.collectAsState()
@@ -197,28 +226,46 @@ fun AuthenticatedAppShell(
     val homeChanges by homeChangeFeed.records.collectAsState()
     var legacyWarningDismissed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // 紧凑端底栏属于一级 destination，自身随场景一起切换；NavDisplay 始终保持全屏尺寸，
+    // 避免 push/pop 时因底栏显隐改变内容高度。NavigationBar 本体高 80dp，并追加系统 inset。
+    val compactBottomBarOverlayPadding = if (windowClass != WindowClass.Expanded) {
+        80.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    } else {
+        0.dp
+    }
 
-    // 页面导航：NavHost 承载全部页面。一级页走标准 tab 模式（切走保存、切回恢复状态），
-    // “更多”子页压栈 push：顶栏返回箭头或系统返回（Android 预测性返回）pop 回上一级。
-    val navController = rememberNavController()
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val section: AppSection = backStackEntry?.destination?.route
-        ?.let { route -> AppSection.entries.firstOrNull { it.name == route } }
-        ?: AppSection.HOME
-    val moreSubPageNames = MoreGroupSections
-        .filter { it != AppSection.MORE }
-        .map { it.name }
-        .toSet()
+    // Navigation 3：应用直接拥有返回栈。一级 tab 总是以 HOME 为根，二/三级页继续压栈；
+    // NavDisplay 负责 Android predictive back 与 iOS start-edge back 的连续手势进度。
+    val initialRoute = remember(forcedRouteId) {
+        forcedRouteId?.toAppRoute() ?: AppSection.HOME
+    }
+    val backStack = remember(forcedRouteId) { mutableStateListOf<AppRoute>(initialRoute) }
+    val currentRoute = backStack.last()
+    val section: AppSection = when (currentRoute) {
+        ClassroomDetailRoute -> AppSection.CLASSROOMS
+        is AppSection -> currentRoute
+    }
+    val popBackStack: () -> Unit = if (forcedRouteId != null) {
+        onCloseNativeRoute
+    } else {
+        { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) }
+    }
     val navigateToSection: (AppSection) -> Unit = { target ->
-        navController.navigate(target.name) {
-            if (target in MoreGroupSections && target != AppSection.MORE) {
-                // 二级页：压栈，返回时 pop。
-                launchSingleTop = true
+        if (backStack.lastOrNull() != target) {
+            if (
+                nativeNavigationEnabled &&
+                target in MoreGroupSections &&
+                target != AppSection.MORE
+            ) {
+                onOpenNativeRoute(target.name)
+            } else if (target in MoreGroupSections && target != AppSection.MORE) {
+                // 二级页：保留当前来源并 push，返回可准确预览来源页。
+                backStack.add(target)
             } else {
-                // 一级页：标准底部导航模式，切换后保留各自页面状态。
-                popUpTo(AppSection.HOME.name) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
+                // 一级页：复刻旧 popUpTo(HOME) 语义；从非首页返回时先回首页。
+                backStack.clear()
+                backStack.add(AppSection.HOME)
+                if (target != AppSection.HOME) backStack.add(target)
             }
         }
     }
@@ -300,136 +347,313 @@ fun AuthenticatedAppShell(
         }
     }
 
-    // 所有页面的 NavHost 目的地注册：compact/expanded 两套布局共用，
-    // 差异只有 expanded 标志、明文通道开关和占位 modifier。
-    fun NavGraphBuilder.sectionDestinations(
+    // 页面骨架（顶栏 + 下拉刷新）包在各目的地内部而非 NavHost 外层：
+    // 1) 外层容器若随当前页面切换（如“更多”页不可刷新、考试安排页可刷新），NavHost 会在
+    //    转场瞬间移出/移入 composition 被销毁重建，表现为点击进出页面没有任何转场动画；
+    // 2) 顶栏随页面一起参与转场才是原生观感——整个屏幕一起动，而非标题栏先跳变；
+    // 3) 必须铺不透明背景：页面透明时转场中上下两层互相穿透（iOS 上会露出灰色窗口底色），
+    //    看起来像层级重叠遮挡。
+    @Composable
+    fun DestinationPage(
+        title: String,
+        expanded: Boolean,
+        refreshable: Boolean,
+        isRefreshing: Boolean,
+        showBack: Boolean,
+        modifier: Modifier,
+        content: @Composable () -> Unit,
+    ) {
+        val showsCompactBottomBar = !expanded && !showBack && compactBottomBarOverlayPadding > 0.dp
+        Box(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(
+                    bottom = if (showsCompactBottomBar) compactBottomBarOverlayPadding else 0.dp,
+                ),
+            ) {
+                if (!expanded) {
+                    CompactAppTopBar(
+                        title = title,
+                        isRefreshing = isRefreshing,
+                        isLoggingIn = entryLoggingIn,
+                        onBack = if (showBack) {
+                            popBackStack
+                        } else {
+                            null
+                        },
+                    )
+                }
+                val contentModifier = Modifier.weight(1f).fillMaxWidth()
+                if (!expanded && refreshable) {
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = refresh, modifier = contentModifier) {
+                        content()
+                    }
+                } else {
+                    // 宽屏布局本就没有下拉刷新；邮箱/设置/下载/更多页也不可刷新。
+                    Box(modifier = contentModifier) { content() }
+                }
+            }
+            if (showsCompactBottomBar) {
+                // 底栏随一级场景一起运动；二/三级场景在其上方，返回预览不会提前跳出底栏。
+                CompactBottomNavigation(
+                    section = section,
+                    onSectionSelected = navigateToSection,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+        }
+    }
+
+    // Navigation 3 的目的地渲染器：compact/expanded 两套布局共用，
+    // entryProvider 只负责把类型安全 route 交给这里，页面业务保持不变。
+    @Composable
+    fun SectionDestination(
+        route: AppRoute,
         expanded: Boolean,
         modifier: Modifier,
         usesLegacySmartTransport: Boolean,
     ) {
-        composable(AppSection.HOME.name) {
-            HomeWorkspace(
-                model = homeModel,
-                platform = platform,
+        when (route) {
+            AppSection.HOME -> DestinationPage(
+                title = AppSection.HOME.title,
                 expanded = expanded,
-                holdNetwork = entryLoggingIn,
-                homework = homeworkState.homework,
-                exams = examState.exams,
-                currentWeek = courseState.currentWeek,
-                now = homeworkState.now,
-                timeZone = homeworkState.timeZone,
-                isAgendaLoading = homeworkState.isLoading || examState.isLoading || courseState.isLoading,
+                refreshable = true,
                 isRefreshing = homeState.isRefreshing || homeworkState.isRefreshing ||
                     examState.isRefreshing || courseState.isRefreshing,
-                onRefresh = refresh,
-                onOpenMailbox = { navigateToSection(AppSection.MAILBOX) },
-                onOpenHomework = { navigateToSection(AppSection.HOMEWORK) },
-                onOpenExams = { navigateToSection(AppSection.EXAMS) },
-                changes = homeChanges,
-                onClearAllChanges = { scope.launch { homeChangeFeed.clear() } },
-                onClearChangeDomain = { domain -> scope.launch { homeChangeFeed.clear(domain) } },
-                onOpenChangeDomain = { domain -> navigateToSection(domain.toAppSection()) },
+                showBack = false,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.GRADES.name) {
-            GradeWorkspace(
-                state = gradeState,
+            ) {
+                HomeWorkspace(
+                    model = homeModel,
+                    platform = platform,
+                    expanded = expanded,
+                    holdNetwork = entryLoggingIn,
+                    homework = homeworkState.homework,
+                    exams = examState.exams,
+                    currentWeek = courseState.currentWeek,
+                    now = homeworkState.now,
+                    timeZone = homeworkState.timeZone,
+                    isAgendaLoading = homeworkState.isLoading || examState.isLoading || courseState.isLoading,
+                    isRefreshing = homeState.isRefreshing || homeworkState.isRefreshing ||
+                        examState.isRefreshing || courseState.isRefreshing,
+                    onRefresh = refresh,
+                    onOpenMailbox = { navigateToSection(AppSection.MAILBOX) },
+                    onOpenHomework = { navigateToSection(AppSection.HOMEWORK) },
+                    onOpenExams = { navigateToSection(AppSection.EXAMS) },
+                    changes = homeChanges,
+                    onClearAllChanges = { scope.launch { homeChangeFeed.clear() } },
+                    onClearChangeDomain = { domain -> scope.launch { homeChangeFeed.clear(domain) } },
+                    onOpenChangeDomain = { domain -> navigateToSection(domain.toAppSection()) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.GRADES -> DestinationPage(
+                title = AppSection.GRADES.title,
                 expanded = expanded,
-                model = gradeModel,
-                onRefresh = refresh,
+                refreshable = true,
+                isRefreshing = gradeState.isRefreshing,
+                showBack = false,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.SCHEDULE.name) {
-            CourseScheduleWorkspace(
-                state = courseState,
+            ) {
+                GradeWorkspace(
+                    state = gradeState,
+                    expanded = expanded,
+                    model = gradeModel,
+                    onRefresh = refresh,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.SCHEDULE -> DestinationPage(
+                title = AppSection.SCHEDULE.title,
                 expanded = expanded,
-                model = courseScheduleModel,
-                onRefresh = refresh,
+                refreshable = true,
+                isRefreshing = courseState.isRefreshing,
+                showBack = false,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.EXAMS.name) {
-            ExamScheduleWorkspace(
-                state = examState,
+            ) {
+                CourseScheduleWorkspace(
+                    state = courseState,
+                    expanded = expanded,
+                    model = courseScheduleModel,
+                    onRefresh = refresh,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.EXAMS -> DestinationPage(
+                title = AppSection.EXAMS.title,
                 expanded = expanded,
-                model = examScheduleModel,
-                onRefresh = refresh,
+                refreshable = true,
+                isRefreshing = examState.isRefreshing,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.HOMEWORK.name) {
-            HomeworkWorkspace(
-                state = homeworkState,
+            ) {
+                ExamScheduleWorkspace(
+                    state = examState,
+                    expanded = expanded,
+                    model = examScheduleModel,
+                    onRefresh = refresh,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.HOMEWORK -> DestinationPage(
+                title = AppSection.HOMEWORK.title,
                 expanded = expanded,
-                usesLegacySmartTransport = usesLegacySmartTransport,
-                model = homeworkModel,
-                fileGateway = homeworkFileGateway,
-                onRefresh = refresh,
+                refreshable = true,
+                isRefreshing = homeworkState.isRefreshing,
+                showBack = false,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.COURSEWARE.name) {
-            CoursewareWorkspace(
-                state = coursewareState,
+            ) {
+                HomeworkWorkspace(
+                    state = homeworkState,
+                    expanded = expanded,
+                    usesLegacySmartTransport = usesLegacySmartTransport,
+                    legacyWarningVisible = usesLegacySmartTransportFor(platform.family) && !legacyWarningDismissed,
+                    onDismissLegacyWarning = { legacyWarningDismissed = true },
+                    model = homeworkModel,
+                    fileGateway = homeworkFileGateway,
+                    onRefresh = refresh,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.COURSEWARE -> DestinationPage(
+                title = AppSection.COURSEWARE.title,
                 expanded = expanded,
-                usesLegacySmartTransport = usesLegacySmartTransport,
-                model = coursewareModel,
-                fileGateway = homeworkFileGateway,
-                directoryGateway = coursewareDirectoryGateway,
-                onRefresh = refresh,
+                refreshable = true,
+                isRefreshing = coursewareState.isRefreshing,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.CALENDAR_DOWNLOAD.name) {
-            CalendarDownloadWorkspace(
-                model = otherFunctionModel,
+            ) {
+                CoursewareWorkspace(
+                    state = coursewareState,
+                    expanded = expanded,
+                    usesLegacySmartTransport = usesLegacySmartTransport,
+                    legacyWarningVisible = usesLegacySmartTransportFor(platform.family) && !legacyWarningDismissed,
+                    onDismissLegacyWarning = { legacyWarningDismissed = true },
+                    model = coursewareModel,
+                    fileGateway = homeworkFileGateway,
+                    directoryGateway = coursewareDirectoryGateway,
+                    onRefresh = refresh,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.CALENDAR_DOWNLOAD -> DestinationPage(
+                title = AppSection.CALENDAR_DOWNLOAD.title,
                 expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.REPORT_CARD_DOWNLOAD.name) {
-            ReportCardDownloadWorkspace(
-                model = otherFunctionModel,
+            ) {
+                CalendarDownloadWorkspace(
+                    model = otherFunctionModel,
+                    expanded = expanded,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.REPORT_CARD_DOWNLOAD -> DestinationPage(
+                title = AppSection.REPORT_CARD_DOWNLOAD.title,
                 expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.CLASSROOMS.name) {
-            ClassroomWorkspace(
-                model = classroomModel,
+            ) {
+                ReportCardDownloadWorkspace(
+                    model = otherFunctionModel,
+                    expanded = expanded,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.CLASSROOMS -> DestinationPage(
+                title = AppSection.CLASSROOMS.title,
                 expanded = expanded,
+                refreshable = true,
+                isRefreshing = classroomState.isLoading,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.SETTINGS.name) {
-            SettingsWorkspace(
-                model = settingsModel,
-                accountName = "${profile.name} · ${profile.studentId}",
-                platform = platform,
+            ) {
+                ClassroomWorkspace(
+                    model = classroomModel,
+                    expanded = expanded,
+                    onOpenBuilding = {
+                        if (nativeNavigationEnabled) {
+                            onOpenNativeRoute(CLASSROOM_DETAIL_ROUTE_ID)
+                        } else if (backStack.lastOrNull() != ClassroomDetailRoute) {
+                            backStack.add(ClassroomDetailRoute)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            ClassroomDetailRoute -> DestinationPage(
+                title = AppSection.CLASSROOMS.title,
                 expanded = expanded,
-                onLogout = onLogout,
+                refreshable = true,
+                isRefreshing = classroomState.isLoading,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.MAILBOX.name) {
-            MailboxWorkspace(
-                model = mailboxModel,
-                platform = platform,
+            ) {
+                ClassroomBuildingWorkspace(
+                    model = classroomModel,
+                    onBack = popBackStack,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.SETTINGS -> DestinationPage(
+                title = AppSection.SETTINGS.title,
                 expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = true,
                 modifier = modifier,
-            )
-        }
-        composable(AppSection.MORE.name) {
-            MoreWorkspace(
-                onOpenSection = navigateToSection,
+            ) {
+                SettingsWorkspace(
+                    model = settingsModel,
+                    accountName = "${profile.name} · ${profile.studentId}",
+                    platform = platform,
+                    expanded = expanded,
+                    onLogout = onLogout,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.MAILBOX -> DestinationPage(
+                title = AppSection.MAILBOX.title,
+                expanded = expanded,
+                refreshable = false,
+                isRefreshing = mailboxState == MailboxUiState.Preparing,
+                showBack = true,
                 modifier = modifier,
-            )
+            ) {
+                MailboxWorkspace(
+                    model = mailboxModel,
+                    platform = platform,
+                    expanded = expanded,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AppSection.MORE -> DestinationPage(
+                title = AppSection.MORE.title,
+                expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = false,
+                modifier = modifier,
+            ) {
+                MoreWorkspace(
+                    onOpenSection = navigateToSection,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
     }
 
-    if (windowClass == WindowClass.Expanded) {
+    if (forcedRouteId != null) {
+        SectionDestination(
+            route = currentRoute,
+            expanded = false,
+            modifier = Modifier.fillMaxSize(),
+            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+        )
+    } else if (windowClass == WindowClass.Expanded) {
         Row(
             modifier = Modifier.fillMaxSize().padding(18.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
@@ -442,143 +666,189 @@ fun AuthenticatedAppShell(
                 onLogout = onLogout,
                 modifier = Modifier.width(236.dp).fillMaxHeight(),
             )
-            // 宽屏侧栏布局页面并列，切换不播放 push/pop 动画。
-            NavHost(
-                navController = navController,
-                startDestination = AppSection.HOME.name,
+            // 宽屏侧栏布局按 macOS/iPad 的并列工作区处理，不播放手机式 push/pop。
+            NavDisplay(
+                backStack = backStack,
+                onBack = popBackStack,
                 modifier = Modifier.weight(1f).fillMaxHeight(),
-                enterTransition = { EnterTransition.None },
-                exitTransition = { ExitTransition.None },
-                popEnterTransition = { EnterTransition.None },
-                popExitTransition = { ExitTransition.None },
-            ) {
-                sectionDestinations(
-                    expanded = true,
-                    modifier = Modifier.fillMaxSize(),
-                    usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
-                )
-            }
-        }
-    } else {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // “更多”子页是二级页面：顶栏显示返回箭头，同时隐藏底部导航，
-            // 明确层级关系（对应 iOS 的 push 后 tab bar 收起）。
-            val isMoreSubPage = section in MoreGroupSections && section != AppSection.MORE
-            val isRefreshing = when (section) {
-                AppSection.HOME -> homeState.isRefreshing || homeworkState.isRefreshing ||
-                    examState.isRefreshing || courseState.isRefreshing
-                AppSection.GRADES -> gradeState.isRefreshing
-                AppSection.SCHEDULE -> courseState.isRefreshing
-                AppSection.EXAMS -> examState.isRefreshing
-                AppSection.HOMEWORK -> homeworkState.isRefreshing
-                AppSection.COURSEWARE -> coursewareState.isRefreshing
-                AppSection.CLASSROOMS -> classroomState.isLoading
-                AppSection.MAILBOX -> mailboxState == MailboxUiState.Preparing
-                AppSection.CALENDAR_DOWNLOAD -> false
-                AppSection.REPORT_CARD_DOWNLOAD -> false
-                AppSection.SETTINGS -> false
-                AppSection.MORE -> false
-            }
-            CompactAppTopBar(
-                title = section.title,
-                isRefreshing = isRefreshing,
-                platformFamily = platform.family,
-                isLoggingIn = entryLoggingIn,
-                // “更多”的子页左上角显示返回箭头，pop 回到上一级。
-                onBack = if (isMoreSubPage) {
-                    { navController.popBackStack() }
-                } else {
-                    null
+                transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+                popTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
+                predictivePopTransitionSpec = { _: Int ->
+                    EnterTransition.None togetherWith ExitTransition.None
+                },
+                entryProvider = entryProvider {
+                    entry<AppSection> { route ->
+                        SectionDestination(
+                            route = route,
+                            expanded = true,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+                        )
+                    }
+                    entry<ClassroomDetailRoute> {
+                        SectionDestination(
+                            route = ClassroomDetailRoute,
+                            expanded = true,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+                        )
+                    }
                 },
             )
-            // 明文通道提示只在与作业/课件相关的页面出现，且每次登录会话内只需确认一次。
-            if (
-                usesLegacySmartTransportFor(platform.family) &&
-                (section == AppSection.HOMEWORK || section == AppSection.COURSEWARE) &&
-                !legacyWarningDismissed
-            ) {
-                LegacySmartTransportWarning(
-                    onDismiss = { legacyWarningDismissed = true },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-            // 邮箱页是全屏 WebView，下拉手势应留给网页；“设置/下载/更多”没有可刷新内容。
-            val pullRefreshEnabled = section != AppSection.SETTINGS &&
-                section != AppSection.MAILBOX &&
-                section != AppSection.CALENDAR_DOWNLOAD &&
-                section != AppSection.REPORT_CARD_DOWNLOAD &&
-                section != AppSection.MORE
-            // 页面过渡：进入二级页从右滑入，返回向右滑出（iOS push/pop 观感）；
-            // Android 的系统返回由 Navigation 接管，自动获得预测性返回动画。
-            val navHostContent: @Composable () -> Unit = {
-                NavHost(
-                    navController = navController,
-                    startDestination = AppSection.HOME.name,
-                    modifier = Modifier.fillMaxSize(),
-                    enterTransition = {
-                        val initialRoute = initialState.destination.route
-                        val targetRoute = targetState.destination.route
-                        val initialIsSub = initialRoute != null && moreSubPageNames.contains(initialRoute)
-                        val targetIsSub = targetRoute != null && moreSubPageNames.contains(targetRoute)
-                        when {
-                            targetIsSub && !initialIsSub ->
-                                slideInHorizontally(animationSpec = tween(300), initialOffsetX = { it }) +
-                                    fadeIn(animationSpec = tween(300))
-                            initialIsSub -> fadeIn(animationSpec = tween(200))
-                            else -> fadeIn(animationSpec = tween(160))
-                        }
-                    },
-                    exitTransition = {
-                        val initialRoute = initialState.destination.route
-                        val initialIsSub = initialRoute != null && moreSubPageNames.contains(initialRoute)
-                        if (initialIsSub) {
-                            fadeOut(animationSpec = tween(220))
-                        } else {
-                            fadeOut(animationSpec = tween(160))
-                        }
-                    },
-                    popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-                    popExitTransition = {
-                        val initialRoute = initialState.destination.route
-                        val initialIsSub = initialRoute != null && moreSubPageNames.contains(initialRoute)
-                        if (initialIsSub) {
-                            slideOutHorizontally(animationSpec = tween(300), targetOffsetX = { it }) +
-                                fadeOut(animationSpec = tween(300))
-                        } else {
-                            fadeOut(animationSpec = tween(160))
-                        }
-                    },
-                ) {
-                    sectionDestinations(
+        }
+    } else {
+        val reduceMotion = LocalReduceMotion.current
+        val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+        val appleSpatialSpec = spring<androidx.compose.ui.unit.IntOffset>(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = 320f,
+        )
+        val appleInteractiveSpec = tween<androidx.compose.ui.unit.IntOffset>(
+            durationMillis = 350,
+            easing = LinearEasing,
+        )
+        val androidOffsetSpec = tween<androidx.compose.ui.unit.IntOffset>(
+            durationMillis = 350,
+            easing = androidPredictiveEasing,
+        )
+        val androidScaleSpec = tween<Float>(
+            durationMillis = 350,
+            easing = androidPredictiveEasing,
+        )
+
+        // Android 使用 Navigation 3 的 seekable 场景内核，并按 Google full-screen surface
+        // predictive-back 规范让前景 100%→90%、后景 110%→100%，同时保留小幅横向预览。
+        // iOS 使用可被 NavDisplay start-edge 手势 seek 的 UINavigationController 空间路径；
+        // macOS 的紧凑窗口仍遵守桌面习惯，不播放手机式整页滑动。
+        NavDisplay(
+            backStack = backStack,
+            onBack = popBackStack,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                when {
+                    nativeNavigationEnabled ->
+                        EnterTransition.None togetherWith ExitTransition.None
+                    reduceMotion ->
+                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                    platform.family == PlatformFamily.Android ->
+                        (slideInHorizontally(
+                            initialOffsetX = { direction * it / 12 },
+                            animationSpec = androidOffsetSpec,
+                        ) + scaleIn(
+                            initialScale = 0.96f,
+                            animationSpec = androidScaleSpec,
+                        ) + fadeIn(tween(220))) togetherWith
+                            (slideOutHorizontally(
+                                targetOffsetX = { -direction * it / 20 },
+                                animationSpec = androidOffsetSpec,
+                            ) + scaleOut(
+                                targetScale = 0.90f,
+                                animationSpec = androidScaleSpec,
+                            ) + fadeOut(tween(280)))
+                    platform.family == PlatformFamily.IOS ->
+                        slideInHorizontally(
+                            initialOffsetX = { direction * it },
+                            animationSpec = appleSpatialSpec,
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { -direction * it / 3 },
+                            animationSpec = appleSpatialSpec,
+                        )
+                    else -> EnterTransition.None togetherWith ExitTransition.None
+                }
+            },
+            popTransitionSpec = {
+                when {
+                    nativeNavigationEnabled ->
+                        EnterTransition.None togetherWith ExitTransition.None
+                    reduceMotion ->
+                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                    platform.family == PlatformFamily.Android ->
+                        (slideInHorizontally(
+                            initialOffsetX = { -direction * it / 20 },
+                            animationSpec = androidOffsetSpec,
+                        ) + scaleIn(
+                            initialScale = 1.10f,
+                            animationSpec = androidScaleSpec,
+                        ) + fadeIn(tween(280))) togetherWith
+                            (slideOutHorizontally(
+                                targetOffsetX = { direction * it / 20 },
+                                animationSpec = androidOffsetSpec,
+                            ) + scaleOut(
+                                targetScale = 0.90f,
+                                animationSpec = androidScaleSpec,
+                            ) + fadeOut(tween(220)))
+                    platform.family == PlatformFamily.IOS ->
+                        slideInHorizontally(
+                            initialOffsetX = { -direction * it / 3 },
+                            animationSpec = appleSpatialSpec,
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { direction * it },
+                            animationSpec = appleSpatialSpec,
+                        )
+                    else -> EnterTransition.None togetherWith ExitTransition.None
+                }
+            },
+            predictivePopTransitionSpec = { swipeEdge: Int ->
+                val gestureDirection = if (swipeEdge == NavigationEvent.EDGE_RIGHT) -1 else 1
+                when {
+                    nativeNavigationEnabled ->
+                        EnterTransition.None togetherWith ExitTransition.None
+                    reduceMotion ->
+                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                    platform.family == PlatformFamily.Android ->
+                        (slideInHorizontally(
+                            initialOffsetX = { -gestureDirection * it / 20 },
+                            animationSpec = androidOffsetSpec,
+                        ) + scaleIn(
+                            initialScale = 1.10f,
+                            animationSpec = androidScaleSpec,
+                        ) + fadeIn(tween(280))) togetherWith
+                            (slideOutHorizontally(
+                                targetOffsetX = { gestureDirection * it / 20 },
+                                animationSpec = androidOffsetSpec,
+                            ) + scaleOut(
+                                targetScale = 0.90f,
+                                animationSpec = androidScaleSpec,
+                            ) + fadeOut(tween(220)))
+                    platform.family == PlatformFamily.IOS ->
+                        slideInHorizontally(
+                            initialOffsetX = { -gestureDirection * it / 3 },
+                            animationSpec = appleInteractiveSpec,
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { gestureDirection * it },
+                            animationSpec = appleInteractiveSpec,
+                        )
+                    else -> EnterTransition.None togetherWith ExitTransition.None
+                }
+            },
+            entryProvider = entryProvider {
+                entry<AppSection> { route ->
+                    SectionDestination(
+                        route = route,
                         expanded = false,
                         modifier = Modifier.fillMaxSize(),
                         usesLegacySmartTransport = false,
                     )
                 }
-            }
-            if (pullRefreshEnabled) {
-                PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = refresh,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                ) {
-                    navHostContent()
+                entry<ClassroomDetailRoute> {
+                    SectionDestination(
+                        route = ClassroomDetailRoute,
+                        expanded = false,
+                        modifier = Modifier.fillMaxSize(),
+                        usesLegacySmartTransport = false,
+                    )
                 }
-            } else {
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    navHostContent()
-                }
-            }
-            // 二级页隐藏底栏，表明处于更深层级；不额外保留底部安全区（实测各平台无遮挡）。
-            if (!isMoreSubPage) {
-                CompactBottomNavigation(
-                    section = section,
-                    onSectionSelected = navigateToSection,
-                )
-            }
-        }
+            },
+        )
     }
 }
+
+private fun String.toAppRoute(): AppRoute? =
+    if (this == CLASSROOM_DETAIL_ROUTE_ID) {
+        ClassroomDetailRoute
+    } else {
+        AppSection.entries.firstOrNull { it.name == this }
+    }
 
 private fun HomeChangeDomain.toAppSection(): AppSection = when (this) {
     HomeChangeDomain.GRADES -> AppSection.GRADES
@@ -686,19 +956,14 @@ private fun AppSidebarItem(title: String, selected: Boolean, onClick: () -> Unit
 private fun CompactAppTopBar(
     title: String,
     isRefreshing: Boolean,
-    platformFamily: PlatformFamily,
     isLoggingIn: Boolean = false,
     onBack: (() -> Unit)? = null,
 ) {
     // 顶栏与页面背景同色：iOS 的 SwiftUI 根视图在状态栏下方铺的就是 background，
     // 顶栏若用 surface 会在状态栏下方露出一条浅色带子，破坏沉浸感。
-    // iOS 的 Compose 宿主本身已位于状态栏下方，再叠加 statusBarsPadding 会重复
-    // 计算安全区，导致标题与状态栏间距异常（2026-08-04 真机反馈）。
-    val statusBarInset = if (platformFamily == PlatformFamily.IOS) {
-        Modifier
-    } else {
-        Modifier.statusBarsPadding()
-    }
+    // iOS 的 Compose 宿主已改为全屏布局（原生 push 转场需要覆盖状态栏区域），
+    // WindowInsets.statusBars 在 iOS 上恢复为真实值，顶栏统一应用状态栏内边距。
+    val statusBarInset = Modifier.statusBarsPadding()
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
             modifier = Modifier.fillMaxWidth()
@@ -784,8 +1049,9 @@ private fun BackChevron() {
 private fun CompactBottomNavigation(
     section: AppSection,
     onSectionSelected: (AppSection) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    NavigationBar {
+    NavigationBar(modifier = modifier) {
         BottomNavSections.forEach { item ->
             NavigationBarItem(
                 selected = if (item == AppSection.MORE) section in MoreGroupSections else section == item,
@@ -1154,7 +1420,7 @@ private fun GradeControls(state: GradeUiState, model: GradeScreenModel) {
             FilledTonalButton(onClick = model::cycleSortOrder) {
                 Text(
                     when (state.sortOrder) {
-                        GradeSortOrder.ORIGINAL -> "排序：原始"
+                        GradeSortOrder.ORIGINAL -> "排序：成绩更新顺序"
                         GradeSortOrder.ASCENDING -> "排序：分数升序 ↑"
                         GradeSortOrder.DESCENDING -> "排序：分数降序 ↓"
                     },
@@ -1184,52 +1450,70 @@ private fun GradeSelectionActions(state: GradeUiState, model: GradeScreenModel) 
                 OutlinedButton(onClick = model::clearSelectedSemesters) { Text("清空所选学期") }
             }
             OutlinedButton(onClick = model::clearAllSelections) { Text("全部清空") }
-            // 按课程性质批量选择/排除，三态 chip：全选（selected 样式）/ 部分选中
-            // （tertiaryContainer + 已选/总数）/ 未选中（默认样式）。
-            // 点击行为：全选状态 → 取消该性质全部；其余状态 → 全选该性质。
-            // “其他类别”覆盖性质未知（UNKNOWN）的课程，避免已选未知课程没有入口取消。
-            listOf(
-                CourseType.REQUIRED to "必修",
-                CourseType.LIMITED to "限选",
-                CourseType.ELECTIVE to "任选",
-                CourseType.PHYSICAL_EDUCATION to "体育",
-                CourseType.UNKNOWN to "其他类别",
-            ).forEach { (type, label) ->
-                val count = state.courseTypeCounts[type] ?: 0
-                if (count > 0) {
-                    val selectionState = state.selectionStateForType(type)
-                    val partial = selectionState == CourseTypeSelectionState.PARTIAL
-                    FilterChip(
-                        selected = selectionState == CourseTypeSelectionState.ALL,
-                        onClick = {
-                            if (selectionState == CourseTypeSelectionState.ALL) {
-                                model.deselectByType(type)
-                            } else {
-                                model.selectAllByType(type)
-                            }
-                        },
-                        colors = if (partial) {
-                            FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                labelColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                            )
-                        } else {
-                            FilterChipDefaults.filterChipColors()
-                        },
-                        label = {
-                            Text(
-                                if (partial) {
-                                    val selectedCount = state.grades.count { grade ->
-                                        state.courseTypeOf(grade) == type &&
-                                            grade.id in state.selectedGradeIds
-                                    }
-                                    "$label $selectedCount/$count"
+            if (state.courseTypesByCode == null) {
+                // 映射未加载时不做分类，避免把全部课程误当成“其他类别”。
+                Text(
+                    "课程性质未同步，下拉刷新后可用分类筛选",
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                // 按课程性质批量选择/排除，三态 chip：全选（该类别实色底）/ 部分选中
+                // （浅底描边 + 已选/总数）/ 未选中（默认样式）。
+                // 点击行为：全选状态 → 取消该性质全部；其余状态 → 全选该性质。
+                // “其他类别”覆盖性质未知（UNKNOWN）的课程，避免已选未知课程没有入口取消。
+                listOf(
+                    CourseType.REQUIRED to "必修",
+                    CourseType.LIMITED to "限选",
+                    CourseType.ELECTIVE to "任选",
+                    CourseType.PHYSICAL_EDUCATION to "体育",
+                    CourseType.UNKNOWN to "其他类别",
+                ).forEach { (type, label) ->
+                    val count = state.courseTypeCounts[type] ?: 0
+                    if (count > 0) {
+                        val selectionState = state.selectionStateForType(type)
+                        val colors = courseTypeColors(type)
+                        FilterChip(
+                            selected = selectionState == CourseTypeSelectionState.ALL,
+                            onClick = {
+                                if (selectionState == CourseTypeSelectionState.ALL) {
+                                    model.deselectByType(type)
                                 } else {
-                                    "$label $count"
-                                },
-                            )
-                        },
-                    )
+                                    model.selectAllByType(type)
+                                }
+                            },
+                            colors = when (selectionState) {
+                                CourseTypeSelectionState.PARTIAL -> FilterChipDefaults.filterChipColors(
+                                    containerColor = colors.container.copy(alpha = 0.35f),
+                                    labelColor = colors.onContainer,
+                                )
+                                CourseTypeSelectionState.ALL -> FilterChipDefaults.filterChipColors(
+                                    containerColor = colors.container,
+                                    labelColor = colors.onContainer,
+                                )
+                                CourseTypeSelectionState.NONE -> FilterChipDefaults.filterChipColors()
+                            },
+                            border = if (selectionState != CourseTypeSelectionState.NONE) {
+                                BorderStroke(1.dp, colors.border)
+                            } else {
+                                null
+                            },
+                            label = {
+                                Text(
+                                    if (selectionState == CourseTypeSelectionState.PARTIAL) {
+                                        val selectedCount = state.grades.count { grade ->
+                                            state.courseTypeOf(grade) == type &&
+                                                grade.id in state.selectedGradeIds
+                                        }
+                                        "$label $selectedCount/$count"
+                                    } else {
+                                        "$label $count"
+                                    },
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -1274,7 +1558,7 @@ private fun GradeList(
 @Composable
 private fun GradeRow(
     grade: Grade,
-    courseType: CourseType,
+    courseType: CourseType?,
     selectionMode: Boolean,
     selectedForCalculation: Boolean,
     selectedForDetails: Boolean,
@@ -1312,11 +1596,12 @@ private fun GradeRow(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // 性质未知的课程不显示标签，避免把映射缺失误读成任选。
-                    if (courseType != CourseType.UNKNOWN) {
+                    // 性质未同步（null）或未知的课程不显示标签，避免把映射缺失误读成任选。
+                    if (courseType != null && courseType != CourseType.UNKNOWN) {
+                        val colors = courseTypeColors(courseType)
                         Surface(
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            color = colors.container,
+                            contentColor = colors.onContainer,
                             shape = RoundedCornerShape(6.dp),
                         ) {
                             Text(

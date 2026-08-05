@@ -102,6 +102,26 @@ class GradeScreenModelTest {
     }
 
     @Test
+    fun unsyncedMappingStaysNullAndGradesHaveNoCategory() = runBlocking {
+        val snapshot = GradeSnapshot(
+            grades = listOf(grade(1, name = "C312009B高级英语视听说[04]")),
+            selectedGradeIds = emptySet(),
+            courseTypesByCode = null,
+        )
+        val model = GradeScreenModel(
+            FakeRepository(loaded = snapshot, refreshed = GradeRefreshResult.Success(snapshot)),
+        )
+
+        model.initialize()
+
+        val state = model.state.value
+        assertEquals(null, state.courseTypesByCode)
+        assertEquals(null, state.courseTypeOf(state.grades.single()))
+        assertTrue(state.courseTypeCounts.isEmpty())
+        assertEquals(CourseTypeSelectionState.NONE, state.selectionStateForType(CourseType.UNKNOWN))
+    }
+
+    @Test
     fun courseTypesFlowIntoStateAndUnknownGradesStayUnlabeled() = runBlocking {
         val required = grade(1, name = "C312009B高级英语视听说[04]")
         val unknown = grade(2, name = "英语认定")
@@ -124,7 +144,8 @@ class GradeScreenModelTest {
     }
 
     @Test
-    fun typeChipsSelectAndDeselectWholeTypeAndSurviveRefresh() = runBlocking {        val required = grade(1, name = "C312009B高级英语视听说[04]")
+    fun typeChipsSelectAndDeselectWholeTypeAndSurviveRefresh() = runBlocking {
+        val required = grade(1, name = "C312009B高级英语视听说[04]")
         val elective = grade(2, name = "S1100120A计算机导论[01]")
         val courseTypes = mapOf(
             "C312009B" to CourseType.REQUIRED,
@@ -254,7 +275,7 @@ class GradeScreenModelTest {
         override fun clearSelectedCourseTypes(courseTypes: Set<CourseType>): GradeSnapshot {
             val ids = snapshot.grades
                 .filterNot { grade ->
-                    courseTypeOfGrade(grade, snapshot.courseTypesByCode) in courseTypes
+                    courseTypeOfGrade(grade, snapshot.courseTypesByCode.orEmpty()) in courseTypes
                 }
                 .mapTo(mutableSetOf(), Grade::id)
             return snapshot.copy(selectedGradeIds = snapshot.selectedGradeIds intersect ids)

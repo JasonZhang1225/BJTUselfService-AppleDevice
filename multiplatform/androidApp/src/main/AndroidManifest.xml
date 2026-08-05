@@ -14,5 +14,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".NativeDetailActivity"
+            android:enableOnBackInvokedCallback="true"
+            android:exported="false" />
     </application>
 </manifest>
