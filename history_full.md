@@ -188,6 +188,31 @@
 - 验证：`:androidApp:assembleDebug`、`:shared:desktopTest`、iOS Simulator `xcodebuild` 构建/安装/运行全部通过，无新崩溃报告；用户目视确认 iOS push 转场（含状态栏覆盖修复）OK。工具边界：macOS 录屏隐私限制下 `simctl io screenshot` 与 Computer Use 截图读黑帧（App 实际正常）；Computer Use 坐标无法可靠起始于设备屏幕边缘，边缘手势与转场观感以用户目视/真机录屏为准。
 - 同批修正：成绩课程性质映射 `courseTypesByCode` 改为可空，区分"从未成功同步培养方案"与"全部落入其他类别"，避免方案未刷新时误导分类筛选；`GradeRepository`/数据源/Model/测试同步调整。
 
+## 紧凑壳、静默登录与列表 UI（2026-08-04～08-06）
+
+### 紧凑端导航壳与静默自动登录（2026-08-04）
+
+- Apple Design 框架：紧凑端底部 5 tab（首页/课程表/成绩/作业/更多）；顶栏大标题+同步指示；考试/课件/教室/邮箱/设置/校历与成绩单下载收进「更多」；明文 HTTP 风险提示仅在作业/课件等授权页出现。Android 明文策略与 iOS/macOS 对齐走 `LegacyHttp`/`networkSecurityConfig` 仅放行 `123.121.147.7`。
+- 静默自动登录：登录成功写入最小档案快照（姓名/学号/身份/学院）到 CacheStore metadata；冷启动有凭据且有档案时跳过登录页，顶栏先「登录中」再「同步中」；`entryLoggingIn` 门控 ScreenModel 网络初始化，避免无会话请求；多次失败主界面引导弹窗回登录页；凭据恢复完成前不渲染，消除登录页闪帧。Android 模拟器冷启动截图验证；iOS 真机用户确认（需先有一次成功登录写档案）。
+- 「更多」结构调整：校历下载/成绩单下载独立进根目录；子页顶栏返回箭头；「更多」子页隐藏底栏并以 `navigationBarsPadding()` 占位；设置页大标题仅宽屏显示。成绩单语言改为中/英分段按钮。
+- 校历下载页增加「当前最新」文件名（`fetchCalendarFileName` 只解析不下载 PDF）；失败静默 null。
+- 邮箱首进：Android 预热 WebView、iOS 常驻 prewarmedWebView，MailboxWorkspace 延迟约 450ms 再初始化，减轻转场卡顿。
+- 本地四端分发包曾输出到根 `builtapps/`（gitignore）：1.7.0 原版 APK、KMP Android/iOS/macOS debug 或开发签名包，非正式发布。
+
+### 成绩课程性质映射（2026-08-05）
+
+- 成绩接口表格无课程性质列；性质从培养方案 `/training/training/program/` 列表与全部 `stuview/<id>/` 交叉比对（rowspan/colspan 课组跟踪），产出课程号→必修/限选/任选/体育映射，与成绩同事务落库表 `program_course_type_cache`（SQLDelight `2.sqm` v2→v3）。
+- 自选模式五类三态 chips（必修/限选/任选/体育/其他类别）；体育因学校 PDF/方案页/成绩单口径不一致独立类别；课程号贪婪匹配吞字 bug 已修。desktopTest/assembleDebug 通过。开放问题见根目录 `体育课疑惑.md`。计划文 `docs/migration/m9-grade-course-type-plan.md`。
+
+### 紧凑端列表 UI 与刷新策略（2026-08-06，提交 `c1bd8d1`）
+
+- **成绩**：筛选 sheet 排序改为「维度圆角矩形 + 方向胶囊」；`ORIGINAL_REVERSED` 默认（教务原序倒排=从新到旧）；分数从高到低/从低到高；自由选择课程用 Switch；性质胶囊在自选模式下绑 `selectedGradeIds`，文案 `已选/总数`，0 门为全部未选淡色三态。
+- **作业**：对齐课表/成绩——同步态顶栏右上；Banner 内筛选+排序图标开 sheet（课程、截止两矩形「显示全部日期」「隐藏已过期」、排序）；改排序不算「已筛选」；状态条与课表 Banner 风格对齐。
+- **课表**：Banner 与星期行固定在列表外；下方 `LazyColumn` 用 `weight(1f)` 占满剩余高度，短内容也可过滚。
+- **同步门控**：登录成功后才网络自动同步；Workspace 初始化只灌缓存；`entryLoggingIn` 门控 shell；成绩/作业/考试/课表 `initialize` 分缓存与网络两阶段。排序切换 LazyColumn 回顶。进度条钉在顶栏下。
+- **去掉下拉刷新**：曾尝试 Material3 PTR、CMP 挂 UIRefreshControl、无 event handling 过滚等，均与系统过滚互抢或误触；根因是 Compose LazyColumn 主手势不在可稳定挂 `UIRefreshControl` 的 UIScrollView 上。产品决定删除全部分端 `AppPullToRefresh`，可刷新页在「已同步」旁圆形刷新按钮；保留平台原生 overscroll bounce。用户明确日后 SwiftUI 重写再做 `.refreshable`。
+- 验证：`:shared` desktop / iOS Simulator / Android 编译与 grade 相关单测通过。真机目视刷新按钮与课表过滚仍待用户确认，未写成验收完成。
+
 ## 决策记录
 
 - 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。
@@ -203,3 +228,4 @@
 - 2026-08-01：进一步无障碍专项（VoiceOver、最大字号手势等）暂时移出当前范围，不作为完成门禁。
 - 2026-08-01：真实作业上传延期到学校后续布置作业时再做；不制造作业或上传无关文件。
 - 2026-08-05：紧凑端二/三级页导航交给平台原生容器（Android 系统 Activity、iOS UIKit `UINavigationController`），Compose `NavDisplay` 只保留宽屏/回退路径与一级 tab 容器；底栏一级 tab 永不触发原生 push。
+- 2026-08-06：去掉 Compose 下拉刷新（与系统过滚互抢）；紧凑可刷新页改用顶栏圆形刷新按钮 + 平台原生 overscroll；原生 SwiftUI `.refreshable` 留到日后 SwiftUI 重写再做。
