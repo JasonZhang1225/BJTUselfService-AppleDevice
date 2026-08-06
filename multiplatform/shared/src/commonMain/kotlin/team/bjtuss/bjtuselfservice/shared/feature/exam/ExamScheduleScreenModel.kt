@@ -42,29 +42,36 @@ class ExamScheduleScreenModel(
     private val mutableState = MutableStateFlow(ExamScheduleUiState())
     val state: StateFlow<ExamScheduleUiState> = mutableState.asStateFlow()
 
-    private var initialized = false
+    private var cacheLoaded = false
+    private var networkAutoSyncStarted = false
     private var refreshInFlight = false
 
+    /**
+     * @param refreshFromNetwork false 只读缓存；true 在登录成功后由 shell 触发自动同步。
+     */
     suspend fun initialize(refreshFromNetwork: Boolean = true) {
-        if (initialized) return
-        initialized = true
-        val cached = runCatching(repository::load).getOrNull()
-        if (cached != null) {
-            applySnapshot(
-                cached,
-                if (cached.exams.isEmpty()) null else ExamScheduleContentSource.CACHE,
-                null,
-            )
-        } else {
-            mutableState.value = mutableState.value.copy(
-                isLoading = true,
-                failure = ExamScheduleSyncFailure.CACHE,
-            )
+        if (!cacheLoaded) {
+            cacheLoaded = true
+            val cached = runCatching(repository::load).getOrNull()
+            if (cached != null) {
+                applySnapshot(
+                    cached,
+                    if (cached.exams.isEmpty()) null else ExamScheduleContentSource.CACHE,
+                    null,
+                )
+            } else {
+                mutableState.value = mutableState.value.copy(
+                    isLoading = true,
+                    failure = ExamScheduleSyncFailure.CACHE,
+                )
+            }
+            if (!refreshFromNetwork) {
+                mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
+            }
         }
-        if (refreshFromNetwork) {
+        if (refreshFromNetwork && !networkAutoSyncStarted) {
+            networkAutoSyncStarted = true
             refresh()
-        } else {
-            mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
         }
     }
 

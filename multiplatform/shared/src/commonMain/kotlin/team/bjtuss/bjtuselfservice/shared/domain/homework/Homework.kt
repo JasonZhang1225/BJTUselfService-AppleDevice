@@ -108,17 +108,26 @@ fun filterHomework(
     dateMatches && courseMatches
 }
 
+/**
+ * 截止时间排序。
+ * - [HomeworkSortOrder.ASCENDING]：由近到远（截止更早的在前）
+ * - [HomeworkSortOrder.DESCENDING]：由远到近（截止更晚的在前）
+ *
+ * 注意：历史上 ASC/DESC 与文案曾对调过，以本注释与 UI 文案为准。
+ */
 fun sortHomework(
     homework: List<Homework>,
     order: HomeworkSortOrder,
 ): List<Homework> = when (order) {
     HomeworkSortOrder.ORIGINAL -> homework
+    // 由近到远：更早截止在前；无日期沉底。
     HomeworkSortOrder.ASCENDING -> homework.sortedWith(
         compareBy<Homework> { parseSchoolLocalDateTime(it.endTime) == null }
             .thenBy { parseSchoolLocalDateTime(it.endTime) },
     )
+    // 由远到近：更晚截止在前；无日期沉底。
     HomeworkSortOrder.DESCENDING -> homework.sortedWith(
-        compareByDescending<Homework> { parseSchoolLocalDateTime(it.endTime) != null }
+        compareBy<Homework> { parseSchoolLocalDateTime(it.endTime) == null }
             .thenByDescending { parseSchoolLocalDateTime(it.endTime) },
     )
 }

@@ -39,7 +39,8 @@ data class GradeUiState(
     val excludedCourseTypes: Set<CourseType> = emptySet(),
     /** null = 性质映射未加载（从未同步成功），此时不应把全部课程当“其他类别”。 */
     val courseTypesByCode: Map<String, CourseType>? = null,
-    val sortOrder: GradeSortOrder = GradeSortOrder.ORIGINAL,
+    /** 默认「从新到旧」：教务原序倒排。 */
+    val sortOrder: GradeSortOrder = GradeSortOrder.ORIGINAL_REVERSED,
     val selectionMode: Boolean = false,
     val selectedGradeId: Int? = null,
     val isLoading: Boolean = true,
@@ -122,6 +123,10 @@ data class GradeUiState(
         }
     }
 
+    /** 自选模式下某性质已勾选门数（用于胶囊计数 `已选/总数`）。 */
+    fun selectedCountForType(type: CourseType): Int =
+        grades.count { courseTypeOf(it) == type && it.id in selectedGradeIds }
+
     fun allSelectedForType(type: CourseType): Boolean =
         selectionStateForType(type) == CourseTypeSelectionState.ALL
 }
@@ -139,34 +144,41 @@ class GradeScreenModel(
     private val mutableState = MutableStateFlow(GradeUiState())
     val state: StateFlow<GradeUiState> = mutableState.asStateFlow()
 
-    private var initialized = false
+    private var cacheLoaded = false
+    private var networkAutoSyncStarted = false
     private var refreshInFlight = false
 
+    /**
+     * @param refreshFromNetwork false 只读缓存；true 在登录成功后由 shell 触发自动同步。
+     */
     suspend fun initialize(refreshFromNetwork: Boolean = true) {
-        if (initialized) return
-        initialized = true
-        val cached = runCatching(repository::load).getOrNull()
-        if (cached != null) {
-            val semesterOptions = cached.grades.map(Grade::semester).filter(String::isNotBlank).toSet()
-            mutableState.value = mutableState.value.copy(
-                grades = cached.grades,
-                selectedGradeIds = cached.selectedGradeIds,
-                courseTypesByCode = cached.courseTypesByCode,
-                selectedSemesters = semesterOptions,
-                isLoading = cached.grades.isEmpty(),
-                source = if (cached.grades.isEmpty()) null else GradeContentSource.CACHE,
-                failure = null,
-            )
-        } else {
-            mutableState.value = mutableState.value.copy(
-                isLoading = true,
-                failure = GradeSyncFailure.CACHE,
-            )
+        if (!cacheLoaded) {
+            cacheLoaded = true
+            val cached = runCatching(repository::load).getOrNull()
+            if (cached != null) {
+                val semesterOptions = cached.grades.map(Grade::semester).filter(String::isNotBlank).toSet()
+                mutableState.value = mutableState.value.copy(
+                    grades = cached.grades,
+                    selectedGradeIds = cached.selectedGradeIds,
+                    courseTypesByCode = cached.courseTypesByCode,
+                    selectedSemesters = semesterOptions,
+                    isLoading = cached.grades.isEmpty(),
+                    source = if (cached.grades.isEmpty()) null else GradeContentSource.CACHE,
+                    failure = null,
+                )
+            } else {
+                mutableState.value = mutableState.value.copy(
+                    isLoading = true,
+                    failure = GradeSyncFailure.CACHE,
+                )
+            }
+            if (!refreshFromNetwork) {
+                mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
+            }
         }
-        if (refreshFromNetwork) {
+        if (refreshFromNetwork && !networkAutoSyncStarted) {
+            networkAutoSyncStarted = true
             refresh()
-        } else {
-            mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
         }
     }
 
@@ -243,9 +255,10 @@ class GradeScreenModel(
         val current = mutableState.value
         setSortOrder(
             when (current.sortOrder) {
-                GradeSortOrder.ORIGINAL -> GradeSortOrder.ASCENDING
-                GradeSortOrder.ASCENDING -> GradeSortOrder.DESCENDING
-                GradeSortOrder.DESCENDING -> GradeSortOrder.ORIGINAL
+                GradeSortOrder.ORIGINAL -> GradeSortOrder.ORIGINAL_REVERSED
+                GradeSortOrder.ORIGINAL_REVERSED -> GradeSortOrder.DESCENDING
+                GradeSortOrder.DESCENDING -> GradeSortOrder.ASCENDING
+                GradeSortOrder.ASCENDING -> GradeSortOrder.ORIGINAL
             },
         )
     }
@@ -255,10 +268,30 @@ class GradeScreenModel(
         mutableState.value = mutableState.value.copy(sortOrder = order)
     }
 
+    /**
+     * 筛选面板：点左侧维度胶囊。已在该维度则不动方向；切维度时落到该维默认方向
+     * （更新顺序→从新到旧 / 分数→从高到低）。
+     */
+    fun selectSortCategory(byScore: Boolean) {
+        val current = mutableState.value.sortOrder
+        val alreadyInCategory = if (byScore) {
+            current == GradeSortOrder.ASCENDING || current == GradeSortOrder.DESCENDING
+        } else {
+            current == GradeSortOrder.ORIGINAL || current == GradeSortOrder.ORIGINAL_REVERSED
+        }
+        if (alreadyInCategory) return
+        setSortOrder(
+            if (byScore) GradeSortOrder.DESCENDING else GradeSortOrder.ORIGINAL_REVERSED,
+        )
+    }
+
     fun setSelectionMode(enabled: Boolean) {
         val current = mutableState.value
         if (current.selectionMode == enabled) return
-        // 开关只控制列表是否显示逐门勾选框；学期/性质筛选保持不动。
+        // 开关只控制列表勾选框与性质胶囊语义：
+        // - 开启后：性质胶囊绑定 selectedGradeIds（0 门 → 全部 0/n 未选态，不会沿用「筛选全选」满色）
+        // - 关闭后：性质胶囊回到 excludedCourseTypes 筛选语义
+        // 不在此处改写 selectedGradeIds / excludedCourseTypes，避免误清用户已有自选。
         mutableState.value = current.copy(selectionMode = enabled)
     }
 
@@ -294,6 +327,20 @@ class GradeScreenModel(
             grades = current.grades,
             selectedIds = current.selectedGradeIds + idsOfType,
         )
+    }
+
+    /**
+     * 自选模式下点性质胶囊：
+     * - 已全选 → 取消该类
+     * - 未选 / 部分选 → 全选该类
+     */
+    fun toggleTypeSelection(type: CourseType) {
+        when (mutableState.value.selectionStateForType(type)) {
+            CourseTypeSelectionState.ALL -> deselectByType(type)
+            CourseTypeSelectionState.PARTIAL,
+            CourseTypeSelectionState.NONE,
+            -> selectAllByType(type)
+        }
     }
 
     fun deselectByType(type: CourseType) {

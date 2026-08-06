@@ -81,6 +81,10 @@ class GradeRulesTest {
         )
 
         assertEquals(listOf(1, 2, 3), sortGrades(grades, GradeSortOrder.ORIGINAL).map { it.id })
+        assertEquals(
+            listOf(3, 2, 1),
+            sortGrades(grades, GradeSortOrder.ORIGINAL_REVERSED).map { it.id },
+        )
         assertEquals(listOf(2, 1, 3), sortGrades(grades, GradeSortOrder.ASCENDING).map { it.id })
         assertEquals(listOf(3, 1, 2), sortGrades(grades, GradeSortOrder.DESCENDING).map { it.id })
         assertEquals(95, scoreForSorting("A,95"))

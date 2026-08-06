@@ -182,7 +182,7 @@ fun HomeWorkspace(
                 }
             }
         }
-        if (isRefreshing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
             Text(
                 failure.message(state.status != null),

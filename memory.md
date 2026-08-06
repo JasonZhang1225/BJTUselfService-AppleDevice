@@ -1,7 +1,7 @@
 # BJTUselfService KMP 迁移工作记忆
 
-> 最后更新：2026-08-05
-> 当前分支：`main`（跟踪 `mine/main` → `JasonZhang1225/BJTUselfService-AppleDevice`）
+> 最后更新：2026-08-06
+> 当前分支：`main`（跟踪 `mine/main` → `JasonZhang1225/BJTUselfService-AppleDevice`，本地可领先远端）
 > 分支创建点：`9d8da18`；发布与功能基线：`v1.7.0@419313d`
 > 远端历史：2026-08-03 已强制改写为单根提交 `46f6ef9`；远端仅 `HEAD/main`、无标签/PR/下游 fork。旧 SHA 仍可被 GitHub 缓存直接解析；Support 要求先轮换泄露凭据，用户决定不再提交清缓存工单并自行更换密码。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
@@ -9,9 +9,8 @@
 
 ## 1. 本阶段已做到（≤10 行）
 
-- 2026-08-05 成绩页 UI 与课表对齐：banner 同尺寸（18dp/14×12），右侧 pill「筛选」打开全高 sheet（学期勾选、排序、自选 Switch + 性质三态勾选）；同步态顶栏右上。desktop 编译与 grade tests 通过，待目视。
-- 2026-08-05 修复「同步中」假死：HomeScreenModel 曾用 isRefreshing 当互斥，协程取消（切后台）后标志不清、后续 refresh 永久 return；首页顶栏 OR 了 home/homework/exam/course 四态。现改 Mutex + finally 清标志；课表/考试/作业/成绩/课件同样 finally 收尾。另：Ktor 会话请求串行化修并发 Cookie 竞态（LiveCourseScheduleProbe 并发 8/8）。HomeScreenModelTest 含取消用例通过。
-- 2026-08-05 iOS 原生导航修复 leading-edge 侧滑返回：`NativeNavigationController` 隐藏系统导航栏后 UIKit 默认关掉 `interactivePopGestureRecognizer`；现自管 delegate——栈深>1 才允许开始，并 `shouldBeRequiredToFailBy` 让 pop 手势优先于 Compose 滚动。iOS Simulator `xcodebuild` 通过，侧滑手势待用户目视。
+- 2026-08-06 紧凑端成绩/作业/课表/考试 UI 与刷新策略收敛：成绩筛选 sheet 排序改为「维度圆角矩形 + 方向胶囊」（更新顺序默认从新到旧=教务原序倒排；分数从高到低/从低到高）；自由选择课程模式用 Switch，性质胶囊在自选下绑 `selectedGradeIds` 显示 `已选/总数` 三态（0 门=全部未选淡色）；作业对齐课表/成绩——同步态顶栏右上、Banner 内筛选+排序图标开 sheet（课程/截止两矩形「显示全部日期」「隐藏已过期」/排序；改排序不算「已筛选」）；课表 Banner+星期固定、下方 LazyColumn 占满剩余高度。**去掉下拉刷新**（CMP LazyColumn 与 UIRefreshControl/过滚互抢手感差，用户决定日后 SwiftUI 再做）；可刷新页顶栏「已同步」旁圆形刷新按钮；进度条仍钉顶栏下。登录成功后才网络自动同步（Workspace 只灌缓存；`entryLoggingIn` 门控 shell）。排序切换 LazyColumn 回顶。desktop/iOS sim/Android 编译与 grade 相关单测通过，待真机目视刷新按钮与课表过滚。
+- 2026-08-05 成绩页 UI 与课表对齐 + 同步假死/Cookie 并发修复（Mutex+finally、Ktor 请求串行）+ iOS 侧滑返回；细节见此前条目与 `history_full` 若已归档。
 - 2026-08-05 成绩页新增课程性质功能（M9，真实教务页面验证后实施）：成绩接口表格本身无课程性质列（8 列为序号/学年/课程/学分/成绩/加分成绩/教师/详情），课程性质从培养方案页交叉比对获得——每次手动刷新成绩时抓 `/training/training/program/` 列表页与全部 `stuview/<id>/` 详情页（rowspan/colspan 课组跟踪解析，实测 943 门课、成绩匹配率 100%），产出"课程号→必修/限选/任选/体育"映射，与成绩、自选记录同事务落库（新表 `program_course_type_cache`，`2.sqm` v2→v3 迁移）；成绩行不冗余存类别，计算时按课程名前缀课程号 join，查不到安全降级"其他类别"。自选课程模式新增 5 个三态 chips（必修/限选/任选/体育/其他类别，全选/部分/未选配色+计数），支持按类别批量勾选与排除（保研口径=必修+限选可一键达成）；体育课因学校培养方案 PDF/教务系统方案页/官方成绩单三层口径不一致（环节必修 vs 课程任选），独立为"体育"类别（体育Ⅰ/92 门专项课/体测课全覆盖）；修复课程号贪婪匹配吞课程名首字母 bug（`M202015BC语言`→`M202015B`）。desktopTest/assembleDebug 全绿，修订记录见 `docs/migration/m9-grade-course-type-plan.md`，待办见根目录 `体育课疑惑.md`（待问学校确认体育专项课是否计入保研）。
 
 - 2026-08-05 三端导航迁移到 Compose Multiplatform Navigation 3 `1.1.1`：删除 Navigation 2 `NavController/NavHost`，改为应用自持类型安全 `AppRoute` 返回栈与 `NavDisplay`；底栏并入各一级 scene，场景始终全屏，显隐不再改变内容高度。教训：`NavEntry.contentKey` 默认是路由 `toString()` 字符串，强转为 `AppRoute` 的门控曾让 Android 退化为极短淡化、iOS 落入 `None`，移除后恢复平台空间过渡。该共享返回栈的 Compose 模拟动画后经用户多轮主观验收判定"不够原生"，紧凑端二/三级页已被平台原生导航取代（见下条），NavDisplay 现只承担宽屏/回退路径与一级 tab 容器。
@@ -41,17 +40,18 @@
 
 ## 2. 当前痛点（≤8 条）
 
-- **验证码发布级准确率仍待扩样**：当前 24 张固定真实冒烟集单次表达式正确率 87.5%（21/24），两端完全一致；3 次独立新验证码理论成功率约 99.8%，且失败会回退手动，但公版前仍应扩大到至少 300 张独立留出集，不能把 24 张冒烟集当成最终精度门禁。
-- **登录页仍缺 iPhone 真机与真实失败验收**：2026-08-04 第二段 120 fps 真机录屏推翻“仅为滚动回弹”的判断：Password AutoFill 的系统认证 HUD 结束后，SwiftUI 仍按键盘 safe area 缩短 Compose 宿主，页面整体上移并在宿主底边露出纯黑横带。现已固定 SwiftUI 根宿主为全屏，由 Compose 仅在可编辑状态添加 `imePadding`，自动登录开始即移除 IME padding；同时保留加载态清焦点、滚动归零和禁用拖拽。iOS/Android/Desktop 102 项回归通过，iPhone 17 Pro Simulator 已目视确认键盘出现时表单可达、关闭后完整居中且无黑带，签名真机构建与覆盖安装成功，仍待用户复验 Password AutoFill→自动登录的确切真机时序。真机还需核对 Keychain 保存/重启读取；手动验证码弹框等待自然失败时目视。
-- **课件深层按需请求仍缺真实文件夹样本**：当前首门课程首层为 4 个非文件夹项目，已验证课程目录与课程首层冷缓存往返，但无法验证首次展开文件夹；等真实课程出现文件夹时自然补测，不为此制造数据。
-- 服务器真实数据变化样本缺失（四类信息流只验证了基线建立，新增/修改/删除仍无样本）。
-- **iOS Keychain 运行往返仍待专项复验**：2026-08-02 已获得合法开发签名并多次覆盖安装成功，未签名 Simulator 的 `errSecMissingEntitlement` 已不再是权限阻塞；仍需用专项步骤证明保存、重启读取与退出清理。
-- 官方 1.7.0 与当前 KMP PyTorch 2.1 在 API 37.1 模拟器首次启动都会出现 16 KB page-size 兼容提示（KMP 涉及 PyTorch、FBJNI、C++ shared 与 androidx graphics path）；兼容模式下推理已通过，但正式 Android 发布前需升级或替换不对齐的原生库。
+- **紧凑端 UI 待真机目视**：顶栏刷新按钮、课表固定 Banner+可过滚列表、作业筛选 sheet、成绩排序/自选胶囊；下拉刷新已砍，勿再加 Compose 过滚补丁。
+- **CMP 下拉刷新与系统过滚不兼容（已放弃）**：LazyColumn 主手势不在可挂 UIRefreshControl 的 UIScrollView 上；Material PTR 与过滚互抢。用户决定日后 SwiftUI 重写再做 `.refreshable`。
+- **验证码发布级准确率仍待扩样**：24 张冒烟集 87.5%；公版前需 ≥300 张独立留出集。
+- **登录页仍缺 iPhone 真机 Password AutoFill→自动登录时序与 Keychain 专项复验**（宿主全屏+ime 方案已装真机，待用户确认）。
+- **课件深层按需请求仍缺真实文件夹样本**；信息流增删改仍无服务器自然变化样本。
+- 官方 1.7.0 / KMP PyTorch 2.1 在 API 37.1 有 16 KB page-size 提示；正式 Android 发布前需处理原生库对齐。
 
 ## 3. 接下来 1～3 个阶段
 
-1. **M5.5 登录页与凭据收尾**：在 iPhone 真机专项验证 Keychain 保存、重启读取和退出清理，并目视密码键盘/自动填充；等待自然自动登录失败时目视手动验证码弹框，不为此故意提交错误密码；macOS 待用户用真实系统密码条目复验一次选择填充。
-2. **自然样本补证与公版门禁**：课程出现真实文件夹时验证首次展开按需请求；学校布置新作业时再验证上传；服务器自然产生变化时验证信息流新增/修改/删除；验证码公版前补至少 300 张独立留出集；UI 逐页核对按用户指定推进。
+1. **紧凑端 UI 真机验收**：刷新按钮、课表/成绩/作业过滚与筛选排序；问题只记入本文件，不擅自恢复下拉刷新。
+2. **M5.5 登录页与凭据收尾**：真机 Keychain 与 Password AutoFill 时序；自然失败时目视验证码弹框。
+3. **自然样本补证与公版门禁**：课件文件夹、作业上传、信息流变化、验证码扩样；UI 逐页按用户指定推进。
 
 ## 维护规则
 

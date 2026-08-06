@@ -27,9 +27,21 @@ data class GradeSelectionRecord(
     val occurrence: Int,
 )
 
+/**
+ * 成绩列表排序。
+ *
+ * 教务返回的列表偏「旧在前」：UI 上「从新到旧」对应 [ORIGINAL_REVERSED]，
+ * 「从旧到新」对应 [ORIGINAL]（原序）。
+ * - [DESCENDING] / [ASCENDING]：按分数（从高到低 / 从低到高）
+ */
 enum class GradeSortOrder {
+    /** 服务端原序（偏旧→新） */
     ORIGINAL,
+    /** 服务端原序倒序（新→旧），默认展示 */
+    ORIGINAL_REVERSED,
+    /** 分数从低到高 */
     ASCENDING,
+    /** 分数从高到低 */
     DESCENDING,
 }
 
