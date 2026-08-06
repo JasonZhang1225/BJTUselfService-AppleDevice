@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -64,7 +65,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -114,6 +114,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleScreenMod
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkContentSource
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareScreenModel
@@ -318,6 +319,8 @@ fun AuthenticatedAppShell(
         }
     }
 
+    // 登录未完成（静默自动登录中）不触发任何网络自动同步。
+    // 各 Workspace 只会 initialize(refreshFromNetwork=false) 灌缓存；真正的自动同步只在这里启动。
     LaunchedEffect(gradeModel, entryLoggingIn) {
         if (entryLoggingIn) return@LaunchedEffect
         gradeModel.initialize(loginSyncPreferences.autoSyncGrades)
@@ -344,7 +347,7 @@ fun AuthenticatedAppShell(
                 }
             }
             launch {
-                // 课表自动同步的重试在 ScreenModel.initialize 内完成（最多 3 次）。
+                // 课表：登录成功后才网络同步；失败重试在 ScreenModel 内（最多 3 次）。
                 courseScheduleModel.initialize(loginSyncPreferences.autoSyncSchedule)
             }
         }
@@ -381,6 +384,8 @@ fun AuthenticatedAppShell(
                         isRefreshing = isRefreshing,
                         isLoggingIn = entryLoggingIn,
                         idleStatusText = idleStatusText,
+                        // 可刷新页：右上角「已同步」旁放刷新按钮；不再下拉刷新（保平台原生过滚）。
+                        onRefresh = if (refreshable) refresh else null,
                         onBack = if (showBack) {
                             popBackStack
                         } else {
@@ -388,14 +393,13 @@ fun AuthenticatedAppShell(
                         },
                     )
                 }
-                val contentModifier = Modifier.weight(1f).fillMaxWidth()
-                if (!expanded && refreshable) {
-                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = refresh, modifier = contentModifier) {
-                        content()
-                    }
-                } else {
-                    // 宽屏布局本就没有下拉刷新；邮箱/设置/下载/更多页也不可刷新。
-                    Box(modifier = contentModifier) { content() }
+                // 同步进度条钉在顶栏下方。
+                if (isRefreshing) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                // 列表仅平台原生滚动/过滚，无下拉刷新包裹层。
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    content()
                 }
             }
             if (showsCompactBottomBar) {
@@ -521,6 +525,13 @@ fun AuthenticatedAppShell(
                 isRefreshing = homeworkState.isRefreshing,
                 showBack = false,
                 modifier = modifier,
+                // 与课表/成绩一致：同步态在顶栏右上，banner 内只放摘要与筛选入口。
+                idleStatusText = when {
+                    homeworkState.failure != null -> "同步失败"
+                    homeworkState.source == HomeworkContentSource.NETWORK -> "已同步"
+                    homeworkState.source == HomeworkContentSource.CACHE -> "已同步"
+                    else -> "未同步"
+                },
             ) {
                 HomeworkWorkspace(
                     state = homeworkState,
@@ -979,6 +990,8 @@ private fun CompactAppTopBar(
     isLoggingIn: Boolean = false,
     /** 非登录/非刷新时右上角文案（课表等页的「已同步/未同步」）；其它页保持 null。 */
     idleStatusText: String? = null,
+    /** 非空时在状态文案旁显示刷新按钮（替代下拉刷新）。 */
+    onRefresh: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     // 顶栏与页面背景同色：iOS 的 SwiftUI 根视图在状态栏下方铺的就是 background，
@@ -992,7 +1005,7 @@ private fun CompactAppTopBar(
                 .then(statusBarInset)
                 .padding(
                     start = if (onBack != null) 10.dp else 20.dp,
-                    end = 20.dp,
+                    end = 16.dp,
                     top = 14.dp,
                     bottom = 14.dp,
                 ),
@@ -1038,14 +1051,60 @@ private fun CompactAppTopBar(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else if (idleStatusText != null) {
-                Text(
-                    idleStatusText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            } else {
+                if (idleStatusText != null) {
+                    Text(
+                        idleStatusText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (onRefresh != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        onClick = onRefresh,
+                        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.semantics { contentDescription = "刷新" },
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            TopBarRefreshIcon(modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+/** 顶栏刷新：圆弧 + 箭头，不引入 material-icons。 */
+@Composable
+private fun TopBarRefreshIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.7.dp.toPx()
+        val r = size.minDimension * 0.38f
+        val c = Offset(size.width / 2f, size.height / 2f)
+        // 约 270° 圆弧
+        drawArc(
+            color = tint,
+            startAngle = -40f,
+            sweepAngle = 280f,
+            useCenter = false,
+            topLeft = Offset(c.x - r, c.y - r),
+            size = Size(r * 2, r * 2),
+            style = Stroke(width = stroke, cap = StrokeCap.Round),
+        )
+        // 箭头尖
+        val tip = Offset(c.x + r * 0.72f, c.y - r * 0.55f)
+        drawLine(tint, tip, Offset(tip.x - 4.dp.toPx(), tip.y - 1.dp.toPx()), stroke, StrokeCap.Round)
+        drawLine(tint, tip, Offset(tip.x + 1.dp.toPx(), tip.y + 4.dp.toPx()), stroke, StrokeCap.Round)
     }
 }
 
@@ -1307,9 +1366,7 @@ private fun GradeWorkspace(
             }
         }
 
-        if (state.isRefreshing) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
+        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
             GradeFailureBanner(
                 failure = failure,
@@ -1323,11 +1380,11 @@ private fun GradeWorkspace(
             state.isLoading && state.grades.isEmpty() -> GradeLoadingState()
             state.grades.isEmpty() -> GradeEmptyState(onRefresh)
             else -> {
-                GradeSummaryCard(
-                    state = state,
-                    onOpenFilter = { showFilterSheet = true },
-                )
                 if (expanded) {
+                    GradeSummaryCard(
+                        state = state,
+                        onOpenFilter = { showFilterSheet = true },
+                    )
                     Row(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1343,9 +1400,12 @@ private fun GradeWorkspace(
                         )
                     }
                 } else {
-                    GradeList(
+                    // 紧凑端：Banner 放进 LazyColumn，与列表同一滚动体。
+                    // 固定在列表上方时，iOS 橡皮筋只拉卡片、Banner 不动，会出现大空档并与下拉刷新抢手势。
+                    GradeScrollableContent(
                         state = state,
                         model = model,
+                        onOpenFilter = { showFilterSheet = true },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     state.selectedGrade?.let { grade ->
@@ -1431,14 +1491,68 @@ private fun GradeSummaryCard(
                 color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 shape = RoundedCornerShape(999.dp),
+                modifier = Modifier.semantics { contentDescription = "筛选与排序" },
             ) {
-                Text(
-                    "筛选",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                // 筛选 + 排序：sheet 同时承载性质/学期筛选与成绩排序，用双图标表达。
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    FilterFunnelIcon(modifier = Modifier.size(18.dp))
+                    RankBarsIcon(modifier = Modifier.size(18.dp))
+                }
             }
+        }
+    }
+}
+
+/** 漏斗形筛选图标（自绘，不引入 material-icons）。 */
+@Composable
+private fun FilterFunnelIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        val left = 2.5.dp.toPx()
+        val right = size.width - left
+        val top = 3.dp.toPx()
+        val midY = size.height * 0.48f
+        val neckLeft = size.width * 0.42f
+        val neckRight = size.width * 0.58f
+        val bottom = size.height - 2.5.dp.toPx()
+        // 上宽下窄的漏斗轮廓
+        drawLine(tint, Offset(left, top), Offset(right, top), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(left, top), Offset(neckLeft, midY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(right, top), Offset(neckRight, midY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckLeft, midY), Offset(neckLeft, bottom), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckRight, midY), Offset(neckRight, bottom), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckLeft, bottom), Offset(neckRight, bottom), stroke, StrokeCap.Round)
+    }
+}
+
+/** 高度递增柱条：表示成绩排序/排名。 */
+@Composable
+private fun RankBarsIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val barWidth = 3.2.dp.toPx()
+        val gap = 2.4.dp.toPx()
+        val baseY = size.height - 2.5.dp.toPx()
+        val heights = listOf(6.dp.toPx(), 10.dp.toPx(), 14.dp.toPx())
+        val totalWidth = barWidth * 3 + gap * 2
+        val startX = (size.width - totalWidth) / 2f
+        heights.forEachIndexed { index, h ->
+            val x = startX + index * (barWidth + gap)
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(x, baseY - h),
+                size = Size(barWidth, h),
+                cornerRadius = CornerRadius(1.1.dp.toPx()),
+            )
         }
     }
 }
@@ -1500,35 +1614,78 @@ private fun GradeFilterSheet(
             }
         }
 
-        // —— 排序 ——
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // —— 排序：上维度（圆角矩形）+ 下方向（胶囊，随维度切换）——
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "排序",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
+            val byScore =
+                state.sortOrder == GradeSortOrder.ASCENDING ||
+                    state.sortOrder == GradeSortOrder.DESCENDING
+            // 维度：圆角矩形，与下方方向胶囊区分层级。
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(
-                    GradeSortOrder.ORIGINAL to "默认顺序",
-                    GradeSortOrder.ASCENDING to "分数升序",
-                    GradeSortOrder.DESCENDING to "分数降序",
-                ).forEach { (order, label) ->
+                FilterChip(
+                    selected = !byScore,
+                    onClick = { model.selectSortCategory(byScore = false) },
+                    shape = RoundedCornerShape(10.dp),
+                    label = { Text("默认顺序（成绩更新顺序）") },
+                )
+                FilterChip(
+                    selected = byScore,
+                    onClick = { model.selectSortCategory(byScore = true) },
+                    shape = RoundedCornerShape(10.dp),
+                    label = { Text("分数高低") },
+                )
+            }
+            // 方向：胶囊形。
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (byScore) {
                     FilterChip(
-                        selected = state.sortOrder == order,
-                        onClick = { model.setSortOrder(order) },
-                        label = { Text(label) },
+                        selected = state.sortOrder == GradeSortOrder.DESCENDING,
+                        onClick = { model.setSortOrder(GradeSortOrder.DESCENDING) },
+                        shape = RoundedCornerShape(percent = 50),
+                        label = { Text("从高到低") },
+                    )
+                    FilterChip(
+                        selected = state.sortOrder == GradeSortOrder.ASCENDING,
+                        onClick = { model.setSortOrder(GradeSortOrder.ASCENDING) },
+                        shape = RoundedCornerShape(percent = 50),
+                        label = { Text("从低到高") },
+                    )
+                } else {
+                    // 左「从新到旧」= 原序倒排；右「从旧到新」= 教务原序。
+                    FilterChip(
+                        selected = state.sortOrder == GradeSortOrder.ORIGINAL_REVERSED,
+                        onClick = { model.setSortOrder(GradeSortOrder.ORIGINAL_REVERSED) },
+                        shape = RoundedCornerShape(percent = 50),
+                        label = { Text("从新到旧") },
+                    )
+                    FilterChip(
+                        selected = state.sortOrder == GradeSortOrder.ORIGINAL,
+                        onClick = { model.setSortOrder(GradeSortOrder.ORIGINAL) },
+                        shape = RoundedCornerShape(percent = 50),
+                        label = { Text("从旧到新") },
                     )
                 }
             }
         }
 
-        // —— 课程性质：彩色小胶囊，默认全选；不依赖自选开关 ——
+        // —— 课程性质：筛选模式用 excluded；自选模式实时映射已选门数 ——
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                "课程性质",
+                if (state.selectionMode) {
+                    "按课程性质勾选（点击全选/取消该类）"
+                } else {
+                    "按课程性质筛选（点击可勾选或取消勾选）"
+                },
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1550,43 +1707,83 @@ private fun GradeFilterSheet(
                         CourseType.PHYSICAL_EDUCATION to "体育",
                         CourseType.UNKNOWN to "其他类别",
                     ).forEach { (type, label) ->
-                        val count = state.courseTypeCounts[type] ?: 0
-                        if (count <= 0) return@forEach
-                        val included = type !in state.excludedCourseTypes
+                        val total = state.courseTypeCounts[type] ?: 0
+                        if (total <= 0) return@forEach
                         val colors = courseTypeColors(type)
-                        // 选中：满色底 + 加粗；未选中：接近透明底 + 弱字重 + 虚化描边，对比拉大。
-                        FilterChip(
-                            selected = included,
-                            onClick = { model.toggleCourseTypeIncluded(type) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = colors.container,
-                                selectedLabelColor = colors.onContainer,
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                    .accessibleAlpha(0.35f),
-                                labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    .accessibleAlpha(0.48f),
-                            ),
-                            border = BorderStroke(
-                                width = if (included) 1.5.dp else 1.dp,
-                                color = if (included) {
-                                    colors.onContainer.copy(alpha = 0.42f)
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant.accessibleAlpha(0.55f)
+                        if (state.selectionMode) {
+                            // 自选：严格跟 selectedGradeIds。0 门时全部 NONE（0/n、未选色），
+                            // 与筛选模式「默认全选」满色脱钩，避免「自选 0 门但性质仍全亮」。
+                            val selState = state.selectionStateForType(type)
+                            val selectedCount = state.selectedCountForType(type)
+                            val isAll = selState == CourseTypeSelectionState.ALL
+                            val isPartial = selState == CourseTypeSelectionState.PARTIAL
+                            val visuallyOn = isAll || isPartial
+                            FilterChip(
+                                selected = visuallyOn,
+                                onClick = { model.toggleTypeSelection(type) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = when {
+                                        isAll -> colors.container
+                                        isPartial -> colors.container.copy(alpha = 0.55f)
+                                        else -> colors.container
+                                    },
+                                    selectedLabelColor = colors.onContainer,
+                                    // 未选：刻意更淡，和筛选「全选满色」区分开
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                        .accessibleAlpha(0.22f),
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        .accessibleAlpha(0.42f),
+                                ),
+                                border = BorderStroke(
+                                    width = if (visuallyOn) 1.5.dp else 1.dp,
+                                    color = if (visuallyOn) {
+                                        colors.onContainer.copy(alpha = if (isPartial) 0.28f else 0.42f)
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant.accessibleAlpha(0.4f)
+                                    },
+                                ),
+                                label = {
+                                    Text(
+                                        "$label $selectedCount/$total",
+                                        fontWeight = if (isAll) FontWeight.SemiBold else FontWeight.Normal,
+                                    )
                                 },
-                            ),
-                            label = {
-                                Text(
-                                    "$label $count",
-                                    fontWeight = if (included) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                            },
-                        )
+                            )
+                        } else {
+                            val included = type !in state.excludedCourseTypes
+                            FilterChip(
+                                selected = included,
+                                onClick = { model.toggleCourseTypeIncluded(type) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = colors.container,
+                                    selectedLabelColor = colors.onContainer,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                        .accessibleAlpha(0.35f),
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        .accessibleAlpha(0.48f),
+                                ),
+                                border = BorderStroke(
+                                    width = if (included) 1.5.dp else 1.dp,
+                                    color = if (included) {
+                                        colors.onContainer.copy(alpha = 0.42f)
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant.accessibleAlpha(0.55f)
+                                    },
+                                ),
+                                label = {
+                                    Text(
+                                        "$label $total",
+                                        fontWeight = if (included) FontWeight.SemiBold else FontWeight.Normal,
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // —— 自选模式：仅控制列表逐门勾选框 ——
+        // —— 自由选择课程模式：列表逐门勾选；开关形态 ——
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "自选课程计算",
@@ -1606,12 +1803,12 @@ private fun GradeFilterSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            if (state.selectionMode) "已开启自选" else "按筛选结果计算加权",
+                            "自由选择课程模式",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            "开启后列表出现勾选框，可任意点选课程；关闭时用上方学期与性质筛选。",
+                            "开启后列表出现勾选框，可任意点选课程。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1638,6 +1835,62 @@ private fun GradeFilterSheet(
     }
 }
 
+/** 紧凑成绩页：摘要 Banner + 列表（刷新在顶栏按钮，列表仅平台原生过滚）。 */
+@Composable
+private fun GradeScrollableContent(
+    state: GradeUiState,
+    model: GradeScreenModel,
+    onOpenFilter: () -> Unit,
+    modifier: Modifier,
+) {
+    val listState = rememberLazyListState()
+    // 稳定 key 重排时 LazyColumn 会锚定旧 item，导致跳到列表尾；排序变化时回顶。
+    LaunchedEffect(state.sortOrder) {
+        listState.scrollToItem(0)
+    }
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 20.dp),
+    ) {
+        item(key = "grade-summary") {
+            GradeSummaryCard(
+                state = state,
+                onOpenFilter = onOpenFilter,
+            )
+        }
+        if (state.visibleGrades.isEmpty()) {
+            item(key = "grade-empty") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "当前筛选条件下没有成绩",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            items(state.visibleGrades, key = Grade::id) { grade ->
+                GradeRow(
+                    grade = grade,
+                    courseType = state.courseTypeOf(grade),
+                    selectionMode = state.selectionMode,
+                    selectedForCalculation = grade.id in state.selectedGradeIds,
+                    selectedForDetails = grade.id == state.selectedGradeId,
+                    onOpen = { model.showGradeDetails(grade.id) },
+                    onSelectionChange = { selected -> model.setGradeSelected(grade.id, selected) },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun GradeList(
     state: GradeUiState,
@@ -1654,7 +1907,12 @@ private fun GradeList(
         }
         return
     }
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.sortOrder) {
+        listState.scrollToItem(0)
+    }
     LazyColumn(
+        state = listState,
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 20.dp),

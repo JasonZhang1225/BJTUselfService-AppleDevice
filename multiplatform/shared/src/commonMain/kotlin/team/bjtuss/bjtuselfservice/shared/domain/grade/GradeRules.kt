@@ -91,6 +91,7 @@ fun sortGrades(
     order: GradeSortOrder,
 ): List<Grade> = when (order) {
     GradeSortOrder.ORIGINAL -> grades
+    GradeSortOrder.ORIGINAL_REVERSED -> grades.reversed()
     GradeSortOrder.ASCENDING -> grades.sortedBy { scoreForSorting(it.courseScore) }
     GradeSortOrder.DESCENDING -> grades.sortedByDescending { scoreForSorting(it.courseScore) }
 }

@@ -1,5 +1,6 @@
 package team.bjtuss.bjtuselfservice.shared.feature.course
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -43,7 +46,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -84,8 +90,9 @@ fun CourseScheduleWorkspace(
 ) {
     var showSchedulePicker by remember { mutableStateOf(false) }
 
+    // 只灌缓存；网络自动同步由 AuthenticatedAppShell 在登录成功后触发（可重试）。
     LaunchedEffect(model) {
-        model.initialize()
+        model.initialize(refreshFromNetwork = false)
     }
 
     Column(
@@ -117,7 +124,7 @@ fun CourseScheduleWorkspace(
             }
         }
 
-        if (state.isRefreshing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
             CourseFailureBanner(
                 failure = failure,
@@ -130,33 +137,47 @@ fun CourseScheduleWorkspace(
         when {
             state.isLoading && state.courses.isEmpty() -> CourseLoadingState()
             else -> {
-                CourseSummary(
-                    state = state,
-                    onOpenPicker = { showSchedulePicker = true },
-                )
-                if (state.scheduleCourses.isEmpty()) {
-                    CourseEmptyState(state.scheduleType, onRefresh)
-                } else if (expanded) {
-                    Row(
+                if (expanded) {
+                    CourseSummary(
+                        state = state,
+                        onOpenPicker = { showSchedulePicker = true },
+                    )
+                    if (state.scheduleCourses.isEmpty()) {
+                        CourseEmptyState(state.scheduleType, onRefresh)
+                    } else {
+                        Row(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            WeekGrid(
+                                courses = state.visibleCourses,
+                                selectedCourseId = state.selectedCourseId,
+                                onOpen = model::showCourseDetails,
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                            CourseDetailPanel(
+                                course = state.selectedCourse,
+                                modifier = Modifier.widthIn(min = 270.dp, max = 340.dp).fillMaxHeight(),
+                            )
+                        }
+                    }
+                } else if (state.scheduleCourses.isEmpty()) {
+                    Column(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        WeekGrid(
-                            courses = state.visibleCourses,
-                            selectedCourseId = state.selectedCourseId,
-                            onOpen = model::showCourseDetails,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        CourseSummary(
+                            state = state,
+                            onOpenPicker = { showSchedulePicker = true },
                         )
-                        CourseDetailPanel(
-                            course = state.selectedCourse,
-                            modifier = Modifier.widthIn(min = 270.dp, max = 340.dp).fillMaxHeight(),
-                        )
+                        CourseEmptyState(state.scheduleType, onRefresh)
                     }
                 } else {
-                    CompactDaySelector(state.selectedDay, model::selectDay)
-                    DayScheduleList(
-                        courses = state.visibleCourses,
-                        day = state.selectedDay,
+                    // 紧凑端：摘要 + 星期选择 + 日课表同一滚动体。
+                    CourseCompactScrollableContent(
+                        state = state,
+                        model = model,
+                        onOpenPicker = { showSchedulePicker = true },
                         onOpen = model::showCourseDetails,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -303,15 +324,43 @@ private fun CourseSummary(
                 color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 shape = RoundedCornerShape(999.dp),
+                modifier = Modifier.semantics { contentDescription = "切换课表类型与周次" },
             ) {
-                Text(
-                    "切换",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Box(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // 左右对向箭头：表示学期类型/周次互换，不引入 material-icons。
+                    ExchangeArrowsIcon(modifier = Modifier.size(20.dp))
+                }
             }
         }
+    }
+}
+
+/** SwapHoriz 风格：上下两条对向箭头。 */
+@Composable
+private fun ExchangeArrowsIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.9.dp.toPx()
+        val left = 2.dp.toPx()
+        val right = size.width - left
+        val head = 4.5.dp.toPx()
+        val topY = size.height * 0.34f
+        val bottomY = size.height * 0.66f
+
+        // 上箭头：左 → 右
+        drawLine(tint, Offset(left, topY), Offset(right, topY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(right - head, topY - head * 0.7f), Offset(right, topY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(right - head, topY + head * 0.7f), Offset(right, topY), stroke, StrokeCap.Round)
+
+        // 下箭头：右 → 左
+        drawLine(tint, Offset(right, bottomY), Offset(left, bottomY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(left + head, bottomY - head * 0.7f), Offset(left, bottomY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(left + head, bottomY + head * 0.7f), Offset(left, bottomY), stroke, StrokeCap.Round)
     }
 }
 
@@ -466,45 +515,77 @@ private fun CompactDaySelector(selectedDay: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+/**
+ * 紧凑课表：
+ * - Banner + 星期选择 **固定** 在上方（不随列表滚走）
+ * - 下方 LazyColumn **占满剩余高度**，即使当天课很少也能在列表区域过滚/下拉刷新
+ *
+ * 以前把 Banner 塞进 LazyColumn：内容不满屏时整页几乎不能滑；内容超屏时 Banner
+ * 又跟着滚，观感都不对。
+ */
 @Composable
-private fun DayScheduleList(
-    courses: List<Course>,
-    day: Int,
+private fun CourseCompactScrollableContent(
+    state: CourseScheduleUiState,
+    model: CourseScheduleScreenModel,
+    onOpenPicker: () -> Unit,
     onOpen: (Int) -> Unit,
     modifier: Modifier,
 ) {
+    val courses = state.visibleCourses
+    val day = state.selectedDay
     val byLocation = courses.groupBy(Course::courseLocationIndex)
-    LazyColumn(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(9.dp),
-        contentPadding = PaddingValues(bottom = 18.dp),
+    Column(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items((0 until 7).toList(), key = { it }) { slot ->
-            val location = slot * 8 + day + 1
-            val slotCourses = byLocation[location].orEmpty()
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                Text(
-                    slotLabels[slot],
-                    modifier = Modifier.width(88.dp).padding(top = 12.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        CourseSummary(state = state, onOpenPicker = onOpenPicker)
+        CompactDaySelector(state.selectedDay, model::selectDay)
+        LazyColumn(
+            // 占满剩余高度：短列表也能在空白区域拖动手势，便于过滚与下拉刷新
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 18.dp),
+        ) {
+            items((0 until 7).toList(), key = { "slot-$it" }) { slot ->
+                val location = slot * 8 + day + 1
+                val slotCourses = byLocation[location].orEmpty()
+                DayScheduleSlotRow(
+                    slotLabel = slotLabels[slot],
+                    slotCourses = slotCourses,
+                    onOpen = onOpen,
                 )
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    if (slotCourses.isEmpty()) {
-                        // 单层淡底 + 弱化文字，避免「外圈深、内块浅」的双层方框感。
-                        Text(
-                            "无课",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp, vertical = 14.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.accessibleAlpha(0.55f),
-                        )
-                    } else {
-                        slotCourses.forEach { course ->
-                            CourseListCard(course, onOpen)
-                        }
-                    }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayScheduleSlotRow(
+    slotLabel: String,
+    slotCourses: List<Course>,
+    onOpen: (Int) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+        Text(
+            slotLabel,
+            modifier = Modifier.width(88.dp).padding(top = 12.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            if (slotCourses.isEmpty()) {
+                // 单层淡底 + 弱化文字，避免「外圈深、内块浅」的双层方框感。
+                Text(
+                    "无课",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 14.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.accessibleAlpha(0.55f),
+                )
+            } else {
+                slotCourses.forEach { course ->
+                    CourseListCard(course, onOpen)
                 }
             }
         }

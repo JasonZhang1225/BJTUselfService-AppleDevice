@@ -210,7 +210,8 @@ fun CoursewareWorkspace(
             ) { Text("下载教学日历") }
         }
 
-        if (state.isRefreshing || state.isSelectedCourseLoading) {
+        // 列表同步进度条由 DestinationPage 钉在顶栏下；目录导出进度仍在本页展示。
+        if (state.isSelectedCourseLoading && !state.isRefreshing) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
         if (state.directoryDownloadTotal > 0) {

@@ -82,31 +82,38 @@ class HomeworkScreenModel(
     )
     val state: StateFlow<HomeworkUiState> = mutableState.asStateFlow()
 
-    private var initialized = false
+    private var cacheLoaded = false
+    private var networkAutoSyncStarted = false
     private val refreshMutex = Mutex()
     private var detailRequestKey: String? = null
 
+    /**
+     * @param refreshFromNetwork false 只读缓存；true 在登录成功后由 shell 触发自动同步。
+     */
     suspend fun initialize(refreshFromNetwork: Boolean = true) {
-        if (initialized) return
-        initialized = true
-        val cached = runCatching(repository::load).getOrNull()
-        if (cached != null) {
-            applySnapshot(
-                snapshot = cached,
-                source = if (cached.homework.isEmpty()) null else HomeworkContentSource.CACHE,
-                failure = null,
-            )
-        } else {
-            mutableState.value = mutableState.value.copy(
-                isLoading = true,
-                failure = HomeworkSyncFailure.CACHE,
-                now = nowProvider(),
-            )
+        if (!cacheLoaded) {
+            cacheLoaded = true
+            val cached = runCatching(repository::load).getOrNull()
+            if (cached != null) {
+                applySnapshot(
+                    snapshot = cached,
+                    source = if (cached.homework.isEmpty()) null else HomeworkContentSource.CACHE,
+                    failure = null,
+                )
+            } else {
+                mutableState.value = mutableState.value.copy(
+                    isLoading = true,
+                    failure = HomeworkSyncFailure.CACHE,
+                    now = nowProvider(),
+                )
+            }
+            if (!refreshFromNetwork) {
+                mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
+            }
         }
-        if (refreshFromNetwork) {
+        if (refreshFromNetwork && !networkAutoSyncStarted) {
+            networkAutoSyncStarted = true
             refresh()
-        } else {
-            mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
         }
     }
 
@@ -204,7 +211,12 @@ class HomeworkScreenModel(
             HomeworkSortOrder.ASCENDING -> HomeworkSortOrder.DESCENDING
             HomeworkSortOrder.DESCENDING -> HomeworkSortOrder.ORIGINAL
         }
-        mutableState.value = mutableState.value.copy(sortOrder = next, now = nowProvider())
+        setSortOrder(next)
+    }
+
+    fun setSortOrder(order: HomeworkSortOrder) {
+        if (mutableState.value.sortOrder == order) return
+        mutableState.value = mutableState.value.copy(sortOrder = order, now = nowProvider())
     }
 
     suspend fun showDetails(homeworkKey: String) {

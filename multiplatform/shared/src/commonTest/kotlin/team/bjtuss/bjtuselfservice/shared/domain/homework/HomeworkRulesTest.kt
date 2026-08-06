@@ -40,6 +40,7 @@ class HomeworkRulesTest {
             homework(3, "课程", "2026-07-31 08:00"),
         )
 
+        // ASC = 由近到远（更早截止在前）；DESC = 由远到近（更晚截止在前）；无日期沉底。
         assertEquals(listOf(3, 1, 2), sortHomework(items, HomeworkSortOrder.ASCENDING).map { it.id })
         assertEquals(listOf(1, 3, 2), sortHomework(items, HomeworkSortOrder.DESCENDING).map { it.id })
     }

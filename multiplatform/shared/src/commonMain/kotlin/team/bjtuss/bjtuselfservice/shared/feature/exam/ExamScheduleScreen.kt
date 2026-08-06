@@ -56,8 +56,9 @@ fun ExamScheduleWorkspace(
     onRefresh: () -> Unit,
     modifier: Modifier,
 ) {
+    // 只灌缓存；网络自动同步由 shell 在登录成功后触发。
     LaunchedEffect(model) {
-        model.initialize()
+        model.initialize(refreshFromNetwork = false)
     }
 
     Column(
@@ -89,7 +90,7 @@ fun ExamScheduleWorkspace(
             }
         }
 
-        if (state.isRefreshing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
             ExamFailureBanner(
                 failure = failure,
@@ -103,32 +104,35 @@ fun ExamScheduleWorkspace(
             state.isLoading && state.exams.isEmpty() -> ExamLoadingState()
             state.exams.isEmpty() -> ExamEmptyState(onRefresh)
             else -> {
-                ExamSummary(state)
-                ExamTypeFilters(state, model)
-                if (state.visibleExams.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else if (expanded) {
-                    Row(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        ExamList(
-                            exams = state.visibleExams,
-                            selectedExamId = state.selectedExamId,
-                            onOpen = model::showExamDetails,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                        ExamDetailPanel(
-                            exam = state.selectedExam,
-                            modifier = Modifier.widthIn(min = 290.dp, max = 380.dp).fillMaxHeight(),
-                        )
+                if (expanded) {
+                    ExamSummary(state)
+                    ExamTypeFilters(state, model)
+                    if (state.visibleExams.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            ExamList(
+                                exams = state.visibleExams,
+                                selectedExamId = state.selectedExamId,
+                                onOpen = model::showExamDetails,
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                            ExamDetailPanel(
+                                exam = state.selectedExam,
+                                modifier = Modifier.widthIn(min = 290.dp, max = 380.dp).fillMaxHeight(),
+                            )
+                        }
                     }
                 } else {
-                    ExamList(
-                        exams = state.visibleExams,
-                        selectedExamId = state.selectedExamId,
+                    // 紧凑端：摘要 + 类型筛选 + 列表同一滚动体，配合下拉刷新橡皮筋。
+                    ExamScrollableContent(
+                        state = state,
+                        model = model,
                         onOpen = model::showExamDetails,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -216,6 +220,47 @@ private fun ExamTypeFilters(state: ExamScheduleUiState, model: ExamScheduleScree
 }
 
 @Composable
+private fun ExamScrollableContent(
+    state: ExamScheduleUiState,
+    model: ExamScheduleScreenModel,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 18.dp),
+    ) {
+        item(key = "exam-summary") {
+            ExamSummary(state)
+        }
+        item(key = "exam-filters") {
+            ExamTypeFilters(state, model)
+        }
+        if (state.visibleExams.isEmpty()) {
+            item(key = "exam-empty") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            items(state.visibleExams, key = ExamSchedule::id) { exam ->
+                ExamCard(
+                    exam = exam,
+                    selected = exam.id == state.selectedExamId,
+                    onOpen = onOpen,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExamList(
     exams: List<ExamSchedule>,
     selectedExamId: Int?,
@@ -228,40 +273,53 @@ private fun ExamList(
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
         items(exams, key = ExamSchedule::id) { exam ->
-            ElevatedCard(
-                onClick = { onOpen(exam.id) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(17.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = if (exam.id == selectedExamId) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surface
-                    },
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(15.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Text(
-                        exam.courseName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        exam.examType,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    ExamCardLine("时间地点", exam.examTimeAndPlace)
-                    ExamCardLine("状态", exam.examStatus)
-                    if (exam.detail.isNotBlank()) {
-                        ExamCardLine("详情", exam.detail)
-                    }
-                }
+            ExamCard(
+                exam = exam,
+                selected = exam.id == selectedExamId,
+                onOpen = onOpen,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExamCard(
+    exam: ExamSchedule,
+    selected: Boolean,
+    onOpen: (Int) -> Unit,
+) {
+    ElevatedCard(
+        onClick = { onOpen(exam.id) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(17.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(15.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                exam.courseName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                exam.examType,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            ExamCardLine("时间地点", exam.examTimeAndPlace)
+            ExamCardLine("状态", exam.examStatus)
+            if (exam.detail.isNotBlank()) {
+                ExamCardLine("详情", exam.detail)
             }
         }
     }

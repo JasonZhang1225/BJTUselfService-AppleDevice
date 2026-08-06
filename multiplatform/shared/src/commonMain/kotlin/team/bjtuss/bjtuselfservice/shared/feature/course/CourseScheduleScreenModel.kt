@@ -59,30 +59,43 @@ class CourseScheduleScreenModel(
     private val mutableState = MutableStateFlow(CourseScheduleUiState())
     val state: StateFlow<CourseScheduleUiState> = mutableState.asStateFlow()
 
-    private var initialized = false
+    /** 本地缓存是否已灌入 UI。可在登录完成前执行。 */
+    private var cacheLoaded = false
+    /**
+     * 网络自动同步是否已启动。必须在登录成功后由 shell 以 refreshFromNetwork=true 触发，
+     * 避免静默登录未完成时白白失败多次。
+     */
+    private var networkAutoSyncStarted = false
     private var refreshInFlight = false
 
+    /**
+     * @param refreshFromNetwork false：只读缓存（页面打开即可）；true：登录成功后的自动同步（可重试）。
+     * 两阶段可分别调用，且顺序无关：先缓存后网络，或直接网络（内部仍会先灌缓存）。
+     */
     suspend fun initialize(refreshFromNetwork: Boolean = true) {
-        if (initialized) return
-        initialized = true
-        val cached = runCatching(repository::load).getOrNull()
-        if (cached != null) {
-            applySnapshot(
-                snapshot = cached,
-                source = if (cached.courses.isEmpty()) null else CourseScheduleContentSource.CACHE,
-                failure = null,
-            )
-        } else {
-            mutableState.value = mutableState.value.copy(
-                isLoading = true,
-                failure = CourseScheduleSyncFailure.CACHE,
-            )
+        if (!cacheLoaded) {
+            cacheLoaded = true
+            val cached = runCatching(repository::load).getOrNull()
+            if (cached != null) {
+                applySnapshot(
+                    snapshot = cached,
+                    source = if (cached.courses.isEmpty()) null else CourseScheduleContentSource.CACHE,
+                    failure = null,
+                )
+            } else {
+                mutableState.value = mutableState.value.copy(
+                    isLoading = true,
+                    failure = CourseScheduleSyncFailure.CACHE,
+                )
+            }
+            if (!refreshFromNetwork) {
+                mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
+            }
         }
-        if (refreshFromNetwork) {
-            // 自动同步失败时多试 1～2 次，避免首包抖动就弹「同步失败」。
+        if (refreshFromNetwork && !networkAutoSyncStarted) {
+            networkAutoSyncStarted = true
+            // 登录后自动同步：失败再试，避免首包抖动就弹「同步失败」。
             refreshWithRetry(maxAttempts = AUTO_SYNC_MAX_ATTEMPTS)
-        } else {
-            mutableState.value = mutableState.value.copy(isLoading = false, isRefreshing = false)
         }
     }
 

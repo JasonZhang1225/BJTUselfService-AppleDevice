@@ -1,5 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.feature.homework
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +16,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -38,6 +43,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,7 +53,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +96,7 @@ fun HomeworkWorkspace(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var showCourseFilter by remember { mutableStateOf(false) }
+    var showFilterSheet by remember { mutableStateOf(false) }
     var showUpload by remember { mutableStateOf(false) }
     var uploadFiles by remember { mutableStateOf<List<HomeworkFileContent>>(emptyList()) }
     var uploadContent by remember { mutableStateOf("") }
@@ -184,7 +194,8 @@ fun HomeworkWorkspace(
         }
     }
 
-    LaunchedEffect(model) { model.initialize() }
+    // 只灌缓存；网络自动同步由 shell 在登录成功后触发。
+    LaunchedEffect(model) { model.initialize(refreshFromNetwork = false) }
 
     Column(
         modifier = if (expanded) {
@@ -221,7 +232,7 @@ fun HomeworkWorkspace(
             LegacySmartTransportWarning(onDismiss = onDismissLegacyWarning)
         }
 
-        if (state.isRefreshing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
             HomeworkFailureBanner(
                 failure = failure,
@@ -235,63 +246,58 @@ fun HomeworkWorkspace(
             state.isLoading && state.homework.isEmpty() -> HomeworkLoadingState()
             state.homework.isEmpty() -> HomeworkEmptyState(onRefresh)
             else -> {
-                HomeworkSummary(state)
                 if (expanded) {
+                    HomeworkSummary(state)
                     HomeworkExpandedFilters(state, model)
-                } else {
-                    HomeworkCompactFilters(
-                        state = state,
-                        onOpenCourseFilter = { showCourseFilter = true },
-                        model = model,
-                    )
-                }
-
-                if (state.visibleHomework.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                    if (state.visibleHomework.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text("当前筛选下没有作业", style = MaterialTheme.typography.titleMedium)
+                                TextButton(onClick = model::clearCourseFilter) { Text("清除课程筛选") }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            Text("当前筛选下没有作业", style = MaterialTheme.typography.titleMedium)
-                            TextButton(onClick = model::clearCourseFilter) { Text("清除课程筛选") }
+                            HomeworkList(
+                                homework = state.visibleHomework,
+                                selectedKey = state.selectedHomeworkKey,
+                                sortOrder = state.sortOrder,
+                                onOpen = { key ->
+                                    fileFeedback = null
+                                    scope.launch { model.showDetails(key) }
+                                },
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                            HomeworkDetailPanel(
+                                homework = state.selectedHomework,
+                                detail = state.detail,
+                                submittedAttachments = state.submittedAttachments,
+                                isLoading = state.isDetailLoading,
+                                isSubmittedLoading = state.isSubmittedAttachmentsLoading,
+                                failure = state.detailFailure,
+                                fileFailure = state.fileFailure,
+                                isFileTransferInProgress = state.isFileTransferInProgress,
+                                fileGatewayAvailable = fileGateway.isAvailable,
+                                fileFeedback = fileFeedback,
+                                onDownloadTeacher = ::saveTeacherAttachment,
+                                onDownloadSubmitted = ::saveSubmittedAttachment,
+                                onUpload = ::openUpload,
+                                isSubmitting = state.isSubmitting,
+                                modifier = Modifier.widthIn(min = 320.dp, max = 420.dp).fillMaxHeight(),
+                            )
                         }
                     }
-                } else if (expanded) {
-                    Row(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        HomeworkList(
-                            homework = state.visibleHomework,
-                            selectedKey = state.selectedHomeworkKey,
-                            onOpen = { key ->
-                                fileFeedback = null
-                                scope.launch { model.showDetails(key) }
-                            },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                        HomeworkDetailPanel(
-                            homework = state.selectedHomework,
-                            detail = state.detail,
-                            submittedAttachments = state.submittedAttachments,
-                            isLoading = state.isDetailLoading,
-                            isSubmittedLoading = state.isSubmittedAttachmentsLoading,
-                            failure = state.detailFailure,
-                            fileFailure = state.fileFailure,
-                            isFileTransferInProgress = state.isFileTransferInProgress,
-                            fileGatewayAvailable = fileGateway.isAvailable,
-                            fileFeedback = fileFeedback,
-                            onDownloadTeacher = ::saveTeacherAttachment,
-                            onDownloadSubmitted = ::saveSubmittedAttachment,
-                            onUpload = ::openUpload,
-                            isSubmitting = state.isSubmitting,
-                            modifier = Modifier.widthIn(min = 320.dp, max = 420.dp).fillMaxHeight(),
-                        )
-                    }
                 } else {
-                    HomeworkList(
-                        homework = state.visibleHomework,
-                        selectedKey = state.selectedHomeworkKey,
+                    // 紧凑端：Banner（含筛选按钮）+ 列表；筛选进 sheet；同步态在顶栏右上。
+                    HomeworkScrollableContent(
+                        state = state,
+                        onOpenFilter = { showFilterSheet = true },
                         onOpen = { key ->
                             fileFeedback = null
                             scope.launch { model.showDetails(key) }
@@ -327,31 +333,13 @@ fun HomeworkWorkspace(
         }
     }
 
-    if (showCourseFilter) {
-        ModalBottomSheet(onDismissRequest = { showCourseFilter = false }) {
-            Text(
-                "筛选课程",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-            )
-            LazyColumn(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-                item {
-                    CourseFilterRow(
-                        title = "全部课程",
-                        selected = state.selectedCourses.isEmpty(),
-                        onClick = model::clearCourseFilter,
-                    )
-                }
-                items(state.courseOptions) { course ->
-                    CourseFilterRow(
-                        title = course,
-                        selected = course in state.selectedCourses,
-                        onClick = { model.toggleCourse(course) },
-                    )
-                }
-            }
-            Spacer(Modifier.height(24.dp))
+    if (showFilterSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showFilterSheet = false },
+            sheetState = sheetState,
+        ) {
+            HomeworkFilterSheet(state = state, model = model)
         }
     }
 
@@ -417,45 +405,119 @@ fun HomeworkWorkspace(
 }
 
 @Composable
-private fun HomeworkSummary(state: HomeworkUiState) {
+private fun HomeworkSummary(
+    state: HomeworkUiState,
+    onOpenFilter: (() -> Unit)? = null,
+) {
+    // 仅课程/过期过滤算「筛选」；改排序不算。
+    val filtered = state.selectedCourses.isNotEmpty() || state.hideExpired
+    val subtitle = buildString {
+        append(
+            if (state.dueSoonCount > 0) {
+                "未来 48 小时内有 ${state.dueSoonCount} 项未提交"
+            } else {
+                "未来 48 小时内暂无临近截止项"
+            },
+        )
+        if (filtered) {
+            append(" · 已筛选")
+        }
+    }
+    // 与成绩/课表 Banner 对齐：摘要 + 右侧筛选 pill；同步态在顶栏右上。
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         shape = RoundedCornerShape(18.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (onOpenFilter != null) {
+                            Modifier
+                                .clickable(onClick = onOpenFilter)
+                                .padding(vertical = 2.dp, horizontal = 4.dp)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
                 Text(
                     "${state.visibleHomework.size} 项作业",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    if (state.dueSoonCount > 0) "未来 48 小时内有 ${state.dueSoonCount} 项未提交" else "未来 48 小时内暂无临近截止项",
+                    subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
                 )
             }
-            Surface(
-                color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
-                shape = RoundedCornerShape(999.dp),
-            ) {
-                Text(
-                    when {
-                        state.isRefreshing -> "正在同步"
-                        state.source == HomeworkContentSource.CACHE -> "本地缓存"
-                        state.source == HomeworkContentSource.NETWORK -> "已同步"
-                        else -> "尚未同步"
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            if (onOpenFilter != null) {
+                Surface(
+                    onClick = onOpenFilter,
+                    color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.semantics { contentDescription = "筛选与排序" },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        HomeworkFilterFunnelIcon(modifier = Modifier.size(18.dp))
+                        HomeworkSortBarsIcon(modifier = Modifier.size(18.dp))
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeworkFilterFunnelIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        val left = 2.5.dp.toPx()
+        val right = size.width - left
+        val top = 3.dp.toPx()
+        val midY = size.height * 0.48f
+        val neckLeft = size.width * 0.42f
+        val neckRight = size.width * 0.58f
+        val bottom = size.height - 2.5.dp.toPx()
+        drawLine(tint, Offset(left, top), Offset(right, top), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(left, top), Offset(neckLeft, midY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(right, top), Offset(neckRight, midY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckLeft, midY), Offset(neckLeft, bottom), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckRight, midY), Offset(neckRight, bottom), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckLeft, bottom), Offset(neckRight, bottom), stroke, StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun HomeworkSortBarsIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        val left = 3.dp.toPx()
+        val right = size.width - left
+        val ys = listOf(size.height * 0.28f, size.height * 0.5f, size.height * 0.72f)
+        val ends = listOf(right, right * 0.72f, right * 0.48f)
+        ys.zip(ends).forEach { (y, endX) ->
+            drawLine(tint, Offset(left, y), Offset(endX, y), stroke, StrokeCap.Round)
         }
     }
 }
@@ -486,34 +548,10 @@ private fun HomeworkExpandedFilters(state: HomeworkUiState, model: HomeworkScree
 }
 
 @Composable
-private fun HomeworkCompactFilters(
-    state: HomeworkUiState,
-    onOpenCourseFilter: () -> Unit,
-    model: HomeworkScreenModel,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onOpenCourseFilter, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                if (state.selectedCourses.isEmpty()) "筛选课程 · 全部" else "筛选课程 · 已选 ${state.selectedCourses.size} 门",
-            )
-        }
-        HomeworkBehaviorFilters(state, model)
-    }
-}
-
-@Composable
 private fun HomeworkBehaviorFilters(state: HomeworkUiState, model: HomeworkScreenModel) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        FilterChip(
-            selected = state.hideExpired,
-            onClick = { model.setHideExpired(!state.hideExpired) },
-            label = { Text(if (state.hideExpired) "已隐藏过期" else "显示全部日期") },
-        )
-        OutlinedButton(onClick = model::cycleSortOrder, modifier = Modifier.weight(1f)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        HomeworkDeadlineFilterChips(state = state, model = model)
+        OutlinedButton(onClick = model::cycleSortOrder, modifier = Modifier.fillMaxWidth()) {
             Text(
                 when (state.sortOrder) {
                     HomeworkSortOrder.ORIGINAL -> "截止时间 · 原顺序"
@@ -524,6 +562,126 @@ private fun HomeworkBehaviorFilters(state: HomeworkUiState, model: HomeworkScree
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+/** 截止时间：两个圆角矩形，互斥（显示全部 / 隐藏已过期）。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HomeworkDeadlineFilterChips(
+    state: HomeworkUiState,
+    model: HomeworkScreenModel,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = !state.hideExpired,
+            onClick = { model.setHideExpired(false) },
+            shape = RoundedCornerShape(10.dp),
+            label = { Text("显示全部日期") },
+        )
+        FilterChip(
+            selected = state.hideExpired,
+            onClick = { model.setHideExpired(true) },
+            shape = RoundedCornerShape(10.dp),
+            label = { Text("隐藏已过期") },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HomeworkFilterSheet(
+    state: HomeworkUiState,
+    model: HomeworkScreenModel,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Text("筛选与排序", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "课程",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (state.courseOptions.isEmpty()) {
+                Text(
+                    "暂无课程数据",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = state.selectedCourses.isEmpty(),
+                        onClick = model::clearCourseFilter,
+                        label = { Text("全部") },
+                    )
+                    state.courseOptions.forEach { course ->
+                        FilterChip(
+                            selected = course in state.selectedCourses,
+                            onClick = { model.toggleCourse(course) },
+                            label = {
+                                Text(course, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "截止时间",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            HomeworkDeadlineFilterChips(state = state, model = model)
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "排序",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = state.sortOrder == HomeworkSortOrder.ORIGINAL,
+                    onClick = { model.setSortOrder(HomeworkSortOrder.ORIGINAL) },
+                    shape = RoundedCornerShape(percent = 50),
+                    label = { Text("原顺序") },
+                )
+                FilterChip(
+                    selected = state.sortOrder == HomeworkSortOrder.ASCENDING,
+                    onClick = { model.setSortOrder(HomeworkSortOrder.ASCENDING) },
+                    shape = RoundedCornerShape(percent = 50),
+                    label = { Text("由近到远") },
+                )
+                FilterChip(
+                    selected = state.sortOrder == HomeworkSortOrder.DESCENDING,
+                    onClick = { model.setSortOrder(HomeworkSortOrder.DESCENDING) },
+                    shape = RoundedCornerShape(percent = 50),
+                    label = { Text("由远到近") },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -549,57 +707,122 @@ private fun CourseFilterRow(title: String, selected: Boolean, onClick: () -> Uni
     }
 }
 
+/** 紧凑作业页唯一纵向滚动体：Banner + 列表（筛选在 sheet）。 */
+@Composable
+private fun HomeworkScrollableContent(
+    state: HomeworkUiState,
+    onOpenFilter: () -> Unit,
+    onOpen: (String) -> Unit,
+    modifier: Modifier,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.sortOrder, state.hideExpired, state.selectedCourses) {
+        listState.scrollToItem(0)
+    }
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(bottom = 18.dp),
+    ) {
+        item(key = "homework-summary") {
+            HomeworkSummary(state = state, onOpenFilter = onOpenFilter)
+        }
+        if (state.visibleHomework.isEmpty()) {
+            item(key = "homework-empty") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("当前筛选下没有作业", style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = onOpenFilter) { Text("调整筛选") }
+                }
+            }
+        } else {
+            items(state.visibleHomework, key = Homework::stableKey) { item ->
+                HomeworkCard(
+                    item = item,
+                    selected = item.stableKey() == state.selectedHomeworkKey,
+                    onOpen = onOpen,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeworkCard(
+    item: Homework,
+    selected: Boolean,
+    onOpen: (String) -> Unit,
+) {
+    val key = item.stableKey()
+    ElevatedCard(
+        onClick = { onOpen(key) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(17.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(15.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                item.courseName,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                item.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            HomeworkCardLine("类型", item.typeLabel())
+            HomeworkCardLine("提交状态", item.subStatus.ifBlank { "未标明" })
+            HomeworkCardLine("截止", item.endTime.ifBlank { "未提供" })
+            HomeworkCardLine("提交人数", "${item.submitCount} / ${item.allCount}")
+            if (item.score.isNotBlank()) HomeworkCardLine("评分", item.score)
+        }
+    }
+}
+
 @Composable
 private fun HomeworkList(
     homework: List<Homework>,
     selectedKey: String?,
+    sortOrder: HomeworkSortOrder,
     onOpen: (String) -> Unit,
     modifier: Modifier,
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(sortOrder) {
+        listState.scrollToItem(0)
+    }
     LazyColumn(
+        state = listState,
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
         items(homework, key = Homework::stableKey) { item ->
-            val key = item.stableKey()
-            ElevatedCard(
-                onClick = { onOpen(key) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(17.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = if (key == selectedKey) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surface
-                    },
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(15.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Text(
-                        item.courseName,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        item.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    HomeworkCardLine("类型", item.typeLabel())
-                    HomeworkCardLine("提交状态", item.subStatus.ifBlank { "未标明" })
-                    HomeworkCardLine("截止", item.endTime.ifBlank { "未提供" })
-                    HomeworkCardLine("提交人数", "${item.submitCount} / ${item.allCount}")
-                    if (item.score.isNotBlank()) HomeworkCardLine("评分", item.score)
-                }
-            }
+            HomeworkCard(
+                item = item,
+                selected = item.stableKey() == selectedKey,
+                onOpen = onOpen,
+            )
         }
     }
 }

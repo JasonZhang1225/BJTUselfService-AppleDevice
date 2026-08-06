@@ -68,7 +68,10 @@ class GradeScreenModelTest {
         // 加载后默认全选学期；取消 2025-2026-2 后只剩第一学期。
         assertEquals(setOf("2025-2026-1", "2025-2026-2"), model.state.value.selectedSemesters)
         model.toggleSemester("2025-2026-2")
-        model.cycleSortOrder()
+        // 默认 ORIGINAL → 切到分数维度默认从高到低；再点从低到高。
+        model.selectSortCategory(byScore = true)
+        assertEquals(GradeSortOrder.DESCENDING, model.state.value.sortOrder)
+        model.setSortOrder(GradeSortOrder.ASCENDING)
         assertEquals(GradeSortOrder.ASCENDING, model.state.value.sortOrder)
         assertEquals(listOf(1), model.state.value.visibleGrades.map(Grade::id))
 
@@ -207,6 +210,40 @@ class GradeScreenModelTest {
 
         model.deselectByType(CourseType.ELECTIVE)
         assertTrue(model.state.value.selectedGradeIds.isEmpty())
+    }
+
+    @Test
+    fun enteringSelectionModeWithEmptySelectionLeavesAllTypesNone() = runBlocking {
+        val required = grade(1, name = "C312009B高级英语视听说[04]")
+        val elective = grade(2, name = "S1100120A计算机导论[01]")
+        val snapshot = GradeSnapshot(
+            grades = listOf(required, elective),
+            selectedGradeIds = emptySet(),
+            courseTypesByCode = mapOf(
+                "C312009B" to CourseType.REQUIRED,
+                "S1100120A" to CourseType.ELECTIVE,
+            ),
+        )
+        val model = GradeScreenModel(
+            FakeRepository(loaded = snapshot, refreshed = GradeRefreshResult.Success(snapshot)),
+        )
+        model.initialize()
+        // 筛选态默认全选性质，但 selectedGradeIds 为空
+        assertTrue(model.state.value.excludedCourseTypes.isEmpty())
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+
+        model.setSelectionMode(true)
+        assertTrue(model.state.value.selectionMode)
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+        // 开启自选后性质绑定自选集合：0 门 → 全部 NONE（不是筛选满选）
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.REQUIRED))
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.ELECTIVE))
+        assertEquals(0, model.state.value.selectedCountForType(CourseType.REQUIRED))
+        assertEquals(0, model.state.value.selectedCountForType(CourseType.ELECTIVE))
+
+        model.clearAllSelections()
+        assertTrue(model.state.value.selectedGradeIds.isEmpty())
+        assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.REQUIRED))
     }
 
     @Test
