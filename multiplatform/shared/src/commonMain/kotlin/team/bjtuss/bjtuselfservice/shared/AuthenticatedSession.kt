@@ -41,7 +41,20 @@ class AuthenticatedSession(
     val homeworkFileGateway: HomeworkFileGateway,
     val coursewareDirectoryGateway: CoursewareDirectoryGateway,
     val onLogout: () -> Unit,
-)
+) {
+    /**
+     * 智慧教学明文 HTTP 风险提示是否已在本登录态关闭。
+     * 必须挂在 session 上：原生 push 的二级页会新建 Compose 树，
+     * 若只用 remember，每次进课件/作业都会再弹一次。
+     */
+    var legacyHttpWarningDismissed: Boolean = false
+
+    /**
+     * 教室人数估计首页引导 Banner（请选择教学楼 / 人数仅供参考）
+     * 是否已在本登录态关闭。
+     */
+    var classroomIntroBannerDismissed: Boolean = false
+}
 
 /** 只有这些目的地属于一级 tab 之上的原生导航层级。 */
 fun isNativeDetailRoute(routeId: String): Boolean =
@@ -49,6 +62,7 @@ fun isNativeDetailRoute(routeId: String): Boolean =
         routeId == "COURSEWARE" ||
         routeId == "CLASSROOMS" ||
         routeId == "CLASSROOM_DETAIL" ||
+        routeId == "HOMEWORK_DETAIL" ||
         routeId == "MAILBOX" ||
         routeId == "CALENDAR_DOWNLOAD" ||
         routeId == "REPORT_CARD_DOWNLOAD" ||

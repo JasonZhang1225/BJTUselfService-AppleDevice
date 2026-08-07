@@ -9,11 +9,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,9 +63,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.fleeksoft.ksoup.Ksoup
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
+import team.bjtuss.bjtuselfservice.shared.util.schoolRichTextToPlainMultiline
 import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkSyncFailure
 import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkOperationResult
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
@@ -93,15 +94,159 @@ fun HomeworkWorkspace(
     model: HomeworkScreenModel,
     fileGateway: HomeworkFileGateway,
     onRefresh: () -> Unit,
+    onOpenDetail: () -> Unit,
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    // 附件下载/上传状态与详情二级页共用同一套实现，见 HomeworkTransferState。
+    val transfer = rememberHomeworkTransferState(model, fileGateway)
     var showFilterSheet by remember { mutableStateOf(false) }
-    var showUpload by remember { mutableStateOf(false) }
-    var uploadFiles by remember { mutableStateOf<List<HomeworkFileContent>>(emptyList()) }
-    var uploadContent by remember { mutableStateOf("") }
-    var uploadFeedback by remember { mutableStateOf<String?>(null) }
-    var fileFeedback by remember { mutableStateOf<String?>(null) }
+
+    // 只灌缓存；网络自动同步由 shell 在登录成功后触发。
+    LaunchedEffect(model) { model.initialize(refreshFromNetwork = false) }
+
+    Column(
+        modifier = if (expanded) {
+            modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        } else {
+            modifier.padding(horizontal = 16.dp).padding(top = 8.dp)
+        },
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (expanded) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "作业",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Text(
+                        "按课程和截止时间整理平时作业、课程设计与实验报告",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
+                    Text(if (state.isRefreshing) "正在同步" else "同步作业")
+                }
+            }
+        }
+
+        // 明文通道提示：仅在 shell 判定「本会话尚未关闭」时显示一条可关闭横幅。
+        // 以前在 dismiss 后又画一条无 onDismiss 的副本，导致关不掉。
+        if (legacyWarningVisible) {
+            LegacySmartTransportWarning(onDismiss = onDismissLegacyWarning)
+        }
+
+        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
+        state.failure?.let { failure ->
+            HomeworkFailureBanner(
+                failure = failure,
+                hasContent = state.homework.isNotEmpty(),
+                onRetry = onRefresh,
+                onDismiss = model::dismissFailure,
+            )
+        }
+
+        when {
+            state.isLoading && state.homework.isEmpty() -> HomeworkLoadingState()
+            state.homework.isEmpty() -> HomeworkEmptyState(onRefresh)
+            else -> {
+                if (expanded) {
+                    HomeworkSummary(state)
+                    HomeworkExpandedFilters(state, model)
+                    if (state.visibleHomework.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text("当前筛选下没有作业", style = MaterialTheme.typography.titleMedium)
+                                TextButton(onClick = model::clearCourseFilter) { Text("清除课程筛选") }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            HomeworkList(
+                                homework = state.visibleHomework,
+                                selectedKey = state.selectedHomeworkKey,
+                                sortOrder = state.sortOrder,
+                                onOpen = { key ->
+                                    transfer.fileFeedback = null
+                                    scope.launch { model.showDetails(key) }
+                                },
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                            HomeworkDetailPanel(
+                                homework = state.selectedHomework,
+                                detail = state.detail,
+                                submittedAttachments = state.submittedAttachments,
+                                isLoading = state.isDetailLoading,
+                                isSubmittedLoading = state.isSubmittedAttachmentsLoading,
+                                failure = state.detailFailure,
+                                fileFailure = state.fileFailure,
+                                isFileTransferInProgress = state.isFileTransferInProgress,
+                                fileGatewayAvailable = fileGateway.isAvailable,
+                                fileFeedback = transfer.fileFeedback,
+                                onDownloadTeacher = transfer::saveTeacherAttachment,
+                                onDownloadSubmitted = transfer::saveSubmittedAttachment,
+                                onUpload = transfer::openUpload,
+                                isSubmitting = state.isSubmitting,
+                                modifier = Modifier.widthIn(min = 320.dp, max = 420.dp).fillMaxHeight(),
+                            )
+                        }
+                    }
+                } else {
+                    // 紧凑端：Banner（含筛选按钮）+ 列表；点卡片先选中再 push 详情二级页。
+                    HomeworkScrollableContent(
+                        state = state,
+                        onOpenFilter = { showFilterSheet = true },
+                        onOpen = { key ->
+                            transfer.fileFeedback = null
+                            // 必须先同步写完选中再 push，否则详情页打开时 selectedHomework 仍为空；
+                            // 详情的网络加载异步进行，不阻塞 push。
+                            model.selectHomework(key)
+                            scope.launch { model.showDetails(key) }
+                            onOpenDetail()
+                        },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+
+    if (showFilterSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showFilterSheet = false },
+            sheetState = sheetState,
+            sheetGesturesEnabled = false,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        ) {
+            HomeworkFilterSheet(state = state, model = model)
+        }
+    }
+
+    HomeworkUploadDialog(transfer = transfer, isSubmitting = state.isSubmitting)
+}
+
+/** 作业附件下载/上传的共享传输状态：宽屏列表侧栏与紧凑详情二级页各持一份，逻辑一致。 */
+private class HomeworkTransferState(
+    private val model: HomeworkScreenModel,
+    private val fileGateway: HomeworkFileGateway,
+    private val scope: CoroutineScope,
+) {
+    var showUpload by mutableStateOf(false)
+    var uploadFiles by mutableStateOf<List<HomeworkFileContent>>(emptyList())
+    var uploadContent by mutableStateOf("")
+    var uploadFeedback by mutableStateOf<String?>(null)
+    var fileFeedback by mutableStateOf<String?>(null)
 
     fun saveTeacherAttachment(attachmentId: Int) {
         if (!fileGateway.isAvailable) {
@@ -147,7 +292,7 @@ fun HomeworkWorkspace(
     }
 
     fun closeUpload() {
-        if (state.isSubmitting) return
+        if (model.state.value.isSubmitting) return
         showUpload = false
         uploadFiles = emptyList()
         uploadContent = ""
@@ -165,6 +310,10 @@ fun HomeworkWorkspace(
                 }
             }
         }
+    }
+
+    fun removeUploadFile(index: Int) {
+        uploadFiles = uploadFiles.filterIndexed { itemIndex, _ -> itemIndex != index }
     }
 
     fun submitUpload() {
@@ -193,215 +342,91 @@ fun HomeworkWorkspace(
             }
         }
     }
+}
 
-    // 只灌缓存；网络自动同步由 shell 在登录成功后触发。
-    LaunchedEffect(model) { model.initialize(refreshFromNetwork = false) }
+@Composable
+private fun rememberHomeworkTransferState(
+    model: HomeworkScreenModel,
+    fileGateway: HomeworkFileGateway,
+): HomeworkTransferState {
+    val scope = rememberCoroutineScope()
+    return remember(model, fileGateway) { HomeworkTransferState(model, fileGateway, scope) }
+}
 
-    Column(
-        modifier = if (expanded) {
-            modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        } else {
-            modifier.padding(horizontal = 16.dp).padding(top = 8.dp)
+/** 上传作业对话框：宽屏与紧凑详情二级页统一用 AlertDialog。 */
+@Composable
+private fun HomeworkUploadDialog(
+    transfer: HomeworkTransferState,
+    isSubmitting: Boolean,
+) {
+    if (!transfer.showUpload) return
+    AlertDialog(
+        onDismissRequest = transfer::closeUpload,
+        title = { Text("上传作业") },
+        text = {
+            UploadHomeworkContent(
+                files = transfer.uploadFiles,
+                content = transfer.uploadContent,
+                feedback = transfer.uploadFeedback,
+                isSubmitting = isSubmitting,
+                onContentChange = { transfer.uploadContent = it },
+                onPickFiles = transfer::pickUploadFiles,
+                onRemoveFile = transfer::removeUploadFile,
+            )
         },
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        confirmButton = {
+            Button(
+                onClick = transfer::submitUpload,
+                enabled = transfer.uploadFiles.isNotEmpty() && !isSubmitting,
+            ) { Text(if (isSubmitting) "正在提交" else "提交") }
+        },
+        dismissButton = {
+            TextButton(onClick = transfer::closeUpload, enabled = !isSubmitting) { Text("取消") }
+        },
+    )
+}
+
+/**
+ * 紧凑端作业详情二级页内容（仿教室详情）。
+ * 返回依赖顶栏/系统边缘手势，页内不再放返回按钮；顶栏固定显示「作业详情」，正文不再重复该标题。
+ * 上传与附件下载与列表页共用同一套传输逻辑。
+ */
+@Composable
+fun HomeworkDetailWorkspace(
+    model: HomeworkScreenModel,
+    fileGateway: HomeworkFileGateway,
+    modifier: Modifier = Modifier,
+) {
+    val state by model.state.collectAsState()
+    val transfer = rememberHomeworkTransferState(model, fileGateway)
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp)
+            .padding(top = 12.dp, bottom = 28.dp),
     ) {
-        if (expanded) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "作业",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "按课程和截止时间整理平时作业、课程设计与实验报告",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                    Text(if (state.isRefreshing) "正在同步" else "同步作业")
-                }
-            }
-        }
-
-        // 明文通道提示由 shell 控制显隐；宽度跟随父 Column 水平 padding，勿再叠 16.dp。
-        if (usesLegacySmartTransport && !legacyWarningVisible) LegacySmartTransportWarning()
-        if (legacyWarningVisible) {
-            LegacySmartTransportWarning(onDismiss = onDismissLegacyWarning)
-        }
-
-        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
-        state.failure?.let { failure ->
-            HomeworkFailureBanner(
-                failure = failure,
-                hasContent = state.homework.isNotEmpty(),
-                onRetry = onRefresh,
-                onDismiss = model::dismissFailure,
+        state.selectedHomework?.let { selected ->
+            HomeworkDetailSheetBody(
+                homework = selected,
+                detail = state.detail,
+                submittedAttachments = state.submittedAttachments,
+                isLoading = state.isDetailLoading,
+                isSubmittedLoading = state.isSubmittedAttachmentsLoading,
+                failure = state.detailFailure,
+                fileFailure = state.fileFailure,
+                isFileTransferInProgress = state.isFileTransferInProgress,
+                fileGatewayAvailable = fileGateway.isAvailable,
+                fileFeedback = transfer.fileFeedback,
+                onDownloadTeacher = transfer::saveTeacherAttachment,
+                onDownloadSubmitted = transfer::saveSubmittedAttachment,
+                onUpload = transfer::openUpload,
+                isSubmitting = state.isSubmitting,
+                modifier = Modifier.fillMaxWidth(),
+                showHeading = false,
             )
         }
-
-        when {
-            state.isLoading && state.homework.isEmpty() -> HomeworkLoadingState()
-            state.homework.isEmpty() -> HomeworkEmptyState(onRefresh)
-            else -> {
-                if (expanded) {
-                    HomeworkSummary(state)
-                    HomeworkExpandedFilters(state, model)
-                    if (state.visibleHomework.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Text("当前筛选下没有作业", style = MaterialTheme.typography.titleMedium)
-                                TextButton(onClick = model::clearCourseFilter) { Text("清除课程筛选") }
-                            }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
-                            HomeworkList(
-                                homework = state.visibleHomework,
-                                selectedKey = state.selectedHomeworkKey,
-                                sortOrder = state.sortOrder,
-                                onOpen = { key ->
-                                    fileFeedback = null
-                                    scope.launch { model.showDetails(key) }
-                                },
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                            )
-                            HomeworkDetailPanel(
-                                homework = state.selectedHomework,
-                                detail = state.detail,
-                                submittedAttachments = state.submittedAttachments,
-                                isLoading = state.isDetailLoading,
-                                isSubmittedLoading = state.isSubmittedAttachmentsLoading,
-                                failure = state.detailFailure,
-                                fileFailure = state.fileFailure,
-                                isFileTransferInProgress = state.isFileTransferInProgress,
-                                fileGatewayAvailable = fileGateway.isAvailable,
-                                fileFeedback = fileFeedback,
-                                onDownloadTeacher = ::saveTeacherAttachment,
-                                onDownloadSubmitted = ::saveSubmittedAttachment,
-                                onUpload = ::openUpload,
-                                isSubmitting = state.isSubmitting,
-                                modifier = Modifier.widthIn(min = 320.dp, max = 420.dp).fillMaxHeight(),
-                            )
-                        }
-                    }
-                } else {
-                    // 紧凑端：Banner（含筛选按钮）+ 列表；筛选进 sheet；同步态在顶栏右上。
-                    HomeworkScrollableContent(
-                        state = state,
-                        onOpenFilter = { showFilterSheet = true },
-                        onOpen = { key ->
-                            fileFeedback = null
-                            scope.launch { model.showDetails(key) }
-                        },
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                    )
-                    state.selectedHomework?.takeIf { !showUpload }?.let { selected ->
-                        ModalBottomSheet(onDismissRequest = model::dismissDetails) {
-                            HomeworkDetailContent(
-                                homework = selected,
-                                detail = state.detail,
-                                submittedAttachments = state.submittedAttachments,
-                                isLoading = state.isDetailLoading,
-                                isSubmittedLoading = state.isSubmittedAttachmentsLoading,
-                                failure = state.detailFailure,
-                                fileFailure = state.fileFailure,
-                                isFileTransferInProgress = state.isFileTransferInProgress,
-                                fileGatewayAvailable = fileGateway.isAvailable,
-                                fileFeedback = fileFeedback,
-                                onDownloadTeacher = ::saveTeacherAttachment,
-                                onDownloadSubmitted = ::saveSubmittedAttachment,
-                                onUpload = ::openUpload,
-                                isSubmitting = state.isSubmitting,
-                                modifier = Modifier.fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                            )
-                            Spacer(Modifier.height(24.dp))
-                        }
-                    }
-                }
-            }
-        }
     }
-
-    if (showFilterSheet) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
-            onDismissRequest = { showFilterSheet = false },
-            sheetState = sheetState,
-        ) {
-            HomeworkFilterSheet(state = state, model = model)
-        }
-    }
-
-    if (showUpload) {
-        if (expanded) {
-            AlertDialog(
-                onDismissRequest = ::closeUpload,
-                title = { Text("上传作业") },
-                text = {
-                    UploadHomeworkContent(
-                        files = uploadFiles,
-                        content = uploadContent,
-                        feedback = uploadFeedback,
-                        isSubmitting = state.isSubmitting,
-                        onContentChange = { uploadContent = it },
-                        onPickFiles = ::pickUploadFiles,
-                        onRemoveFile = { index -> uploadFiles = uploadFiles.filterIndexed { itemIndex, _ -> itemIndex != index } },
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = ::submitUpload,
-                        enabled = uploadFiles.isNotEmpty() && !state.isSubmitting,
-                    ) { Text(if (state.isSubmitting) "正在提交" else "提交") }
-                },
-                dismissButton = {
-                    TextButton(onClick = ::closeUpload, enabled = !state.isSubmitting) { Text("取消") }
-                },
-            )
-        } else {
-            ModalBottomSheet(
-                onDismissRequest = ::closeUpload,
-            ) {
-                UploadHomeworkContent(
-                    files = uploadFiles,
-                    content = uploadContent,
-                    feedback = uploadFeedback,
-                    isSubmitting = state.isSubmitting,
-                    onContentChange = { uploadContent = it },
-                    onPickFiles = ::pickUploadFiles,
-                    onRemoveFile = { index -> uploadFiles = uploadFiles.filterIndexed { itemIndex, _ -> itemIndex != index } },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    TextButton(
-                        onClick = ::closeUpload,
-                        enabled = !state.isSubmitting,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("取消") }
-                    Button(
-                        onClick = ::submitUpload,
-                        enabled = uploadFiles.isNotEmpty() && !state.isSubmitting,
-                        modifier = Modifier.weight(1f),
-                    ) { Text(if (state.isSubmitting) "正在提交" else "提交") }
-                }
-                Spacer(Modifier.height(18.dp))
-            }
-        }
-    }
+    HomeworkUploadDialog(transfer = transfer, isSubmitting = state.isSubmitting)
 }
 
 @Composable
@@ -601,7 +626,8 @@ private fun HomeworkFilterSheet(
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Text("筛选与排序", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -681,7 +707,6 @@ private fun HomeworkFilterSheet(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -881,12 +906,14 @@ private fun HomeworkDetailPanel(
                 onDownloadSubmitted = onDownloadSubmitted,
                 onUpload = onUpload,
                 isSubmitting = isSubmitting,
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+                contentPadding = PaddingValues(22.dp),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
 }
 
+/** 宽屏侧栏用的可滚动作业详情。 */
 @Composable
 private fun HomeworkDetailContent(
     homework: Homework,
@@ -904,14 +931,63 @@ private fun HomeworkDetailContent(
     onUpload: () -> Unit,
     isSubmitting: Boolean,
     modifier: Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(
-            "作业详情",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.semantics { heading() },
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding),
+    ) {
+        HomeworkDetailSheetBody(
+            homework = homework,
+            detail = detail,
+            submittedAttachments = submittedAttachments,
+            isLoading = isLoading,
+            isSubmittedLoading = isSubmittedLoading,
+            failure = failure,
+            fileFailure = fileFailure,
+            isFileTransferInProgress = isFileTransferInProgress,
+            fileGatewayAvailable = fileGatewayAvailable,
+            fileFeedback = fileFeedback,
+            onDownloadTeacher = onDownloadTeacher,
+            onDownloadSubmitted = onDownloadSubmitted,
+            onUpload = onUpload,
+            isSubmitting = isSubmitting,
         )
+    }
+}
+
+/** 作业详情正文（详情页与宽屏侧栏共用）；滚动由调用方 Modifier 提供。宽屏侧栏保留「作业详情」小标题，详情页由顶栏显示标题、正文不重复。 */
+@Composable
+private fun HomeworkDetailSheetBody(
+    homework: Homework,
+    detail: HomeworkDetail?,
+    submittedAttachments: List<SubmittedHomeworkAttachment>,
+    isLoading: Boolean,
+    isSubmittedLoading: Boolean,
+    failure: HomeworkSyncFailure?,
+    fileFailure: HomeworkSyncFailure?,
+    isFileTransferInProgress: Boolean,
+    fileGatewayAvailable: Boolean,
+    fileFeedback: String?,
+    onDownloadTeacher: (Int) -> Unit,
+    onDownloadSubmitted: (String) -> Unit,
+    onUpload: () -> Unit,
+    isSubmitting: Boolean,
+    modifier: Modifier = Modifier,
+    showHeading: Boolean = true,
+) {
+    val teacherAttachments = detail?.attachments.orEmpty()
+    val showSubmittedSection = homework.idSnId != null || homework.subStatus == "已提交"
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (showHeading) {
+            Text(
+                "作业详情",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.semantics { heading() },
+            )
+        }
         Text(homework.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         HomeworkDetailLine("课程", homework.courseName)
         HomeworkDetailLine("类型", homework.typeLabel())
@@ -947,14 +1023,15 @@ private fun HomeworkDetailContent(
         }
         Text("作业要求", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            detail?.content.toPlainText().ifBlank { "老师未填写文字要求。" },
+            schoolRichTextToPlainMultiline(detail?.content)
+                .ifBlank { "老师未填写文字要求。" },
             style = MaterialTheme.typography.bodyLarge,
         )
         Text("老师提供的附件", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        if (detail?.attachments.isNullOrEmpty()) {
+        if (teacherAttachments.isEmpty()) {
             Text("暂无附件", color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            detail?.attachments.orEmpty().forEach { attachment ->
+            teacherAttachments.forEach { attachment ->
                 HomeworkAttachmentRow(
                     attachment = attachment,
                     downloadEnabled = fileGatewayAvailable && !isFileTransferInProgress,
@@ -962,7 +1039,7 @@ private fun HomeworkDetailContent(
                 )
             }
         }
-        if (homework.idSnId != null || homework.subStatus == "已提交") {
+        if (showSubmittedSection) {
             Text("我已提交的附件", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (isSubmittedLoading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -986,7 +1063,7 @@ private fun HomeworkDetailContent(
             Text(if (isSubmitting) "正在提交" else "上传作业")
         }
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.45f),
             shape = RoundedCornerShape(14.dp),
         ) {
             Text(
@@ -1182,11 +1259,6 @@ private fun HomeworkEmptyState(onRefresh: () -> Unit) {
         }
     }
 }
-
-private fun String?.toPlainText(): String = this
-    ?.takeIf(String::isNotBlank)
-    ?.let { Ksoup.parse(it).text() }
-    .orEmpty()
 
 private fun Long.toReadableSize(): String = when {
     this <= 0L -> "大小未知"

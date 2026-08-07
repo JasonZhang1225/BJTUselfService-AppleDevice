@@ -213,6 +213,17 @@
 - **去掉下拉刷新**：曾尝试 Material3 PTR、CMP 挂 UIRefreshControl、无 event handling 过滚等，均与系统过滚互抢或误触；根因是 Compose LazyColumn 主手势不在可稳定挂 `UIRefreshControl` 的 UIScrollView 上。产品决定删除全部分端 `AppPullToRefresh`，可刷新页在「已同步」旁圆形刷新按钮；保留平台原生 overscroll bounce。用户明确日后 SwiftUI 重写再做 `.refreshable`。
 - 验证：`:shared` desktop / iOS Simulator / Android 编译与 grade 相关单测通过。真机目视刷新按钮与课表过滚仍待用户确认，未写成验收完成。
 
+## 紧凑端 UI 真机验收与作业详情二级页（2026-08-07）
+
+- **作业详情弃用 M3 `ModalBottomSheet`**：CMP iOS 上表面层与正文分层动画错位（文字/背景不同步）、`skipPartiallyExpanded` 全高顶状态栏、关手势又不能下滑；升 material3 1.12.0-alpha03 后真机仍有三处异常（背景滑满全屏、遮住底部两行文字、全屏回半屏时文字跳动）。曾自绘单节点整体平移弹层被用户否掉（坚持用原生组件）。最终仿 `CLASSROOM_DETAIL` 改**原生二级页**：点卡片先 `selectHomework`（从 `showDetails` 拆出的非 suspend 同步写选中）再 push，routeId `HOMEWORK_DETAIL`，Android `NativeDetailActivity` / iOS UIKit push 通用处理、平台侧零改动；上传对话框统一 `AlertDialog`；顶栏固定「作业详情」，正文不再重复标题。宽屏仍是列表+侧栏并排，行为不变。
+- **依赖升级**：`composeMultiplatform 1.11.1→1.12.0-beta03`、`composeMaterial3 1.11.0-alpha07→1.12.0-alpha03`（为修 sheet 所升；sheet 弃用后升级保留，惠及筛选等其它 sheet；navigation3 仍 1.1.1，三端编译过）。
+- **顶栏同步胶囊**：首页此前没传 `idleStatusText`，空闲时只剩孤 sync 图标；现聚合 home/homework/exam/course 的 failure 与 source 显示「已同步/同步失败/未同步」。空闲态图标由双弧 sync 改 Canvas 对勾（`TopBarSyncedIcon`，沿用自绘不引入图标库约定），各业务页胶囊同步生效。
+- **课件**：选课弹窗 `skipPartiallyExpanded` false→true（修卡半高锚点、须点把手才展开、底部一截够不着；与全项目其它 sheet 对齐）；同步后并发预载各课顶层目录（`loadCoursesConcurrently`，Semaphore 限流 2 路、单课失败不拖垮整批、一次合并落库），`ensureInitialized` 加互斥防并发握手踩坏会话；文件大小单位格式化 + `CoursewareSizeFormatTest`。
+- **教室**：搜索改 `BasicTextField` 居中；引导 Banner（请选择教学楼/人数仅供参考，登录态只显示一次）。**考试**：Banner 对齐成绩/作业，类型 chips 进 sheet，长类型名完整多行显示。
+- **成绩详情解析与信息流防抖**：教务 `data-content` HTML 保留换行（`<br>`/块级结束标签→换行再去标签），旧缓存单行按「平时/期中/期末/实验/最终/总评成绩、备注」等字段名断行；抽出共用工具 `schoolRichTextToPlainMultiline`（+测试）。成绩信息流按业务字段判等，忽略本地 id 与详情 HTML 解析抖动；原/现展示文案相同的「修改」不进信息流、不展示（`GradeSemanticEqualityTest`）。
+- **遗留**：课表课程详情弹窗仍是 `skipPartiallyExpanded=false`（全项目唯一一处），若用户反馈卡半高再对齐 true。
+- **验证**：`:shared` desktop / iOS Simulator / Android 编译与 desktop 单测通过；**用户 iPhone 真机目视通过**（作业详情二级页跳转/返回、首页与各科「已同步 ✓」胶囊、课件选课弹窗展开）。
+
 ## 决策记录
 
 - 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。

@@ -1,5 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.feature.exam
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,11 +10,13 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,16 +31,25 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -60,6 +73,8 @@ fun ExamScheduleWorkspace(
     LaunchedEffect(model) {
         model.initialize(refreshFromNetwork = false)
     }
+    var showFilterSheet by remember { mutableStateOf(false) }
+    val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Column(
         modifier = if (expanded) {
@@ -105,7 +120,11 @@ fun ExamScheduleWorkspace(
             state.exams.isEmpty() -> ExamEmptyState(onRefresh)
             else -> {
                 if (expanded) {
-                    ExamSummary(state)
+                    // 宽屏：Banner 带筛选入口 + 类型 chips 仍可常驻，便于鼠标点选。
+                    ExamSummary(
+                        state = state,
+                        onOpenFilter = { showFilterSheet = true },
+                    )
                     ExamTypeFilters(state, model)
                     if (state.visibleExams.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -129,23 +148,116 @@ fun ExamScheduleWorkspace(
                         }
                     }
                 } else {
-                    // 紧凑端：摘要 + 类型筛选 + 列表同一滚动体，配合下拉刷新橡皮筋。
+                    // 紧凑端：同步态在顶栏；Banner 内筛选入口；类型 chips 进 sheet。
                     ExamScrollableContent(
                         state = state,
-                        model = model,
+                        onOpenFilter = { showFilterSheet = true },
                         onOpen = model::showExamDetails,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     state.selectedExam?.let { exam ->
-                        ModalBottomSheet(onDismissRequest = model::dismissExamDetails) {
-                            ExamDetailContent(
+                        val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                        ModalBottomSheet(
+                            onDismissRequest = model::dismissExamDetails,
+                            sheetState = detailSheetState,
+                            sheetGesturesEnabled = false,
+                            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+                        ) {
+                            ExamDetailSheetBody(
                                 exam = exam,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                                    .padding(horizontal = 24.dp)
+                                    .padding(bottom = 28.dp),
                             )
-                            Spacer(Modifier.height(24.dp))
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showFilterSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showFilterSheet = false },
+            sheetState = filterSheetState,
+            sheetGesturesEnabled = false,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        ) {
+            ExamFilterSheet(
+                state = state,
+                model = model,
+                onDone = { showFilterSheet = false },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 28.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExamSummary(
+    state: ExamScheduleUiState,
+    onOpenFilter: (() -> Unit)? = null,
+) {
+    val filtered = state.selectedType != null
+    val subtitle = buildString {
+        append(state.selectedType ?: "全部类型")
+        if (filtered) append(" · 已筛选")
+    }
+    // 与成绩/作业对齐：摘要 + 右侧筛选 pill；同步态在顶栏右上。
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (onOpenFilter != null) {
+                            Modifier
+                                .clickable(onClick = onOpenFilter)
+                                .padding(vertical = 2.dp, horizontal = 4.dp)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
+                Text(
+                    "考试安排：${state.visibleExams.size} 项",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
+                )
+            }
+            if (onOpenFilter != null) {
+                Surface(
+                    onClick = onOpenFilter,
+                    color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.semantics { contentDescription = "筛选考试类型" },
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ExamFilterFunnelIcon(modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -154,46 +266,25 @@ fun ExamScheduleWorkspace(
 }
 
 @Composable
-private fun ExamSummary(state: ExamScheduleUiState) {
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        shape = RoundedCornerShape(18.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "考试安排：${state.visibleExams.size} 项",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    state.selectedType ?: "全部类型",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
-                )
-            }
-            Surface(
-                color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
-                shape = RoundedCornerShape(999.dp),
-            ) {
-                Text(
-                    when {
-                        state.isRefreshing -> "正在同步"
-                        state.source == ExamScheduleContentSource.CACHE -> "本地缓存"
-                        state.source == ExamScheduleContentSource.NETWORK -> "已同步"
-                        else -> "尚未同步"
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
+private fun ExamFilterFunnelIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.8.dp.toPx()
+        val left = 2.5.dp.toPx()
+        val right = size.width - left
+        val top = 3.dp.toPx()
+        val midY = size.height * 0.48f
+        val neckLeft = size.width * 0.42f
+        val neckRight = size.width * 0.58f
+        val bottom = size.height - 2.5.dp.toPx()
+        drawLine(tint, Offset(left, top), Offset(right, top), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(left, top), Offset(neckLeft, midY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(right, top), Offset(neckRight, midY), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckLeft, midY), Offset(neckLeft, bottom), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckRight, midY), Offset(neckRight, bottom), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(neckLeft, bottom), Offset(neckRight, bottom), stroke, StrokeCap.Round)
     }
 }
 
@@ -213,8 +304,31 @@ private fun ExamTypeFilters(state: ExamScheduleUiState, model: ExamScheduleScree
             FilterChip(
                 selected = state.selectedType == type,
                 onClick = { model.selectType(type) },
+                // 考试类型名往往很长，允许多行完整显示，不在 chip 内截断。
                 label = { Text(type) },
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ExamFilterSheet(
+    state: ExamScheduleUiState,
+    model: ExamScheduleScreenModel,
+    onDone: () -> Unit,
+    modifier: Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("筛选考试类型", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(
+            "选择要查看的考试类型，列表会立即更新。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ExamTypeFilters(state, model)
+        TextButton(onClick = onDone, modifier = Modifier.align(Alignment.End)) {
+            Text("完成")
         }
     }
 }
@@ -222,7 +336,7 @@ private fun ExamTypeFilters(state: ExamScheduleUiState, model: ExamScheduleScree
 @Composable
 private fun ExamScrollableContent(
     state: ExamScheduleUiState,
-    model: ExamScheduleScreenModel,
+    onOpenFilter: () -> Unit,
     onOpen: (Int) -> Unit,
     modifier: Modifier,
 ) {
@@ -232,10 +346,7 @@ private fun ExamScrollableContent(
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
         item(key = "exam-summary") {
-            ExamSummary(state)
-        }
-        item(key = "exam-filters") {
-            ExamTypeFilters(state, model)
+            ExamSummary(state = state, onOpenFilter = onOpenFilter)
         }
         if (state.visibleExams.isEmpty()) {
             item(key = "exam-empty") {
@@ -245,7 +356,10 @@ private fun ExamScrollableContent(
                         .padding(vertical = 48.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = onOpenFilter) { Text("调整筛选") }
+                    }
                 }
             }
         } else {
@@ -350,14 +464,33 @@ private fun ExamDetailPanel(exam: ExamSchedule?, modifier: Modifier) {
         } else {
             ExamDetailContent(
                 exam = exam,
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+                contentPadding = PaddingValues(22.dp),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
 }
 
 @Composable
-private fun ExamDetailContent(exam: ExamSchedule, modifier: Modifier) {
+private fun ExamDetailContent(
+    exam: ExamSchedule,
+    modifier: Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding),
+    ) {
+        ExamDetailSheetBody(exam)
+    }
+}
+
+@Composable
+private fun ExamDetailSheetBody(
+    exam: ExamSchedule,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(
             "考试详情",

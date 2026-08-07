@@ -2,6 +2,8 @@ package team.bjtuss.bjtuselfservice.shared.data.courseware
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import team.bjtuss.bjtuselfservice.shared.auth.ParseResult
 import team.bjtuss.bjtuselfservice.shared.auth.parseAcademicRedirectUrl
 import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkJsonParseResult
@@ -53,6 +55,8 @@ class SchoolCoursewareRemoteDataSource(
     private val requestDelayMillis: Long = 0,
     private val endpoint: SmartPlatformEndpoint = SmartPlatformEndpoint.VerifiedHttps,
 ) : CoursewareRemoteDataSource {
+    // 并发预加载各课顶层时，多个协程会同时 ensureInitialized；必须串行握手，否则会话互相踩坏。
+    private val initMutex = Mutex()
     private var initialized = false
     private var sessionId: String? = null
     private var courses: List<SmartCourse> = emptyList()
@@ -197,6 +201,13 @@ class SchoolCoursewareRemoteDataSource(
 
     private suspend fun ensureInitialized() {
         if (initialized) return
+        initMutex.withLock {
+            if (initialized) return
+            ensureInitializedLocked()
+        }
+    }
+
+    private suspend fun ensureInitializedLocked() {
         val module = execute(
             SchoolHttpRequest(
                 method = SchoolHttpMethod.GET,

@@ -588,7 +588,11 @@ private fun HomeChangeFeedSection(
     onSelectDomain: (HomeChangeDomain) -> Unit,
     onClearAll: () -> Unit,
 ) {
-    if (changes.isEmpty()) return
+    // 过滤历史误报：原/现文案完全相同的「修改」不算变动。
+    val meaningful = changes.filterNot {
+        it.kind == DataChangeKind.MODIFIED && it.beforeDetail == it.afterDetail
+    }
+    if (meaningful.isEmpty()) return
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -598,7 +602,7 @@ private fun HomeChangeFeedSection(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("数据变动", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "同步后发现 ${changes.size} 项变化",
+                        "同步后发现 ${meaningful.size} 项变化",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -606,7 +610,7 @@ private fun HomeChangeFeedSection(
                 TextButton(onClick = onClearAll) { Text("全部标记已读") }
             }
             HomeChangeDomain.entries.forEach { domain ->
-                val domainChanges = changes.filter { it.domain == domain }
+                val domainChanges = meaningful.filter { it.domain == domain }
                 if (domainChanges.isNotEmpty()) {
                     ChangeDomainRow(domain, domainChanges, onSelectDomain)
                 }
@@ -631,7 +635,12 @@ private fun HomeChangeDialog(
                 modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                changes.forEach { ChangeDetailRow(it) }
+                // 过滤历史误报：原/现展示文案完全相同的「修改」不展示。
+                changes
+                    .filterNot {
+                        it.kind == DataChangeKind.MODIFIED && it.beforeDetail == it.afterDetail
+                    }
+                    .forEach { ChangeDetailRow(it) }
             }
         },
         confirmButton = { Button(onClick = onOpen) { Text("前往页面") } },

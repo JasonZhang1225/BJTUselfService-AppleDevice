@@ -80,10 +80,21 @@ fun gradeChangeRecorder(feed: HomeChangeFeedRepository): DataChangeRecorder<Grad
         feed = feed,
         domain = HomeChangeDomain.GRADES,
         identity = { listOf(it.courseName, it.courseTeacher, it.courseYear, it.semester) },
-        equivalent = { old, new -> old.copy(id = 0) == new.copy(id = 0) },
+        // 只比分数/学分/学期等业务字段。detail（组成与说明）会因解析 <br>/空白变化而抖动，
+        // 不应冒充「成绩变动」；id 是本地库生成的，也必须忽略。
+        equivalent = { old, new -> gradesSemanticallyEqual(old, new) },
         title = Grade::courseName,
-        detail = { "${it.courseScore} · ${it.courseCredits} 学分 · ${it.courseYear}${it.semester}" },
+        detail = { "${it.courseScore} · ${it.courseCredits} 学分 · ${it.semester}" },
     )
+
+/** 成绩信息流等价：忽略本地 id 与详情 HTML 文本差异。 */
+internal fun gradesSemanticallyEqual(old: Grade, new: Grade): Boolean =
+    old.courseName == new.courseName &&
+        old.courseTeacher == new.courseTeacher &&
+        old.courseScore == new.courseScore &&
+        old.courseCredits == new.courseCredits &&
+        old.courseYear == new.courseYear &&
+        old.semester == new.semester
 
 fun courseChangeRecorder(feed: HomeChangeFeedRepository): DataChangeRecorder<Course> =
     changeRecorder(
@@ -135,6 +146,11 @@ private fun <T, K> changeRecorder(
             afterDetail = change.after?.let(detail).orEmpty(),
         )
     }
+        // 二次保险：展示文案完全一致的「修改」不进信息流（避免解析抖动误报）。
+        .filterNot { record ->
+            record.kind == DataChangeKind.MODIFIED &&
+                record.beforeDetail == record.afterDetail
+        }
     feed.acceptRefresh(domain, before.isNotEmpty(), records)
 }
 

@@ -1,6 +1,11 @@
 package team.bjtuss.bjtuselfservice.shared.data.courseware
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import team.bjtuss.bjtuselfservice.shared.cache.CacheStore
 import team.bjtuss.bjtuselfservice.shared.domain.courseware.CoursewareNode
 import team.bjtuss.bjtuselfservice.shared.domain.courseware.CoursewareCourse
@@ -60,6 +65,18 @@ interface CoursewareRepository {
         courseId: Int,
     ): CoursewareOperationResult<CoursewareSnapshot> =
         CoursewareOperationResult.Failure(CoursewareSyncFailure.MALFORMED_RESPONSE)
+
+    /**
+     * 并发拉取多门课的顶层目录，合并后一次落库。
+     * 用于同步后预填各课「N 个顶层项目」，避免点选才加载。
+     */
+    suspend fun loadCoursesConcurrently(
+        snapshot: CoursewareSnapshot,
+        courseIds: List<Int>,
+        concurrency: Int = 3,
+    ): CoursewareOperationResult<CoursewareSnapshot> =
+        CoursewareOperationResult.Failure(CoursewareSyncFailure.MALFORMED_RESPONSE)
+
     suspend fun loadFolder(
         snapshot: CoursewareSnapshot,
         courseId: Int,
@@ -129,6 +146,53 @@ class DefaultCoursewareRepository(
                 } else {
                     candidate
                 }
+            },
+        )
+        return try {
+            local.replace(accountScope, updated)
+            CoursewareOperationResult.Success(local.load(accountScope))
+        } catch (_: Exception) {
+            CoursewareOperationResult.Failure(CoursewareSyncFailure.CACHE)
+        }
+    }
+
+    override suspend fun loadCoursesConcurrently(
+        snapshot: CoursewareSnapshot,
+        courseIds: List<Int>,
+        concurrency: Int,
+    ): CoursewareOperationResult<CoursewareSnapshot> {
+        val targets = courseIds
+            .distinct()
+            .mapNotNull { id -> snapshot.courses.firstOrNull { it.id == id && !it.childrenLoaded } }
+        if (targets.isEmpty()) return CoursewareOperationResult.Success(snapshot)
+        val limit = concurrency.coerceIn(1, 6)
+        val semaphore = Semaphore(limit)
+        // 单课失败跳过，不拖垮整批；至少成功一门就合并落库。
+        val fetched: List<Pair<Int, List<CoursewareNode>>> = coroutineScope {
+            targets.map { course ->
+                async {
+                    semaphore.withPermit {
+                        try {
+                            val children = remote.fetchChildren(course, parentId = 0)
+                            if (children.hasDuplicateKeys()) null
+                            else course.id to children
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
+        if (fetched.isEmpty()) {
+            return CoursewareOperationResult.Failure(CoursewareSyncFailure.NETWORK)
+        }
+        val byId = fetched.toMap()
+        val updated = snapshot.copy(
+            courses = snapshot.courses.map { course ->
+                val children = byId[course.id] ?: return@map course
+                course.copy(children = children, childrenLoaded = true)
             },
         )
         return try {
