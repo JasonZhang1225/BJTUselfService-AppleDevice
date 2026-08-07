@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,6 +37,7 @@ fun MailboxWorkspace(
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    val isMac = platform.family == PlatformFamily.MacOS
     LaunchedEffect(model) {
         if (model.state.value == MailboxUiState.Idle) {
             // 首次进入先等进页转场播完再准备会话/创建 WebView：WKWebView/WebView 的首次初始化
@@ -46,23 +48,6 @@ fun MailboxWorkspace(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        if (expanded) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text("校内邮箱", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    if (platform.family == PlatformFamily.MacOS) {
-                        "macOS 使用系统浏览器；App 会话 Cookie 不会注入浏览器，必要时请在学校页面重新登录。"
-                    } else {
-                        "在学校域名范围内复用当前登录会话；外部链接交给系统浏览器。"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
         when (val current = state) {
             MailboxUiState.Idle,
             MailboxUiState.Preparing,
@@ -80,11 +65,38 @@ fun MailboxWorkspace(
                     modifier = Modifier.padding(top = 16.dp),
                 ) { Text("重试") }
             }
-            is MailboxUiState.Ready -> SchoolWebView(
-                request = current.request,
-                modifier = Modifier.fillMaxSize(),
-                onOpenExternal = uriHandler::openUri,
-            )
+            is MailboxUiState.Ready -> {
+                if (isMac) {
+                    // macOS 走系统浏览器：会话 Cookie 不会注入浏览器，需在学校页面登录后自动跳转邮箱。
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = if (expanded) 24.dp else 20.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "点击跳转浏览器，在浏览器中登录，自动跳转校内邮箱。",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        )
+                        Button(
+                            onClick = { uriHandler.openUri(current.request.url) },
+                            modifier = Modifier.padding(top = 24.dp),
+                        ) {
+                            Text("打开校内邮箱")
+                        }
+                    }
+                } else {
+                    SchoolWebView(
+                        request = current.request,
+                        modifier = Modifier.fillMaxSize(),
+                        onOpenExternal = uriHandler::openUri,
+                    )
+                }
+            }
         }
     }
 }

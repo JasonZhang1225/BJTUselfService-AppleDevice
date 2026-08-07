@@ -91,14 +91,14 @@ fun ClassroomWorkspace(
                 onDismissIntroBanner = onDismissIntroBanner,
                 showListHeading = true,
                 onSelect = { building -> scope.launch { model.selectBuilding(building) } },
-                modifier = Modifier.width(230.dp).fillMaxHeight(),
+                modifier = Modifier.weight(0.32f).fillMaxHeight(),
             )
             ClassroomDetail(
                 state = state,
                 model = model,
                 onRefresh = { scope.launch { model.refresh() } },
                 showBuildingHeader = true,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                modifier = Modifier.weight(0.68f).fillMaxHeight(),
             )
         }
     } else {

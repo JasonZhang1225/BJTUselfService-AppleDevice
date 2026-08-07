@@ -151,26 +151,7 @@ fun CoursewareWorkspace(
         },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (expanded) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "课件下载",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "按课程和文件夹浏览智慧教学平台资源",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                    Text(if (state.isRefreshing) "正在同步" else "同步课件")
-                }
-            }
-        }
+        // 同步态在 DestinationPage 顶栏；此处不再放页内「同步课件」。
 
         // 明文通道提示：仅在 shell/session 判定「本登录态尚未关闭」时显示一条可关闭横幅。
         if (legacyWarningVisible) {
@@ -344,7 +325,8 @@ private fun CoursewareExpandedWorkspace(
 ) {
     val scope = rememberCoroutineScope()
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        ElevatedCard(modifier = Modifier.width(220.dp).fillMaxHeight()) {
+        // 三栏随窗口比例伸缩：课程约 28% / 目录约 42% / 详情约 30%。
+        ElevatedCard(modifier = Modifier.weight(0.28f).fillMaxHeight()) {
             Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("课程", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 LazyColumn(
@@ -363,7 +345,7 @@ private fun CoursewareExpandedWorkspace(
             }
         }
 
-        ElevatedCard(modifier = Modifier.weight(1f).fillMaxHeight()) {
+        ElevatedCard(modifier = Modifier.weight(0.42f).fillMaxHeight()) {
             Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -438,7 +420,7 @@ private fun CoursewareExpandedWorkspace(
             directoryGatewayAvailable = directoryGatewayAvailable,
             onDownload = onDownload,
             onExportDirectory = onExportDirectory,
-            modifier = Modifier.widthIn(min = 290.dp, max = 350.dp).fillMaxHeight(),
+            modifier = Modifier.weight(0.30f).fillMaxHeight(),
         )
     }
 }

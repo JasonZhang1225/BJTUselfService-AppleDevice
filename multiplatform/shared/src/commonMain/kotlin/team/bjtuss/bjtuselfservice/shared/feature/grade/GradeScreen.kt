@@ -53,7 +53,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -159,12 +158,16 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.displayName
 import team.bjtuss.bjtuselfservice.shared.domain.grade.scoreForSorting
 import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeDomain
 
-/** 教室页顶栏空闲态：按当前教学楼加载结果给出与其它页一致的文案。 */
-private fun classroomIdleStatusText(state: ClassroomUiState): String = when (state.buildingState) {
+/**
+ * 教室页顶栏空闲态文案。
+ * 未选楼 / 尚未请求（Idle）返回 null：一级楼列表没有「同步」语义，不显示「未同步 ✓」。
+ * Loading 时 isRefreshing 会盖成「同步中」；此处仍给「未同步」作兜底。
+ */
+private fun classroomIdleStatusText(state: ClassroomUiState): String? = when (state.buildingState) {
     is ClassroomBuildingState.Failed -> "同步失败"
     is ClassroomBuildingState.Loaded -> "已同步"
-    ClassroomBuildingState.Loading -> "未同步" // 实际显示会被 isRefreshing「同步中」覆盖
-    ClassroomBuildingState.Idle -> "未同步"
+    ClassroomBuildingState.Loading -> "未同步"
+    ClassroomBuildingState.Idle -> null
 }
 
 private sealed interface AppRoute : NavKey
@@ -290,6 +293,10 @@ fun AuthenticatedAppShell(
     } else {
         0.dp
     }
+    // 宽屏（平板横屏/全屏、macOS）：二级页留在壳内，侧栏固定、右侧换内容，对齐桌面分屏。
+    // 仅紧凑/中等窗口才走原生二级 Activity/UIViewController（手机式全屏 push）。
+    val useNativeSecondaryRoutes =
+        nativeNavigationEnabled && windowClass != WindowClass.Expanded
 
     // Navigation 3：应用直接拥有返回栈。一级 tab 总是以 HOME 为根，二/三级页继续压栈；
     // NavDisplay 负责 Android predictive back 与 iOS start-edge back 的连续手势进度。
@@ -317,16 +324,18 @@ fun AuthenticatedAppShell(
                 yield()
                 if (backStack.lastOrNull() == target) return@launch
                 if (
-                    nativeNavigationEnabled &&
+                    useNativeSecondaryRoutes &&
                     target in MoreGroupSections &&
                     target != AppSection.MORE
                 ) {
                     onOpenNativeRoute(target.name)
                 } else if (target in MoreGroupSections && target != AppSection.MORE) {
-                    // 二级页：保留当前来源并 push，返回可准确预览来源页。
+                    // 「更多」子页：固定为 [更多, 子页]，返回一定回到更多目录。
+                    backStack.clear()
+                    backStack.add(AppSection.MORE)
                     backStack.add(target)
                 } else {
-                    // 一级底栏页：单层替换，不在下方压 HOME。
+                    // 一级底栏页（含「更多」根目录）：单层替换。
                     // 旧 popUpTo(HOME) 会形成 [HOME, 课表/作业…]，边缘侧滑/系统返回会误回首页。
                     backStack.clear()
                     backStack.add(target)
@@ -371,6 +380,8 @@ fun AuthenticatedAppShell(
                 AppCommand.NAVIGATE_HOMEWORK -> navigateToSection(AppSection.HOMEWORK)
                 AppCommand.NAVIGATE_COURSEWARE -> navigateToSection(AppSection.COURSEWARE)
                 AppCommand.NAVIGATE_CLASSROOMS -> navigateToSection(AppSection.CLASSROOMS)
+                AppCommand.NAVIGATE_CLASSROOM_OCCUPANCY ->
+                    navigateToSection(AppSection.CLASSROOM_OCCUPANCY)
                 AppCommand.NAVIGATE_MAILBOX -> navigateToSection(AppSection.MAILBOX)
                 AppCommand.NAVIGATE_SETTINGS -> navigateToSection(AppSection.SETTINGS)
                 AppCommand.REFRESH_CURRENT -> refresh()
@@ -438,21 +449,20 @@ fun AuthenticatedAppShell(
                     bottom = if (reserveBottomBarSpace) compactBottomBarOverlayPadding else 0.dp,
                 ),
             ) {
-                if (!expanded) {
-                    CompactAppTopBar(
-                        title = title,
-                        isRefreshing = isRefreshing,
-                        isLoggingIn = entryLoggingIn,
-                        idleStatusText = idleStatusText,
-                        // 可刷新页：右上角「已同步」旁放刷新按钮；不再下拉刷新（保平台原生过滚）。
-                        onRefresh = if (refreshable) refresh else null,
-                        onBack = if (showBack) {
-                            popBackStack
-                        } else {
-                            null
-                        },
-                    )
-                }
+                // 紧凑/宽屏统一：标题 + 右上同步胶囊。宽屏不再在页内重复「同步××」按钮。
+                CompactAppTopBar(
+                    title = title,
+                    isRefreshing = isRefreshing,
+                    isLoggingIn = entryLoggingIn,
+                    idleStatusText = idleStatusText,
+                    // 可刷新页：右上角「已同步」旁放刷新按钮；不再下拉刷新（保平台原生过滚）。
+                    onRefresh = if (refreshable) refresh else null,
+                    onBack = if (showBack) {
+                        popBackStack
+                    } else {
+                        null
+                    },
+                )
                 // 同步进度条钉在顶栏下方。
                 if (isRefreshing) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -612,7 +622,7 @@ fun AuthenticatedAppShell(
                     onRefresh = refresh,
                     onOpenDetail = {
                         // 先写完选中再 push（onOpen 里已 selectHomework），避免详情页打开时为空。
-                        if (nativeNavigationEnabled) {
+                        if (useNativeSecondaryRoutes) {
                             onOpenNativeRoute(HOMEWORK_DETAIL_ROUTE_ID)
                         } else if (backStack.lastOrNull() != HomeworkDetailRoute) {
                             backStack.add(HomeworkDetailRoute)
@@ -693,7 +703,7 @@ fun AuthenticatedAppShell(
                     onDismissIntroBanner = dismissClassroomIntroBanner,
                     onOpenBuilding = {
                         // 先写完选中再 push，避免详情页打开时 selectedBuilding 仍为空。
-                        if (nativeNavigationEnabled) {
+                        if (useNativeSecondaryRoutes) {
                             onOpenNativeRoute(CLASSROOM_DETAIL_ROUTE_ID)
                         } else if (backStack.lastOrNull() != ClassroomDetailRoute) {
                             backStack.add(ClassroomDetailRoute)
@@ -715,7 +725,7 @@ fun AuthenticatedAppShell(
                     expanded = expanded,
                     onOpenBuilding = {
                         // 先写完选中再 push，避免详情页打开时 selectedBuilding 仍为空。
-                        if (nativeNavigationEnabled) {
+                        if (useNativeSecondaryRoutes) {
                             onOpenNativeRoute(CLASSROOM_OCCUPANCY_DETAIL_ROUTE_ID)
                         } else if (backStack.lastOrNull() != ClassroomOccupancyDetailRoute) {
                             backStack.add(ClassroomOccupancyDetailRoute)
@@ -830,17 +840,16 @@ fun AuthenticatedAppShell(
         ) {
             AppSidebar(
                 profile = profile,
-                platform = platform,
                 section = section,
                 onSectionSelected = navigateToSection,
-                onLogout = onLogout,
-                modifier = Modifier.width(236.dp).fillMaxHeight(),
+                // 随窗口比例伸缩，避免小窗时侧栏仍占固定 236dp 挤掉内容区。
+                modifier = Modifier.weight(0.22f).fillMaxHeight(),
             )
             // 宽屏侧栏布局按 macOS/iPad 的并列工作区处理，不播放手机式 push/pop。
             NavDisplay(
                 backStack = backStack,
                 onBack = popBackStack,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                modifier = Modifier.weight(0.78f).fillMaxHeight(),
                 transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
                 popTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
                 predictivePopTransitionSpec = { _: Int ->
@@ -1078,10 +1087,8 @@ private fun HomeChangeDomain.toAppSection(): AppSection = when (this) {
 @Composable
 private fun AppSidebar(
     profile: StudentProfile,
-    platform: PlatformInfo,
     section: AppSection,
     onSectionSelected: (AppSection) -> Unit,
-    onLogout: () -> Unit,
     modifier: Modifier,
 ) {
     Surface(
@@ -1094,11 +1101,6 @@ private fun AppSidebar(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("交大自由行", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(
-                platform.displayName,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Surface(
                 color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.82f),
                 shape = RoundedCornerShape(16.dp),
@@ -1120,14 +1122,21 @@ private fun AppSidebar(
                     )
                 }
             }
+            // 与移动端底栏一致：只暴露五个一级入口，其余收进「更多」。
+            // 退出登录放在设置页，侧栏不再重复。
             Column(
                 modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                AppSection.entries.filter { it != AppSection.MORE }.forEach { item ->
+                BottomNavSections.forEach { item ->
+                    val selected = if (item == AppSection.MORE) {
+                        section in MoreGroupSections
+                    } else {
+                        section == item
+                    }
                     AppSidebarItem(
                         title = item.title,
-                        selected = section == item,
+                        selected = selected,
                         onClick = { onSectionSelected(item) },
                     )
                 }
@@ -1137,9 +1146,6 @@ private fun AppSidebar(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-            }
-            OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
-                Text("退出并清除登录信息")
             }
         }
     }
@@ -1284,7 +1290,12 @@ private fun CompactAppTopBar(
                                     idleStatusText,
                                     style = MaterialTheme.typography.labelMedium,
                                 )
-                                TopBarSyncedIcon(modifier = Modifier.size(15.dp))
+                                // 对勾只表示「已同步」；未同步/同步失败用刷新图标，避免「未同步 ✓」语义打架。
+                                if (idleStatusText == "已同步") {
+                                    TopBarSyncedIcon(modifier = Modifier.size(15.dp))
+                                } else {
+                                    TopBarRefreshIcon(modifier = Modifier.size(15.dp))
+                                }
                             } else {
                                 TopBarRefreshIcon(modifier = Modifier.size(15.dp))
                             }
@@ -1737,28 +1748,7 @@ private fun GradeWorkspace(
         },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (expanded) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "成绩",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "按学期查看、排序或自选课程计算加权平均分",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                    Text(if (state.isRefreshing) "正在同步" else "同步成绩")
-                }
-            }
-        }
-
-        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
+        // 同步态在 DestinationPage 顶栏；此处不再放页内「同步成绩」。
         state.failure?.let { failure ->
             GradeFailureBanner(
                 failure = failure,
@@ -1784,11 +1774,11 @@ private fun GradeWorkspace(
                         GradeList(
                             state = state,
                             model = model,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            modifier = Modifier.weight(0.58f).fillMaxHeight(),
                         )
                         GradeDetailPanel(
                             grade = state.selectedGrade,
-                            modifier = Modifier.widthIn(min = 290.dp, max = 390.dp).fillMaxHeight(),
+                            modifier = Modifier.weight(0.42f).fillMaxHeight(),
                         )
                     }
                 } else {

@@ -32,6 +32,22 @@ class SettingsScreenModelTest {
     }
 
     @Test
+    fun dynamicColorTogglePersists() {
+        val saved = mutableListOf<AppPreferences>()
+        val model = SettingsScreenModel(
+            initialPreferences = AppPreferences(dynamicColor = true),
+            persistPreferences = { saved += it; true },
+            clearAccountCache = { true },
+        )
+
+        model.setDynamicColor(false)
+
+        assertEquals(1, saved.size)
+        assertFalse(model.state.value.preferences.dynamicColor)
+        assertFalse(model.state.value.saveFailed)
+    }
+
+    @Test
     fun failedAutoSyncSaveKeepsPreviousValueAndReportsFailure() {
         val model = SettingsScreenModel(
             initialPreferences = AppPreferences(),
