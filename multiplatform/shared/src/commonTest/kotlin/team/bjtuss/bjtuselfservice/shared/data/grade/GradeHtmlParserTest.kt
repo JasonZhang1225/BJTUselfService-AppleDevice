@@ -17,7 +17,7 @@ class GradeHtmlParserTest {
                         credits = "3.0",
                         score = "95",
                         teacher = "张 老师",
-                        detail = "平时成绩 40 期末成绩 60",
+                        detail = "平时成绩(0.6)： 40&lt;br&gt;期末成绩(0.4)： 60&lt;br&gt;最终成绩： 95&lt;br&gt;备注信息： 无",
                     ),
                     row(
                         year = "2025-2026-2",
@@ -34,9 +34,27 @@ class GradeHtmlParserTest {
         assertEquals("2025-2026-1", result.grades[0].semester)
         assertEquals("A,95", result.grades[0].courseScore)
         assertEquals("张老师", result.grades[0].courseTeacher)
+        // <br> 保留为换行，平时/期末分行
         assertTrue(result.grades[0].detail.contains("平时成绩"))
+        assertTrue(result.grades[0].detail.contains('\n'))
+        assertTrue(result.grades[0].detail.lines().any { it.startsWith("期末成绩") })
         assertEquals("B+,83", result.grades[1].courseScore)
         assertEquals("0.0", result.grades[1].courseCredits)
+    }
+
+    @Test
+    fun formatGradeDetailBreaksKnownLabelsEvenWhenFlat() {
+        val flat = "平时成绩(0.6)： 97 期末成绩(0.4)： 88 最终成绩： 93 备注信息： 无"
+        val formatted = formatGradeDetailForDisplay(flat)
+        assertEquals(
+            listOf(
+                "平时成绩(0.6)： 97",
+                "期末成绩(0.4)： 88",
+                "最终成绩： 93",
+                "备注信息： 无",
+            ),
+            formatted.lines(),
+        )
     }
 
     @Test

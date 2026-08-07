@@ -219,7 +219,11 @@ class HomeworkScreenModel(
         mutableState.value = mutableState.value.copy(sortOrder = order, now = nowProvider())
     }
 
-    suspend fun showDetails(homeworkKey: String) {
+    /**
+     * 同步写入选中项与详情占位，不触碰网络。
+     * 紧凑端点卡片要先写完选中再 push 详情二级页，不能等详情网络加载。
+     */
+    fun selectHomework(homeworkKey: String) {
         val item = mutableState.value.homework.firstOrNull { it.stableKey() == homeworkKey } ?: return
         detailRequestKey = homeworkKey
         mutableState.value = mutableState.value.copy(
@@ -231,6 +235,11 @@ class HomeworkScreenModel(
             detailFailure = null,
             fileFailure = null,
         )
+    }
+
+    suspend fun showDetails(homeworkKey: String) {
+        val item = mutableState.value.homework.firstOrNull { it.stableKey() == homeworkKey } ?: return
+        selectHomework(homeworkKey)
         when (val result = repository.loadDetail(item)) {
             is HomeworkDetailResult.Success -> if (detailRequestKey == homeworkKey) {
                 mutableState.value = mutableState.value.copy(

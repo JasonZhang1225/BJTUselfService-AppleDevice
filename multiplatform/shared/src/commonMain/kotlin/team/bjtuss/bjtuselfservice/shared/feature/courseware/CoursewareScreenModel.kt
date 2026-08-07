@@ -98,6 +98,8 @@ class CoursewareScreenModel(
             )
         }
         refresh()
+        // 列表同步后（或失败仅有缓存）仍补拉未加载课程的顶层数量。
+        ensureCourseRootsLoaded()
     }
 
     suspend fun refresh() {
@@ -115,7 +117,6 @@ class CoursewareScreenModel(
                         is CoursewareRefreshResult.Success -> {
                             freshCourseIds.clear()
                             applySnapshot(result.snapshot, CoursewareContentSource.NETWORK, null)
-                            mutableState.value.selectedCourseId?.let { loadCourseLocked(it) }
                         }
                         is CoursewareRefreshResult.Failure -> applySnapshot(
                             result.snapshot,
@@ -130,8 +131,24 @@ class CoursewareScreenModel(
                     }
                 }
             }
+            // 在 refresh 锁外预加载顶层，避免与点选课程长时间互斥；有课未加载数量时总会跑。
+            ensureCourseRootsLoaded()
         } finally {
             refreshMutex.unlock()
+        }
+    }
+
+    /**
+     * 并发补拉尚未加载顶层目录的课程（有界并发）。
+     * 打开选课列表 / 初始化 / 手动同步后都会调用；已在加载中则跳过。
+     */
+    suspend fun ensureCourseRootsLoaded() {
+        val unloaded = mutableState.value.courses.filter { !it.childrenLoaded }.map { it.id }
+        if (unloaded.isEmpty()) return
+        // 已有加载任务在跑时不重复入队
+        if (unloaded.all { it in mutableState.value.loadingCourseIds }) return
+        operationMutex.withLock {
+            preloadUnloadedCourseRootsLocked()
         }
     }
 
@@ -439,6 +456,49 @@ class CoursewareScreenModel(
         } finally {
             mutableState.value = mutableState.value.copy(
                 loadingCourseIds = mutableState.value.loadingCourseIds - courseId,
+            )
+        }
+    }
+
+    /**
+     * 在已持有 [operationMutex] 时调用：并发加载尚未拉顶层目录的课程。
+     * 网络并发、一次合并落库；单课失败不阻断其它课。
+     */
+    private suspend fun preloadUnloadedCourseRootsLocked() {
+        val before = mutableState.value
+        val unloadedIds = before.courses.filter { !it.childrenLoaded }.map { it.id }
+        if (unloadedIds.isEmpty()) return
+        mutableState.value = before.copy(
+            loadingCourseIds = before.loadingCourseIds + unloadedIds,
+        )
+        try {
+            when (
+                val result = repository.loadCoursesConcurrently(
+                    snapshot = CoursewareSnapshot(mutableState.value.courses),
+                    courseIds = unloadedIds,
+                    // 智慧教学接口对并发敏感；2 路在速度与稳定性之间折中。
+                    concurrency = 2,
+                )
+            ) {
+                is CoursewareOperationResult.Success -> {
+                    val loadedIds = result.value.courses
+                        .filter { it.childrenLoaded && it.id in unloadedIds }
+                        .map { it.id }
+                    freshCourseIds += loadedIds
+                    applySnapshot(
+                        result.value,
+                        source = mutableState.value.source ?: CoursewareContentSource.NETWORK,
+                        failure = mutableState.value.failure,
+                    )
+                }
+                is CoursewareOperationResult.Failure -> {
+                    // 预加载失败不弹整页错误；选课列表仍显示「数量未同步」，
+                    // 打开选课 sheet / 再次同步时会重试；点单课仍走 loadCourse。
+                }
+            }
+        } finally {
+            mutableState.value = mutableState.value.copy(
+                loadingCourseIds = mutableState.value.loadingCourseIds - unloadedIds.toSet(),
             )
         }
     }

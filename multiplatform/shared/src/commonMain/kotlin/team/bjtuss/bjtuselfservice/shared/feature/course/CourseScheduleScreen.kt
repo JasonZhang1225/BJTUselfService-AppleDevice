@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -182,14 +183,20 @@ fun CourseScheduleWorkspace(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     state.selectedCourse?.let { course ->
-                        ModalBottomSheet(onDismissRequest = model::dismissCourseDetails) {
+                        val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+                        ModalBottomSheet(
+                            onDismissRequest = model::dismissCourseDetails,
+                            sheetState = detailSheetState,
+                            sheetGesturesEnabled = false,
+                            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+                        ) {
                             CourseDetailContent(
                                 course = course,
                                 modifier = Modifier.fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                                    .padding(horizontal = 24.dp, vertical = 8.dp)
+                                    .padding(bottom = 20.dp),
                             )
-                            Spacer(Modifier.height(24.dp))
                         }
                     }
                 }
@@ -198,11 +205,12 @@ fun CourseScheduleWorkspace(
     }
 
     if (showSchedulePicker) {
-        // skipPartiallyExpanded：打开即全高，周数芯片不用先拖一下才能看全。
         val pickerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { showSchedulePicker = false },
             sheetState = pickerSheetState,
+            sheetGesturesEnabled = false,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth()

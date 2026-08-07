@@ -18,6 +18,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -67,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -88,6 +91,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
@@ -102,7 +106,9 @@ import team.bjtuss.bjtuselfservice.shared.LocalReduceMotion
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 import team.bjtuss.bjtuselfservice.shared.WindowClass
+import kotlin.math.PI
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
+import team.bjtuss.bjtuselfservice.shared.data.grade.formatGradeDetailForDisplay
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 import team.bjtuss.bjtuselfservice.shared.usesLegacySmartTransportFor
 import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
@@ -112,18 +118,23 @@ import team.bjtuss.bjtuselfservice.shared.data.home.HomeChangeFeedRepository
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleContentSource
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleContentSource
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkContentSource
+import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkDetailWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareContentSource
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.CalendarDownloadWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.ReportCardDownloadWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomBuildingState
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomBuildingWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomUiState
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsWorkspace
@@ -145,6 +156,14 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.displayName
 import team.bjtuss.bjtuselfservice.shared.domain.grade.scoreForSorting
 import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeDomain
 
+/** 教室页顶栏空闲态：按当前教学楼加载结果给出与其它页一致的文案。 */
+private fun classroomIdleStatusText(state: ClassroomUiState): String = when (state.buildingState) {
+    is ClassroomBuildingState.Failed -> "同步失败"
+    is ClassroomBuildingState.Loaded -> "已同步"
+    ClassroomBuildingState.Loading -> "未同步" // 实际显示会被 isRefreshing「同步中」覆盖
+    ClassroomBuildingState.Idle -> "未同步"
+}
+
 private sealed interface AppRoute : NavKey
 
 private enum class AppSection(val title: String) : AppRoute {
@@ -153,8 +172,8 @@ private enum class AppSection(val title: String) : AppRoute {
     SCHEDULE("课程表"),
     EXAMS("考试安排"),
     HOMEWORK("作业"),
-    COURSEWARE("课件"),
-    CLASSROOMS("教室"),
+    COURSEWARE("课件下载"),
+    CLASSROOMS("教室人数估计"),
     MAILBOX("邮箱"),
     CALENDAR_DOWNLOAD("校历下载"),
     REPORT_CARD_DOWNLOAD("成绩单下载"),
@@ -187,6 +206,10 @@ private const val LOGIN_SYNC_RETRY_DELAY_MILLIS = 700L
 /** 教室详情的第三级路由：独立于一级/二级 section。 */
 private data object ClassroomDetailRoute : AppRoute
 const val CLASSROOM_DETAIL_ROUTE_ID = "CLASSROOM_DETAIL"
+
+/** 作业详情的二级路由：独立于一级 section，仿教室详情。 */
+private data object HomeworkDetailRoute : AppRoute
+const val HOMEWORK_DETAIL_ROUTE_ID = "HOMEWORK_DETAIL"
 
 /** Google predictive-back full-screen surface 的 SystemUI 插值。 */
 private val androidPredictiveEasing = CubicBezierEasing(0.1f, 0.1f, 0f, 1f)
@@ -231,10 +254,26 @@ fun AuthenticatedAppShell(
     val mailboxState by mailboxModel.state.collectAsState()
     val homeState by homeModel.state.collectAsState()
     val homeChanges by homeChangeFeed.records.collectAsState()
-    var legacyWarningDismissed by remember { mutableStateOf(false) }
+    // 挂 session：原生二级页重建 Compose 时仍记住本登录态是否关过提示。
+    // 同时必须有本地 mutableState，否则只写 session 字段不会触发重组，Banner 点了不关。
+    var legacyWarningDismissed by remember(session) {
+        mutableStateOf(session.legacyHttpWarningDismissed)
+    }
+    val dismissLegacyWarning: () -> Unit = {
+        session.legacyHttpWarningDismissed = true
+        legacyWarningDismissed = true
+    }
+    var classroomIntroBannerDismissed by remember(session) {
+        mutableStateOf(session.classroomIntroBannerDismissed)
+    }
+    val dismissClassroomIntroBanner: () -> Unit = {
+        session.classroomIntroBannerDismissed = true
+        classroomIntroBannerDismissed = true
+    }
     val scope = rememberCoroutineScope()
     // 紧凑端底栏属于一级 destination，自身随场景一起切换；NavDisplay 始终保持全屏尺寸，
-    // 避免 push/pop 时因底栏显隐改变内容高度。NavigationBar 本体高 80dp，并追加系统 inset。
+    // 避免 push/pop 时因底栏显隐改变内容高度。
+    // Material3 NavigationBar 内容高 80.dp + windowInsets.navigationBars（官方安全区）。
     val compactBottomBarOverlayPadding = if (windowClass != WindowClass.Expanded) {
         80.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     } else {
@@ -250,6 +289,7 @@ fun AuthenticatedAppShell(
     val currentRoute = backStack.last()
     val section: AppSection = when (currentRoute) {
         ClassroomDetailRoute -> AppSection.CLASSROOMS
+        HomeworkDetailRoute -> AppSection.HOMEWORK
         is AppSection -> currentRoute
     }
     val popBackStack: () -> Unit = if (forcedRouteId != null) {
@@ -269,10 +309,10 @@ fun AuthenticatedAppShell(
                 // 二级页：保留当前来源并 push，返回可准确预览来源页。
                 backStack.add(target)
             } else {
-                // 一级页：复刻旧 popUpTo(HOME) 语义；从非首页返回时先回首页。
+                // 一级底栏页：单层替换，不在下方压 HOME。
+                // 旧 popUpTo(HOME) 会形成 [HOME, 课表/作业…]，边缘侧滑/系统返回会误回首页。
                 backStack.clear()
-                backStack.add(AppSection.HOME)
-                if (target != AppSection.HOME) backStack.add(target)
+                backStack.add(target)
             }
         }
     }
@@ -431,6 +471,15 @@ fun AuthenticatedAppShell(
                     examState.isRefreshing || courseState.isRefreshing,
                 showBack = false,
                 modifier = modifier,
+                // 与成绩/课表一致：同步态并入顶栏右上胶囊，勿只留孤图标。
+                // 首页是聚合页，任一业务切片失败即显示「同步失败」。
+                idleStatusText = when {
+                    homeState.failure != null || homeworkState.failure != null ||
+                        examState.failure != null || courseState.failure != null -> "同步失败"
+                    homeworkState.source != null || examState.source != null ||
+                        courseState.source != null -> "已同步"
+                    else -> "未同步"
+                },
             ) {
                 HomeWorkspace(
                     model = homeModel,
@@ -509,6 +558,13 @@ fun AuthenticatedAppShell(
                 isRefreshing = examState.isRefreshing,
                 showBack = true,
                 modifier = modifier,
+                // 与成绩/作业一致：同步态顶栏右上，banner 内放类型筛选入口。
+                idleStatusText = when {
+                    examState.failure != null -> "同步失败"
+                    examState.source == ExamScheduleContentSource.NETWORK -> "已同步"
+                    examState.source == ExamScheduleContentSource.CACHE -> "已同步"
+                    else -> "未同步"
+                },
             ) {
                 ExamScheduleWorkspace(
                     state = examState,
@@ -538,10 +594,18 @@ fun AuthenticatedAppShell(
                     expanded = expanded,
                     usesLegacySmartTransport = usesLegacySmartTransport,
                     legacyWarningVisible = usesLegacySmartTransportFor(platform.family) && !legacyWarningDismissed,
-                    onDismissLegacyWarning = { legacyWarningDismissed = true },
+                    onDismissLegacyWarning = dismissLegacyWarning,
                     model = homeworkModel,
                     fileGateway = homeworkFileGateway,
                     onRefresh = refresh,
+                    onOpenDetail = {
+                        // 先写完选中再 push（onOpen 里已 selectHomework），避免详情页打开时为空。
+                        if (nativeNavigationEnabled) {
+                            onOpenNativeRoute(HOMEWORK_DETAIL_ROUTE_ID)
+                        } else if (backStack.lastOrNull() != HomeworkDetailRoute) {
+                            backStack.add(HomeworkDetailRoute)
+                        }
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -552,13 +616,20 @@ fun AuthenticatedAppShell(
                 isRefreshing = coursewareState.isRefreshing,
                 showBack = true,
                 modifier = modifier,
+                // 与成绩/作业一致：右上角「已同步」+ sync 同一胶囊，勿只留孤图标。
+                idleStatusText = when {
+                    coursewareState.failure != null -> "同步失败"
+                    coursewareState.source == CoursewareContentSource.NETWORK -> "已同步"
+                    coursewareState.source == CoursewareContentSource.CACHE -> "已同步"
+                    else -> "未同步"
+                },
             ) {
                 CoursewareWorkspace(
                     state = coursewareState,
                     expanded = expanded,
                     usesLegacySmartTransport = usesLegacySmartTransport,
                     legacyWarningVisible = usesLegacySmartTransportFor(platform.family) && !legacyWarningDismissed,
-                    onDismissLegacyWarning = { legacyWarningDismissed = true },
+                    onDismissLegacyWarning = dismissLegacyWarning,
                     model = coursewareModel,
                     fileGateway = homeworkFileGateway,
                     directoryGateway = coursewareDirectoryGateway,
@@ -601,11 +672,15 @@ fun AuthenticatedAppShell(
                 isRefreshing = classroomState.isLoading,
                 showBack = true,
                 modifier = modifier,
+                idleStatusText = classroomIdleStatusText(classroomState),
             ) {
                 ClassroomWorkspace(
                     model = classroomModel,
                     expanded = expanded,
+                    introBannerVisible = !classroomIntroBannerDismissed,
+                    onDismissIntroBanner = dismissClassroomIntroBanner,
                     onOpenBuilding = {
+                        // 先写完选中再 push，避免详情页打开时 selectedBuilding 仍为空。
                         if (nativeNavigationEnabled) {
                             onOpenNativeRoute(CLASSROOM_DETAIL_ROUTE_ID)
                         } else if (backStack.lastOrNull() != ClassroomDetailRoute) {
@@ -616,16 +691,32 @@ fun AuthenticatedAppShell(
                 )
             }
             ClassroomDetailRoute -> DestinationPage(
-                title = AppSection.CLASSROOMS.title,
+                // 二级页标题用教学楼名；顶栏返回即原生层级返回，页内不再放「返回教学楼」。
+                title = classroomState.selectedBuilding ?: AppSection.CLASSROOMS.title,
                 expanded = expanded,
                 refreshable = true,
                 isRefreshing = classroomState.isLoading,
                 showBack = true,
                 modifier = modifier,
+                idleStatusText = classroomIdleStatusText(classroomState),
             ) {
                 ClassroomBuildingWorkspace(
                     model = classroomModel,
-                    onBack = popBackStack,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            HomeworkDetailRoute -> DestinationPage(
+                // 二级页顶栏固定显示「作业详情」，页内不再重复标题；返回即原生层级返回。
+                title = "作业详情",
+                expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = true,
+                modifier = modifier,
+            ) {
+                HomeworkDetailWorkspace(
+                    model = homeworkModel,
+                    fileGateway = homeworkFileGateway,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -719,6 +810,14 @@ fun AuthenticatedAppShell(
                     entry<ClassroomDetailRoute> {
                         SectionDestination(
                             route = ClassroomDetailRoute,
+                            expanded = true,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+                        )
+                    }
+                    entry<HomeworkDetailRoute> {
+                        SectionDestination(
+                            route = HomeworkDetailRoute,
                             expanded = true,
                             modifier = Modifier.fillMaxSize(),
                             usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
@@ -869,6 +968,14 @@ fun AuthenticatedAppShell(
                         usesLegacySmartTransport = false,
                     )
                 }
+                entry<HomeworkDetailRoute> {
+                    SectionDestination(
+                        route = HomeworkDetailRoute,
+                        expanded = false,
+                        modifier = Modifier.fillMaxSize(),
+                        usesLegacySmartTransport = false,
+                    )
+                }
             },
         )
     }
@@ -877,6 +984,8 @@ fun AuthenticatedAppShell(
 private fun String.toAppRoute(): AppRoute? =
     if (this == CLASSROOM_DETAIL_ROUTE_ID) {
         ClassroomDetailRoute
+    } else if (this == HOMEWORK_DETAIL_ROUTE_ID) {
+        HomeworkDetailRoute
     } else {
         AppSection.entries.firstOrNull { it.name == this }
     }
@@ -983,6 +1092,12 @@ private fun AppSidebarItem(title: String, selected: Boolean, onClick: () -> Unit
     }
 }
 
+/**
+ * 紧凑顶栏。
+ *
+ * 内容区固定高度，避免「作业」有同步胶囊、「更多」无胶囊时标题上下漂。
+ * 一级 tab 无返回：标题左缘统一 20.dp；二级页有返回时标题跟在箭头后。
+ */
 @Composable
 private fun CompactAppTopBar(
     title: String,
@@ -998,113 +1113,221 @@ private fun CompactAppTopBar(
     // 顶栏若用 surface 会在状态栏下方露出一条浅色带子，破坏沉浸感。
     // iOS 的 Compose 宿主已改为全屏布局（原生 push 转场需要覆盖状态栏区域），
     // WindowInsets.statusBars 在 iOS 上恢复为真实值，顶栏统一应用状态栏内边距。
-    val statusBarInset = Modifier.statusBarsPadding()
+    // 内容行固定高度：大标题与右侧「已同步」胶囊垂直居中同一条线，各 tab 一致。
+    val topBarContentHeight = 52.dp
     Surface(color = MaterialTheme.colorScheme.background) {
         Row(
-            modifier = Modifier.fillMaxWidth()
-                .then(statusBarInset)
-                .padding(
-                    start = if (onBack != null) 10.dp else 20.dp,
-                    end = 16.dp,
-                    top = 14.dp,
-                    bottom = 14.dp,
-                ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(topBarContentHeight)
+                .padding(start = if (onBack != null) 6.dp else 20.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // “更多”子页提供返回上一级的箭头；一级页面没有返回。
+            // 二级页返回箭头；一级 tab（首页/作业/更多…）无返回，标题左缘固定。
             if (onBack != null) {
                 Surface(
                     onClick = onBack,
                     color = Color.Transparent,
                     shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.size(topBarContentHeight),
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .fillMaxSize()
                             .semantics { contentDescription = "返回" },
+                        contentAlignment = Alignment.Center,
                     ) {
                         BackChevron()
                     }
                 }
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(2.dp))
             }
             Text(
                 title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             // “登录中”优先于“同步中”，再回落到页面提供的空闲状态（如课表已同步）。
+            // 状态文案与刷新并入同一胶囊，避免「已同步」与孤立圆钮两截破碎感。
             val busyText = when {
                 isLoggingIn -> "登录中"
                 isRefreshing -> "同步中"
                 else -> null
             }
-            if (busyText != null) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    busyText,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                if (idleStatusText != null) {
+            when {
+                busyText != null -> {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 1.8.dp,
+                                color = LocalContentColor.current,
+                            )
+                            Text(
+                                busyText,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
+                onRefresh != null -> {
+                    Surface(
+                        onClick = onRefresh,
+                        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.semantics {
+                            contentDescription = if (idleStatusText != null) {
+                                "$idleStatusText，点按刷新"
+                            } else {
+                                "刷新"
+                            }
+                        },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (idleStatusText != null) {
+                                Text(
+                                    idleStatusText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                TopBarSyncedIcon(modifier = Modifier.size(15.dp))
+                            } else {
+                                TopBarRefreshIcon(modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+                }
+                idleStatusText != null -> {
                     Text(
                         idleStatusText,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (onRefresh != null) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        onClick = onRefresh,
-                        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        shape = RoundedCornerShape(999.dp),
-                        modifier = Modifier.semantics { contentDescription = "刷新" },
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            TopBarRefreshIcon(modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
             }
         }
     }
 }
 
-/** 顶栏刷新：圆弧 + 箭头，不引入 material-icons。 */
+/**
+ * 顶栏同步：双弧 + 两端箭头（Material/SF 风格的 sync，自绘不引入图标库）。
+ * Compose 角度：0° 在右侧，顺时针为正。
+ */
 @Composable
 private fun TopBarRefreshIcon(
     modifier: Modifier = Modifier,
     tint: Color = LocalContentColor.current,
 ) {
     Canvas(modifier = modifier) {
-        val stroke = 1.7.dp.toPx()
-        val r = size.minDimension * 0.38f
+        val strokeWidth = 1.7.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        val r = size.minDimension * 0.34f
         val c = Offset(size.width / 2f, size.height / 2f)
-        // 约 270° 圆弧
+        val topLeft = Offset(c.x - r, c.y - r)
+        val arcSize = Size(r * 2, r * 2)
+        val arrow = 3.4.dp.toPx()
+
+        fun pointOnCircle(deg: Float): Offset {
+            val rad = deg * PI / 180.0
+            return Offset(
+                c.x + r * kotlin.math.cos(rad).toFloat(),
+                c.y + r * kotlin.math.sin(rad).toFloat(),
+            )
+        }
+
+        /** 弧末端处画 V 形箭头，开口朝向切线（顺时针）。 */
+        fun arrowAt(endDeg: Float) {
+            val tip = pointOnCircle(endDeg)
+            // 顺时针切线方向 = endDeg + 90°（Canvas 顺时针）
+            val tangent = (endDeg + 90f) * PI / 180.0
+            val tx = kotlin.math.cos(tangent).toFloat()
+            val ty = kotlin.math.sin(tangent).toFloat()
+            // 法向（指向圆心外侧的侧翼）
+            val nx = -ty
+            val ny = tx
+            val back = Offset(tip.x - tx * arrow, tip.y - ty * arrow)
+            drawLine(
+                tint,
+                tip,
+                Offset(back.x + nx * arrow * 0.55f, back.y + ny * arrow * 0.55f),
+                strokeWidth,
+                StrokeCap.Round,
+            )
+            drawLine(
+                tint,
+                tip,
+                Offset(back.x - nx * arrow * 0.55f, back.y - ny * arrow * 0.55f),
+                strokeWidth,
+                StrokeCap.Round,
+            )
+        }
+
+        // 上半弧：约从右下扫到左上
         drawArc(
             color = tint,
-            startAngle = -40f,
-            sweepAngle = 280f,
+            startAngle = -30f,
+            sweepAngle = 150f,
             useCenter = false,
-            topLeft = Offset(c.x - r, c.y - r),
-            size = Size(r * 2, r * 2),
-            style = Stroke(width = stroke, cap = StrokeCap.Round),
+            topLeft = topLeft,
+            size = arcSize,
+            style = stroke,
         )
-        // 箭头尖
-        val tip = Offset(c.x + r * 0.72f, c.y - r * 0.55f)
-        drawLine(tint, tip, Offset(tip.x - 4.dp.toPx(), tip.y - 1.dp.toPx()), stroke, StrokeCap.Round)
-        drawLine(tint, tip, Offset(tip.x + 1.dp.toPx(), tip.y + 4.dp.toPx()), stroke, StrokeCap.Round)
+        arrowAt(120f)
+
+        // 下半弧：约从左上扫到右下
+        drawArc(
+            color = tint,
+            startAngle = 150f,
+            sweepAngle = 150f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = stroke,
+        )
+        arrowAt(300f)
+    }
+}
+
+/** 顶栏「已同步」对勾：与 TopBarRefreshIcon 同粗细的 Canvas 自绘，不引入图标库。 */
+@Composable
+private fun TopBarSyncedIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = 1.7.dp.toPx()
+        val w = size.width
+        val h = size.height
+        drawLine(
+            tint,
+            Offset(w * 0.20f, h * 0.54f),
+            Offset(w * 0.42f, h * 0.74f),
+            strokeWidth,
+            StrokeCap.Round,
+        )
+        drawLine(
+            tint,
+            Offset(w * 0.42f, h * 0.74f),
+            Offset(w * 0.80f, h * 0.28f),
+            strokeWidth,
+            StrokeCap.Round,
+        )
     }
 }
 
@@ -1132,19 +1355,45 @@ private fun BackChevron() {
     }
 }
 
+/**
+ * 紧凑底栏：Material3 官方 [NavigationBar] + [NavigationBarItem]。
+ * windowInsets 用 [WindowInsets.navigationBars]，由组件处理 Home Indicator / 手势条，
+ * 避免自绘固定高度把标签裁切或与系统安全区叠错。
+ */
 @Composable
 private fun CompactBottomNavigation(
     section: AppSection,
     onSectionSelected: (AppSection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    NavigationBar(modifier = modifier) {
+    NavigationBar(
+        modifier = modifier.fillMaxWidth(),
+        windowInsets = WindowInsets.navigationBars,
+    ) {
         BottomNavSections.forEach { item ->
+            val selected =
+                if (item == AppSection.MORE) section in MoreGroupSections else section == item
             NavigationBarItem(
-                selected = if (item == AppSection.MORE) section in MoreGroupSections else section == item,
+                selected = selected,
                 onClick = { onSectionSelected(item) },
-                icon = { CompactTabIcon(item) },
-                label = { Text(item.title, style = MaterialTheme.typography.labelSmall) },
+                icon = {
+                    // 固定 24.dp 图标盒，保证各 tab 标签基线一致。
+                    Box(
+                        modifier = Modifier.size(24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CompactTabIcon(item)
+                    }
+                },
+                label = {
+                    Text(
+                        item.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                    )
+                },
+                alwaysShowLabel = true,
             )
         }
     }
@@ -1259,43 +1508,107 @@ private fun CompactTabIcon(section: AppSection) {
     }
 }
 
+/**
+ * 「更多」页：iOS 设置式分块列表。
+ * - 学业：考试、课件
+ * - 校园：教室人数、邮箱
+ * - 下载：校历、成绩单
+ * - 设置单独一块垫底
+ */
 @Composable
 private fun MoreWorkspace(
     onOpenSection: (AppSection) -> Unit,
     modifier: Modifier,
 ) {
-    val entries = listOf(
-        AppSection.EXAMS,
-        AppSection.COURSEWARE,
-        AppSection.CLASSROOMS,
-        AppSection.MAILBOX,
-        AppSection.CALENDAR_DOWNLOAD,
-        AppSection.REPORT_CARD_DOWNLOAD,
-        AppSection.SETTINGS,
+    val sections = listOf(
+        MoreListSection(
+            header = "学业",
+            items = listOf(AppSection.EXAMS, AppSection.COURSEWARE),
+        ),
+        MoreListSection(
+            header = "校园",
+            items = listOf(AppSection.CLASSROOMS, AppSection.MAILBOX),
+        ),
+        MoreListSection(
+            header = "下载",
+            items = listOf(AppSection.CALENDAR_DOWNLOAD, AppSection.REPORT_CARD_DOWNLOAD),
+        ),
+        MoreListSection(
+            header = null,
+            items = listOf(AppSection.SETTINGS),
+        ),
     )
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        entries.forEach { item ->
-            Surface(
-                onClick = { onOpenSection(item) },
-                color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        item.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    MoreEntryChevron()
+        sections.forEach { section ->
+            MoreGroupedSection(
+                header = section.header,
+                items = section.items,
+                onOpenSection = onOpenSection,
+            )
+        }
+    }
+}
+
+private data class MoreListSection(
+    val header: String?,
+    val items: List<AppSection>,
+)
+
+@Composable
+private fun MoreGroupedSection(
+    header: String?,
+    items: List<AppSection>,
+    onOpenSection: (AppSection) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (header != null) {
+            Text(
+                header,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+        // 整块圆角容器，行间细分隔线（类似 iOS inset grouped）。
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                items.forEachIndexed { index, item ->
+                    Surface(
+                        onClick = { onOpenSection(item) },
+                        color = Color.Transparent,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                item.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Normal,
+                                modifier = Modifier.weight(1f),
+                            )
+                            MoreEntryChevron()
+                        }
+                    }
+                    if (index < items.lastIndex) {
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp)
+                                .height(0.5.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant.accessibleAlpha(0.55f)),
+                        )
+                    }
                 }
             }
         }
@@ -1305,19 +1618,19 @@ private fun MoreWorkspace(
 @Composable
 private fun MoreEntryChevron() {
     val color = MaterialTheme.colorScheme.onSurfaceVariant
-    Canvas(modifier = Modifier.size(10.dp, 16.dp)) {
-        val strokeWidth = 2.dp.toPx()
+    Canvas(modifier = Modifier.size(8.dp, 14.dp)) {
+        val strokeWidth = 1.8.dp.toPx()
         val mid = size.height / 2
         drawLine(
             color,
             Offset(2.dp.toPx(), 2.dp.toPx()),
-            Offset(size.width - 2.dp.toPx(), mid),
+            Offset(size.width - 1.dp.toPx(), mid),
             strokeWidth,
             cap = StrokeCap.Round,
         )
         drawLine(
             color,
-            Offset(size.width - 2.dp.toPx(), mid),
+            Offset(size.width - 1.dp.toPx(), mid),
             Offset(2.dp.toPx(), size.height - 2.dp.toPx()),
             strokeWidth,
             cap = StrokeCap.Round,
@@ -1409,14 +1722,21 @@ private fun GradeWorkspace(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
                     state.selectedGrade?.let { grade ->
-                        ModalBottomSheet(onDismissRequest = model::dismissGradeDetails) {
-                            GradeDetailContent(
+                        val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                        ModalBottomSheet(
+                            onDismissRequest = model::dismissGradeDetails,
+                            sheetState = detailSheetState,
+                            sheetGesturesEnabled = false,
+                            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+                        ) {
+                            GradeDetailSheetBody(
                                 grade = grade,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                                    .padding(horizontal = 24.dp)
+                                    .padding(bottom = 28.dp),
                             )
-                            Spacer(Modifier.height(24.dp))
                         }
                     }
                 }
@@ -1429,6 +1749,8 @@ private fun GradeWorkspace(
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = sheetState,
+            sheetGesturesEnabled = false,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             GradeFilterSheet(state = state, model = model)
         }
@@ -1571,7 +1893,8 @@ private fun GradeFilterSheet(
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Text("筛选与计算", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -2038,14 +2361,35 @@ private fun GradeDetailPanel(grade: Grade?, modifier: Modifier) {
         } else {
             GradeDetailContent(
                 grade = grade,
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+                contentPadding = PaddingValues(22.dp),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
 }
 
+/** 宽屏侧栏 / 弹层共用的成绩详情正文。 */
 @Composable
-private fun GradeDetailContent(grade: Grade, modifier: Modifier) {
+private fun GradeDetailContent(
+    grade: Grade,
+    modifier: Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        GradeDetailSheetBody(grade = grade)
+    }
+}
+
+@Composable
+private fun GradeDetailSheetBody(
+    grade: Grade,
+    modifier: Modifier = Modifier,
+) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text(
             "成绩详情",
@@ -2064,13 +2408,16 @@ private fun GradeDetailContent(grade: Grade, modifier: Modifier) {
         DetailLine("成绩", grade.courseScore)
         if (grade.detail.isNotBlank()) {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.45f),
                 shape = RoundedCornerShape(14.dp),
             ) {
                 Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
                     Text("组成与说明", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
-                    Text(grade.detail, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        formatGradeDetailForDisplay(grade.detail),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         } else {
