@@ -106,6 +106,8 @@ import team.bjtuss.bjtuselfservice.shared.data.otherfunction.DefaultOtherFunctio
 import team.bjtuss.bjtuselfservice.shared.data.otherfunction.SchoolOtherFunctionRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.classroom.DefaultClassroomRepository
 import team.bjtuss.bjtuselfservice.shared.data.classroom.SchoolClassroomRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.data.classroomoccupancy.DefaultClassroomOccupancyRepository
+import team.bjtuss.bjtuselfservice.shared.data.classroomoccupancy.SchoolClassroomOccupancyRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.home.CacheStoreHomeStatusLocalDataSource
 import team.bjtuss.bjtuselfservice.shared.data.home.DefaultHomeStatusRepository
 import team.bjtuss.bjtuselfservice.shared.data.home.SchoolHomeStatusRemoteDataSource
@@ -122,6 +124,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
+import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeScreenModel
@@ -573,6 +576,20 @@ fun LoginRoute(
         val classroomModel = remember(classroomRepository) {
             ClassroomScreenModel(classroomRepository)
         }
+        val classroomOccupancyRepository = remember {
+            DefaultClassroomOccupancyRepository(
+                remote = SchoolClassroomOccupancyRemoteDataSource(transport.value),
+            )
+        }
+        val classroomOccupancyModel = remember(classroomOccupancyRepository) {
+            ClassroomOccupancyScreenModel(
+                repository = classroomOccupancyRepository,
+                // 默认周跟随课表切片的学校当前教学周，课表未同步时回退第 1 周。
+                currentWeekProvider = {
+                    courseScheduleModel.state.value.currentWeek.takeIf { it > 0 } ?: 1
+                },
+            )
+        }
         val settingsModel = remember(shellProfile.studentId, cacheStore) {
             SettingsScreenModel(
                 initialPreferences = appPreferences,
@@ -604,6 +621,7 @@ fun LoginRoute(
             coursewareModel,
             otherFunctionModel,
             classroomModel,
+            classroomOccupancyModel,
             settingsModel,
             appPreferences,
             mailboxModel,
@@ -622,6 +640,7 @@ fun LoginRoute(
                 coursewareModel = coursewareModel,
                 otherFunctionModel = otherFunctionModel,
                 classroomModel = classroomModel,
+                classroomOccupancyModel = classroomOccupancyModel,
                 settingsModel = settingsModel,
                 loginSyncPreferences = appPreferences,
                 mailboxModel = mailboxModel,

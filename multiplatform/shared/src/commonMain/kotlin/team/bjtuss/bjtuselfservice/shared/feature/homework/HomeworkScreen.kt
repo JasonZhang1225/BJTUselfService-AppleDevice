@@ -226,7 +226,7 @@ fun HomeworkWorkspace(
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = sheetState,
-            sheetGesturesEnabled = false,
+            sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             HomeworkFilterSheet(state = state, model = model)

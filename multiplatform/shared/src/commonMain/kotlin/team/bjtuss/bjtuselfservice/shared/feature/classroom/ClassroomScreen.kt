@@ -34,9 +34,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -52,6 +56,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import team.bjtuss.bjtuselfservice.shared.data.classroom.ClassroomFetchFailure
 import team.bjtuss.bjtuselfservice.shared.domain.classroom.ClassroomCapacity
@@ -248,11 +253,12 @@ private fun ClassroomDetail(
             ErrorCard(failed.reason)
         }
 
+        // 搜索框用本地草稿 + 防抖再写 model：避免每敲一字就 StateFlow 全量重组 + 列表重算。
         // 不用 OutlinedTextField+固定 48.dp：M3 最小高度约 56.dp，硬压高度会裁切占位文案、
         // 垂直不居中，并在 iOS 聚焦时偶发布局/输入崩溃。自绘描边 + BasicTextField 可安全居中。
         ClassroomNameSearchField(
-            query = state.filter.nameQuery,
-            onQueryChange = model::setNameQuery,
+            committedQuery = state.filter.nameQuery,
+            onQueryCommit = model::setNameQuery,
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -303,14 +309,31 @@ private fun ClassroomDetail(
 
 /**
  * 紧凑搜索框：圆角描边 + 垂直居中占位/输入。
+ * 本地 [draft] 立刻跟手；停敲约 180ms 后再 [onQueryCommit]，避免 iOS 输入时卡键盘。
+ * 外部 [committedQuery] 变化（清除筛选等）会回写草稿。
  * 避免 OutlinedTextField 被压到 48.dp 时裁字、偏位与 iOS 聚焦崩溃。
  */
 @Composable
 private fun ClassroomNameSearchField(
-    query: String,
-    onQueryChange: (String) -> Unit,
+    committedQuery: String,
+    onQueryCommit: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var draft by remember { mutableStateOf(committedQuery) }
+    // 清除筛选 / 换楼等外部改动：仅当草稿已提交且外部值不同时同步，避免覆盖正在输入的字。
+    LaunchedEffect(committedQuery) {
+        if (draft != committedQuery) {
+            draft = committedQuery
+        }
+    }
+    LaunchedEffect(draft) {
+        if (draft == committedQuery) return@LaunchedEffect
+        delay(180)
+        if (draft != committedQuery) {
+            onQueryCommit(draft)
+        }
+    }
+
     val textStyle = MaterialTheme.typography.bodyMedium.merge(
         TextStyle(color = MaterialTheme.colorScheme.onSurface),
     )
@@ -331,8 +354,8 @@ private fun ClassroomNameSearchField(
             contentAlignment = Alignment.CenterStart,
         ) {
             BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
+                value = draft,
+                onValueChange = { draft = it },
                 singleLine = true,
                 textStyle = textStyle,
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -342,7 +365,7 @@ private fun ClassroomNameSearchField(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.CenterStart,
                     ) {
-                        if (query.isEmpty()) {
+                        if (draft.isEmpty()) {
                             Text(
                                 "搜索教室名",
                                 style = MaterialTheme.typography.bodyMedium,

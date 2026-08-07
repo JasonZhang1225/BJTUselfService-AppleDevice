@@ -63,6 +63,20 @@ class ClassroomScreenModelTest {
             assertFailsWith<IllegalArgumentException> { model.selectBuilding("不存在的楼") }
         }
     }
+
+    @Test
+    fun nameQueryUpdatesCachedVisibleListWithoutRecomputeGetter() = runBlocking {
+        val model = ClassroomScreenModel(FakeRepository(successInfo()))
+        model.selectBuilding("思源楼")
+        model.setNameQuery("SY10")
+        assertEquals(listOf("SY101", "SY102", "SY103"), model.state.value.visibleClassrooms.map { it.name })
+        model.setNameQuery("SY102")
+        assertEquals(listOf("SY102"), model.state.value.visibleClassrooms.map { it.name })
+        // 相同 query 应是 no-op（引用可不变）
+        val before = model.state.value
+        model.setNameQuery("SY102")
+        assertEquals(before, model.state.value)
+    }
 }
 
 private class FakeRepository(private val info: ClassroomBuildingInfo) : ClassroomRepository {

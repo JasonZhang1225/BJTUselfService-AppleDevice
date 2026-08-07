@@ -187,7 +187,7 @@ fun CourseScheduleWorkspace(
                         ModalBottomSheet(
                             onDismissRequest = model::dismissCourseDetails,
                             sheetState = detailSheetState,
-                            sheetGesturesEnabled = false,
+                            sheetGesturesEnabled = true,
                             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                         ) {
                             CourseDetailContent(
@@ -209,7 +209,7 @@ fun CourseScheduleWorkspace(
         ModalBottomSheet(
             onDismissRequest = { showSchedulePicker = false },
             sheetState = pickerSheetState,
-            sheetGesturesEnabled = false,
+            sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             Column(
