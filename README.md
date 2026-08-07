@@ -1,10 +1,14 @@
 # 🚄 交大自由行 (BJTU Self Service)
 
-> 北京交通大学校园服务 Android 客户端 —— 让校园生活触手可及
+> 北京交通大学校园服务客户端 —— 让校园生活触手可及  
+> 本仓库为 **Kotlin Multiplatform 三端刷新版**（Android / iOS / macOS），在原安卓项目功能基线 `v1.7.0` 上迁移与增强。
 
-[![Latest Release](https://img.shields.io/github/v/release/HFDLYS/BJTUselfService?style=flat-square&label=最新版本)](https://github.com/HFDLYS/BJTUselfService/releases/latest)
+[![KMP Pre-release](https://img.shields.io/github/v/release/JasonZhang1225/BJTUselfService-KMP-Refreshed?include_prereleases&style=flat-square&label=KMP%20版本)](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases)
+[![Upstream](https://img.shields.io/github/v/release/HFDLYS/BJTUselfService?style=flat-square&label=原作者安卓)](https://github.com/HFDLYS/BJTUselfService/releases/latest)
 [![Android](https://img.shields.io/badge/Android-9.0%2B-brightgreen?style=flat-square&logo=android)](https://developer.android.com)
-[![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org)
+[![iOS](https://img.shields.io/badge/iOS-侧载/开发构建-000000?style=flat-square&logo=apple)](https://developer.apple.com)
+[![macOS](https://img.shields.io/badge/macOS-12%2B%20Apple%20Silicon-000000?style=flat-square&logo=apple)](https://developer.apple.com)
+[![Kotlin](https://img.shields.io/badge/Kotlin-Multiplatform%20%2B%20Compose-7F52FF?style=flat-square&logo=kotlin)](https://kotlinlang.org)
 [![License](https://img.shields.io/github/license/HFDLYS/BJTUselfService?style=flat-square)](LICENSE)
 
 ## 📖 项目简介
@@ -12,6 +16,13 @@
 **交大自由行** 是一款专为北京交通大学师生打造的校园服务应用。通过自动登录 MIS 系统，将成绩查询、课程表、考试安排、作业管理、邮件查看等常用校园功能整合到一个简洁直观的界面中。
 
 所有数据解析（包括验证码识别）均在**本地完成**，无需上传至第三方服务器，充分保障用户隐私安全。
+
+本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做三端共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。当前 pre-release 版本号 **1.7.1 KMP**。
+
+相对原版新增/增强（节选）：
+- **教室占用查询**（教务 `room_view`，原 1.7.0 安卓无）
+- **成绩按课程性质筛选**（必修 / 限选 / 任选 / 体育）
+- 三端统一壳层：「更多」收纳、顶栏同步胶囊、平板/桌面侧栏分屏与比例分栏
 
 ## ✨ 功能特性
 
@@ -37,85 +48,92 @@
 - 剩余时间不足阈值时自动发送邮件提醒
 
 ### 🏫 校园工具
-- **教室人数识别** — 实时查看教室人数侦测结果
+- **教室人数估计** — 查看教室人数侦测结果（第三方接口）
+- **教室占用查询** — 按教学楼 / 教学周查看排课与占用（KMP 新增）
 - **校历下载** — 一键下载当前学年校历
 - **成绩单下载** — 支持中英文成绩单快捷下载
-- **应用内更新** — 启动时自动检测新版本
+- **应用内更新** — 原安卓版启动时自动检测新版本；KMP 正式分发后以各平台商店或本仓库 Release 为准
 
 ## 🏗️ 技术架构
 
+**原安卓工程（冻结）** 仍为 Jetpack Compose + Hilt + Room + OkHttp/Jsoup + PyTorch 验证码。
+
+**KMP 刷新版（`multiplatform/`）** 共享业务与大部分 UI：
+
 ```
 ┌─────────────────────────────────────────────┐
-│                   UI 层                      │
-│         Jetpack Compose + Material 3         │
-│   (Screen / Component / Navigation)          │
+│              UI（Compose Multiplatform）      │
+│     Android / iOS / macOS 共享 Screen + 壳层  │
 ├─────────────────────────────────────────────┤
-│                 逻辑层                       │
-│          ViewModel (MVVM)                    │
-│          Dagger Hilt (DI)                    │
+│           shared 领域 / 仓库 / 登录协议        │
+│  SQLDelight 缓存 · 平台 Keystore/Keychain     │
+│  Ktor + 各平台引擎 · HTML 解析                 │
 ├─────────────────────────────────────────────┤
-│                 数据层                       │
-│    Repository → DAO → Room Database          │
-│    OkHttp3 + Jsoup (网络请求与 HTML 解析)     │
-│    DataStore Preferences (本地配置)           │
-├─────────────────────────────────────────────┤
-│                 AI 模块                      │
-│    PyTorch Android (验证码本地识别)            │
+│  验证码：Android TorchScript / Apple Core ML  │
 └─────────────────────────────────────────────┘
 ```
 
-### 主要依赖
+### 主要依赖（KMP）
 
 | 类别 | 技术 |
 |------|------|
-| UI 框架 | Jetpack Compose + Material 3 |
-| 依赖注入 | Dagger Hilt |
-| 网络请求 | OkHttp3 |
-| HTML 解析 | Jsoup |
-| 本地数据库 | Room |
-| 序列化 | Kotlin Serialization / Gson / Moshi |
-| AI 推理 | PyTorch Android |
-| 日历组件 | Kizitonwose Calendar |
-| 动画 | Lottie |
+| UI | Compose Multiplatform + Material 3 |
+| 网络 | Ktor |
+| 本地缓存 | SQLDelight |
+| 凭据 | Android Keystore / Apple Keychain |
+| 验证码 | Android TorchScript、Apple Core ML |
+| 宿主 | androidApp · iosApp · desktopApp |
 
 ## 🚀 快速开始
 
 ### 环境要求
 
-- Android Studio Hedgehog 或更高版本
-- JDK 17
-- Android SDK，compileSdk 34
-- 设备/模拟器 Android 9.0 (API 28) 以上
+- JDK 17+（推荐 Android Studio JBR 21 或本机 Temurin）
+- Android SDK（KMP `androidApp` 当前 compileSdk 见 `multiplatform/`）
+- Xcode（构建 iOS / 相关原生辅助）
+- Apple Silicon macOS（Desktop 当前 arm64 自包含包）
 
-### 构建步骤
+### 构建步骤（KMP）
 
 ```bash
-# 1. 克隆仓库
-git clone git@github.com:HFDLYS/BJTUselfService.git
-cd BJTUselfService
+# 1. 克隆本 fork
+git clone https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed.git
+cd BJTUselfService-KMP-Refreshed
 
-# 2. 赋予 Gradle Wrapper 执行权限
+# 2. 进入 multiplatform 工程
+cd multiplatform
 chmod +x gradlew
 
-# 3. 构建 Debug APK
-export ANDROID_HOME=~/Android/Sdk
-./gradlew assembleDebug
+# 3. Android debug
+./gradlew :androidApp:assembleDebug
 
-# 4. 安装到设备
-adb install app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+# 4. macOS DMG（Apple Silicon）
+./gradlew :desktopApp:packageDmg
+
+# iOS 请用 Xcode 打开 multiplatform/iosApp，按开发证书签名安装；
+# 或本地打未签名 IPA 后侧载（见 builtapps/README.md）。
 ```
 
-或者直接用 **Android Studio** 打开项目，点击 ▶ Run 即可。
+原作者纯安卓工程仍在仓库根目录，可对照构建：
 
-### CI/CD
+```bash
+./gradlew :app:assembleDebug
+```
 
-项目配置了 GitHub Actions 自动化流程：
-- **Debug 构建** — 每次推送自动构建验证
-- **Release 发布** — 推送 `v*` 标签时自动构建、签名并发布 APK 到 GitHub Releases
+### 仓库与发布
 
-## 📱 支持架构
+| 仓库 | 说明 |
+|------|------|
+| [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) | 原作者安卓版与正式 Release |
+| [JasonZhang1225/BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed) | 本 KMP 三端 fork 与 pre-release |
 
-当前仅打包 **arm64-v8a** 架构，适配绝大多数现代 Android 设备。
+本 fork 的 1.7.1 KMP 预发布包由本地构建后上传 Release，**不依赖**上游 `v*` 标签自动打包工作流。
+
+## 📱 支持平台
+
+- **Android**：minSdk 28+，KMP 包名 `team.bjtuss.bjtuselfservice.kmp`（与原版包名不同）
+- **iOS**：开发/侧载构建（未签名 IPA 需自行重签名）
+- **macOS**：Apple Silicon 自包含 `.app` / `.dmg`（开发 ad-hoc 签名，未公证）
 
 ## 🔒 隐私与安全
 
@@ -139,3 +157,6 @@ adb install app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
   - 提供了成绩自选课程计算
 - [wangxiaobo1747](https://github.com/wangxiaobo1747) 
   - 提供了自定义壁纸和桌面课程表小组件
+
+- [JasonZhang1225](https://github.com/JasonZhang1225)
+  - KMP 三端迁移（Android / iOS / macOS）与后续壳层、教室占用等增强
