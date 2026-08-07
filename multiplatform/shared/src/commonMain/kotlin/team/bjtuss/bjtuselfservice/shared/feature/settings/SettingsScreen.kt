@@ -141,11 +141,22 @@ fun SettingsWorkspace(
             ) {
                 Text("版本与项目", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${platform.displayName} · KMP 迁移构建\n功能对齐基线：v1.7.0",
+                    "${platform.displayName} · KMP 迁移构建 v1.7.1\n功能对齐基线：原安卓 v1.7.0",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                OutlinedButton(onClick = { uriHandler.openUri("https://github.com/HFDLYS/BJTUselfService") }) {
-                    Text("打开 GitHub 项目")
+                OutlinedButton(
+                    onClick = { uriHandler.openUri("https://github.com/HFDLYS/BJTUselfService") },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("原作者 GitHub（安卓原版）")
+                }
+                OutlinedButton(
+                    onClick = {
+                        uriHandler.openUri("https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("本仓库 GitHub（KMP 三端）")
                 }
                 Text(
                     when (platform.family) {
