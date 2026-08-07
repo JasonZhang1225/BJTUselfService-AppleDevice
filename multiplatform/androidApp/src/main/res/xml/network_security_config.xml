@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 明文流量只放行智慧教学平台旧端点的固定 IP（用户 2026-08-04 授权，与 Apple 端一致），
+<!-- 明文流量只放行两个既有第三方旧端点（用户 2026-08-04 授权，与 Apple 端一致）：
+     智慧教学平台旧端点的固定 IP，以及教室人数估计的 yaya.csoci.com:2333；
      其余域名保持默认 HTTPS 基线。 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">123.121.147.7</domain>
+        <domain includeSubdomains="false">yaya.csoci.com</domain>
     </domain-config>
 </network-security-config>

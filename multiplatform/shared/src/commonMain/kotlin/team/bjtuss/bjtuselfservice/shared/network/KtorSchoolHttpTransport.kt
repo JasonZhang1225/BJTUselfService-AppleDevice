@@ -32,7 +32,12 @@ class KtorSchoolHttpTransport(
     private val engineFactory: HttpClientEngineFactory<*>,
 ) : SchoolHttpTransport {
     private var cookieStorage = AcceptAllCookiesStorage()
-    private var client = newClient(cookieStorage)
+    private var client = newClient(cookieStorage, sessionScoped = true)
+    /**
+     * 公开页旁路：无 Cookie、不进 [requestMutex]、更短超时。
+     * 仅用于 bksy 校历等不依赖登录的页面；切勿用它拉 aa/CAS。
+     */
+    private val publicClient = newClient(AcceptAllCookiesStorage(), sessionScoped = false)
     /**
      * 登录后课表/作业/考试/首页会并行刷新，共享同一 Cookie jar。
      * Ktor AcceptAllCookiesStorage 非线程安全：并发 execute 会偶发 NETWORK 失败
@@ -52,8 +57,25 @@ class KtorSchoolHttpTransport(
     }
 
     override suspend fun execute(request: SchoolHttpRequest): SchoolHttpResponse = requestMutex.withLock {
+        executeOn(client, request)
+    }
+
+    override suspend fun executePublic(request: SchoolHttpRequest): SchoolHttpResponse =
+        // 故意不拿 requestMutex：公开页挂起不得堵住 aa 会话查询。
+        executeOn(publicClient, request)
+
+    override fun clearSession() {
+        client.close()
+        cookieStorage = AcceptAllCookiesStorage()
+        client = newClient(cookieStorage, sessionScoped = true)
+    }
+
+    private suspend fun executeOn(
+        httpClient: HttpClient,
+        request: SchoolHttpRequest,
+    ): SchoolHttpResponse {
         try {
-            val response = client.request(request.url) {
+            val response = httpClient.request(request.url) {
                 method = when (request.method) {
                     SchoolHttpMethod.GET -> HttpMethod.Get
                     SchoolHttpMethod.POST -> HttpMethod.Post
@@ -91,7 +113,7 @@ class KtorSchoolHttpTransport(
                     )
                 }
             }
-            SchoolHttpResponse(
+            return SchoolHttpResponse(
                 statusCode = response.status.value,
                 finalUrl = response.call.request.url.toString(),
                 headers = response.headers.entries().associate { it.key to it.value },
@@ -102,12 +124,6 @@ class KtorSchoolHttpTransport(
         } catch (error: Throwable) {
             throw SchoolNetworkException("School request failed", error)
         }
-    }
-
-    override fun clearSession() {
-        client.close()
-        cookieStorage = AcceptAllCookiesStorage()
-        client = newClient(cookieStorage)
     }
 
     override suspend fun sessionCookiesFor(url: String): List<SchoolSessionCookie> =
@@ -122,7 +138,10 @@ class KtorSchoolHttpTransport(
             }
         }
 
-    private fun newClient(storage: AcceptAllCookiesStorage): HttpClient = HttpClient(engineFactory) {
+    private fun newClient(
+        storage: AcceptAllCookiesStorage,
+        sessionScoped: Boolean,
+    ): HttpClient = HttpClient(engineFactory) {
         followRedirects = true
         install(HttpCookies) {
             this.storage = storage
@@ -131,11 +150,18 @@ class KtorSchoolHttpTransport(
             agent = SCHOOL_USER_AGENT
         }
         install(HttpTimeout) {
-            // 智慧教学平台在递归拉取课件资源树时响应较慢（真实观察到个别子
-            // 文件夹请求触发默认超时）；给明文旧链路与常规请求留出足够余量。
-            requestTimeoutMillis = 30_000
-            connectTimeoutMillis = 15_000
-            socketTimeoutMillis = 30_000
+            if (sessionScoped) {
+                // 智慧教学平台在递归拉取课件资源树时响应较慢（真实观察到个别子
+                // 文件夹请求触发默认超时）；给明文旧链路与常规请求留出足够余量。
+                requestTimeoutMillis = 30_000
+                connectTimeoutMillis = 15_000
+                socketTimeoutMillis = 30_000
+            } else {
+                // 公开页（如 bksy 校历）：代理下挂起时尽快失败，别拖业务 UI。
+                requestTimeoutMillis = 8_000
+                connectTimeoutMillis = 5_000
+                socketTimeoutMillis = 8_000
+            }
         }
     }
 }

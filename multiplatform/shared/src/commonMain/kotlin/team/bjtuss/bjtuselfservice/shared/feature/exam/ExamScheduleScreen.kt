@@ -160,7 +160,7 @@ fun ExamScheduleWorkspace(
                         ModalBottomSheet(
                             onDismissRequest = model::dismissExamDetails,
                             sheetState = detailSheetState,
-                            sheetGesturesEnabled = false,
+                            sheetGesturesEnabled = true,
                             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                         ) {
                             ExamDetailSheetBody(
@@ -182,7 +182,7 @@ fun ExamScheduleWorkspace(
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
-            sheetGesturesEnabled = false,
+            sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             ExamFilterSheet(

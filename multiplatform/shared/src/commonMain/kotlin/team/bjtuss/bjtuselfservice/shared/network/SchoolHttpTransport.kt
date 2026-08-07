@@ -79,7 +79,20 @@ data class SchoolHttpResponse(
 }
 
 interface SchoolHttpTransport {
+    /**
+     * 会话相关请求（CAS / aa / 智慧平台等）。实现应串行化，保护共享 Cookie jar。
+     */
     suspend fun execute(request: SchoolHttpRequest): SchoolHttpResponse
+
+    /**
+     * 不依赖登录会话的公开页请求。
+     *
+     * 默认回退到 [execute]。[KtorSchoolHttpTransport] 用独立客户端、不占会话请求锁，
+     * 避免 bksy 校历等跨域公开页在代理下挂起时把所有 aa 查询堵在队列里
+     *（教室占用切周转圈就是这个症状）。
+     */
+    suspend fun executePublic(request: SchoolHttpRequest): SchoolHttpResponse = execute(request)
+
     suspend fun sessionCookiesFor(url: String): List<SchoolSessionCookie> = emptyList()
     fun clearSession()
 }

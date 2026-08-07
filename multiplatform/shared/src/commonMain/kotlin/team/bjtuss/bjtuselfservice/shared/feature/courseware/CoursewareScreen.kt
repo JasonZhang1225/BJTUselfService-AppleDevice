@@ -292,7 +292,7 @@ fun CoursewareWorkspace(
         ModalBottomSheet(
             onDismissRequest = { showCoursePicker = false },
             sheetState = pickerSheetState,
-            sheetGesturesEnabled = false,
+            sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             Column(
@@ -575,7 +575,7 @@ private fun CoursewareCompactWorkspace(
         ModalBottomSheet(
             onDismissRequest = { model.selectNode("") },
             sheetState = detailSheetState,
-            sheetGesturesEnabled = false,
+            sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             CoursewareDetailSheetBody(

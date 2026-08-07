@@ -1,7 +1,7 @@
 # BJTUselfService KMP 迁移工作记忆
 
 > 最后更新：2026-08-07
-> 当前分支：`main`（跟踪 `mine/main` → `JasonZhang1225/BJTUselfService-AppleDevice`，本地可领先远端；2026-08-07 紧凑端 UI 真机验收里程碑已提交）
+> 当前分支：`main`（跟踪 `mine/main` → `JasonZhang1225/BJTUselfService-AppleDevice`，本地可领先远端；M11 教室占用查询里程碑待本提交）
 > 分支创建点：`9d8da18`；发布与功能基线：`v1.7.0@419313d`
 > 远端历史：2026-08-03 已强制改写为单根提交 `46f6ef9`；远端仅 `HEAD/main`、无标签/PR/下游 fork。旧 SHA 仍可被 GitHub 缓存直接解析；Support 要求先轮换泄露凭据，用户决定不再提交清缓存工单并自行更换密码。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
@@ -9,22 +9,18 @@
 
 ## 1. 本阶段已做到（≤10 行）
 
-- **主线已通**：M0 基线/工具链、M1 骨架、M2 领域层、M3 登录网络解析、M4 持久化（仅剩 iOS Keychain 签名往返）、M5 首页+八个业务切片、M6 平台能力、M7 三端真实登录；细节见 `history_full.md`。
-- **2026-08-07 紧凑端 UI 真机验收里程碑（用户真机目视通过）**：作业详情改原生二级页（弃 ModalBottomSheet）、首页补「已同步 ✓」胶囊、课件选课弹窗修复 + 并发预载、教室搜索/引导 Banner、考试 chips、成绩详情断行与信息流判等防抖；compose 升 1.12.0-beta03 + material3 1.12.0-alpha03。细节归档 `history_full.md`。
-- **2026-08-06 紧凑端列表 UI + 刷新策略**：成绩/作业/课表布局与去下拉刷新见归档；顶栏 sync 胶囊、详情断行、考试筛选 sheet 等已合入，细节见 `history_full.md`。
-- **2026-08-05 成绩课程性质（M9）**：培养方案交叉比对映射必修/限选/任选/体育，库 v2→v3；自选模式五类三态 chips；待问学校见 `体育课疑惑.md`。
-- **2026-08-05 平台原生导航（M10）**：紧凑二/三级页 Android Activity / iOS UIKit push；一级 tab 即时切换。用户已目视确认；细节见 `history_full.md` M10。
-- **2026-08-04 紧凑壳 + 静默自动登录**：底栏 5 tab；冷启动有档案则跳过登录页；自动登录失败主界面引导。归档见 `history_full.md`。
+- **2026-08-07 M11 教室占用查询（新功能，老安卓无）**：教务 `room_view` 两级楼→占用；`jxlh` 数字 ID；学期/周弹层；bksy 校历 `executePublic`；弹层选周用详情 hostScope（修「同步中」卡死）；空闲格软绿。同批：底栏外提+水波纹、人数估计搜索防抖、Android `yaya.csoci.com` 明文、更多校园顺序/改名、sheet 可下滑、iOS embed 补 `UNLOCALIZED_RESOURCES_FOLDER_PATH`。细节见 `history_full.md` M11。
+- **主线已通**：M0–M7、M9 成绩性质、M10 平台原生导航、紧凑壳/静默登录、08-07 紧凑端 UI 真机验收；细节见 `history_full.md`。
 - **M5.5 验证码/登录链路已实现**：Android TorchScript、Apple Core ML，冒烟 21/24；自动识别默认开；主登录页隐藏验证码、失败最多 3 次后弹手动框。**未完**：真机 Password AutoFill/Keychain 时序、扩样 ≥300。
 - **等外部条件**：真实数据变化样本、真实作业上传、退出账号往返（会话不再需要时）。
 - **缺权限/签名**：iOS Keychain 合法签名往返、Apple Developer 正式签名/公证/隐私问卷。
-- **当前最优先顺序**：紧凑端 UI 真机验收 → M5.5 登录/凭据收尾 → 自然样本与公版门禁；M5.6 用户逐页确认 UI 在 M5.5 整段完成后。
 - **本地分发包**：根目录 `builtapps/`（gitignore）含 1.7.0 原版与 KMP 三端 debug/开发签名包，非正式发布。
 
 ## 2. 当前痛点（≤8 条）
 
-- **紧凑端 UI 真机验收已收官（2026-08-07）**：残留两项观察——明文授权 banner 只显示一条待确认；课表课程详情弹窗仍是 `skipPartiallyExpanded=false`（全项目唯一），若用户反馈卡半高再对齐 true。
-- **CMP 下拉刷新与系统过滚不兼容（已放弃）**：LazyColumn 主手势不在可挂 UIRefreshControl 的 UIScrollView 上；Material PTR 与过滚互抢。用户决定日后 SwiftUI 重写再做 `.refreshable`。
+- **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1；`android.experimental.disableCompileSdkChecks=true` 已绕过。升 AGP 或装 android-37 后复查。
+- **紧凑端 UI**：明文授权 banner 只显示一条待确认；课表课程详情弹窗仍 `skipPartiallyExpanded=false`（全项目唯一），若反馈卡半高再对齐 true。
+- **CMP 下拉刷新与系统过滚不兼容（已放弃）**：用户决定日后 SwiftUI 重写再做 `.refreshable`。
 - **验证码发布级准确率仍待扩样**：24 张冒烟集 87.5%；公版前需 ≥300 张独立留出集。
 - **登录页仍缺 iPhone 真机 Password AutoFill→自动登录时序与 Keychain 专项复验**。
 - **课件深层按需请求仍缺真实文件夹样本**；信息流增删改仍无服务器自然变化样本。

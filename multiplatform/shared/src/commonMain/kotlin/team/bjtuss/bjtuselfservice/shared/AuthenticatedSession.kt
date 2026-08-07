@@ -4,6 +4,7 @@ import team.bjtuss.bjtuselfservice.shared.cache.AppPreferences
 import team.bjtuss.bjtuselfservice.shared.data.home.HomeChangeFeedRepository
 import team.bjtuss.bjtuselfservice.shared.auth.StudentProfile
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
+import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleScreenModel
@@ -33,6 +34,7 @@ class AuthenticatedSession(
     val coursewareModel: CoursewareScreenModel,
     val otherFunctionModel: OtherFunctionScreenModel,
     val classroomModel: ClassroomScreenModel,
+    val classroomOccupancyModel: ClassroomOccupancyScreenModel,
     val settingsModel: SettingsScreenModel,
     val loginSyncPreferences: AppPreferences,
     val mailboxModel: MailboxScreenModel,
@@ -61,7 +63,9 @@ fun isNativeDetailRoute(routeId: String): Boolean =
     routeId == "EXAMS" ||
         routeId == "COURSEWARE" ||
         routeId == "CLASSROOMS" ||
+        routeId == "CLASSROOM_OCCUPANCY" ||
         routeId == "CLASSROOM_DETAIL" ||
+        routeId == "CLASSROOM_OCCUPANCY_DETAIL" ||
         routeId == "HOMEWORK_DETAIL" ||
         routeId == "MAILBOX" ||
         routeId == "CALENDAR_DOWNLOAD" ||

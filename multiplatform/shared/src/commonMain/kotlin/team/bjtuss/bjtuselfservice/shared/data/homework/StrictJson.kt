@@ -21,6 +21,15 @@ internal fun parseStrictJsonObject(text: String): Map<String, StrictJsonValue>? 
     null
 }
 
+/** 解析 JSON 数组根值（如校历页 hidJson）；根不是数组或解析失败返回 null。 */
+internal fun parseStrictJsonArray(text: String): List<StrictJsonValue>? = try {
+    val parser = StrictJsonParser(text)
+    val value = parser.parse()
+    (value as? StrictJsonValue.ArrayValue)?.items
+} catch (_: IllegalArgumentException) {
+    null
+}
+
 internal fun Map<String, StrictJsonValue>.hasSuccessStatus(): Boolean = when (val status = string("STATUS")) {
     null, "", "0" -> true
     else -> false

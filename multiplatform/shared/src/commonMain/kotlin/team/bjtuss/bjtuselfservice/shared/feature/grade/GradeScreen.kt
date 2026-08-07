@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.yield
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
@@ -136,6 +137,8 @@ import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomBuildingWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomUiState
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyBuildingWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxScreenModel
@@ -173,6 +176,7 @@ private enum class AppSection(val title: String) : AppRoute {
     EXAMS("考试安排"),
     HOMEWORK("作业"),
     COURSEWARE("课件下载"),
+    CLASSROOM_OCCUPANCY("教室占用查询"),
     CLASSROOMS("教室人数估计"),
     MAILBOX("邮箱"),
     CALENDAR_DOWNLOAD("校历下载"),
@@ -195,6 +199,7 @@ private val MoreGroupSections = setOf(
     AppSection.EXAMS,
     AppSection.COURSEWARE,
     AppSection.CLASSROOMS,
+    AppSection.CLASSROOM_OCCUPANCY,
     AppSection.MAILBOX,
     AppSection.CALENDAR_DOWNLOAD,
     AppSection.REPORT_CARD_DOWNLOAD,
@@ -206,6 +211,10 @@ private const val LOGIN_SYNC_RETRY_DELAY_MILLIS = 700L
 /** 教室详情的第三级路由：独立于一级/二级 section。 */
 private data object ClassroomDetailRoute : AppRoute
 const val CLASSROOM_DETAIL_ROUTE_ID = "CLASSROOM_DETAIL"
+
+/** 教室占用的第三级路由：独立于一级/二级 section，仿教室详情。 */
+private data object ClassroomOccupancyDetailRoute : AppRoute
+const val CLASSROOM_OCCUPANCY_DETAIL_ROUTE_ID = "CLASSROOM_OCCUPANCY_DETAIL"
 
 /** 作业详情的二级路由：独立于一级 section，仿教室详情。 */
 private data object HomeworkDetailRoute : AppRoute
@@ -237,6 +246,7 @@ fun AuthenticatedAppShell(
     val coursewareModel = session.coursewareModel
     val otherFunctionModel = session.otherFunctionModel
     val classroomModel = session.classroomModel
+    val classroomOccupancyModel = session.classroomOccupancyModel
     val settingsModel = session.settingsModel
     val loginSyncPreferences = session.loginSyncPreferences
     val mailboxModel = session.mailboxModel
@@ -251,6 +261,7 @@ fun AuthenticatedAppShell(
     val homeworkState by homeworkModel.state.collectAsState()
     val coursewareState by coursewareModel.state.collectAsState()
     val classroomState by classroomModel.state.collectAsState()
+    val classroomOccupancyState by classroomOccupancyModel.state.collectAsState()
     val mailboxState by mailboxModel.state.collectAsState()
     val homeState by homeModel.state.collectAsState()
     val homeChanges by homeChangeFeed.records.collectAsState()
@@ -271,9 +282,9 @@ fun AuthenticatedAppShell(
         classroomIntroBannerDismissed = true
     }
     val scope = rememberCoroutineScope()
-    // 紧凑端底栏属于一级 destination，自身随场景一起切换；NavDisplay 始终保持全屏尺寸，
-    // 避免 push/pop 时因底栏显隐改变内容高度。
-    // Material3 NavigationBar 内容高 80.dp + windowInsets.navigationBars（官方安全区）。
+    // 紧凑端底栏挂在 NavDisplay 外层（与内容解耦）：一级 tab 切换时底栏实例保持存活，
+    // 避免整页销毁把 NavigationBarItem 的按压水波纹掐断。
+    // 内容区预留底栏高度：Material3 NavigationBar 80.dp + navigationBars 安全区。
     val compactBottomBarOverlayPadding = if (windowClass != WindowClass.Expanded) {
         80.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     } else {
@@ -289,6 +300,7 @@ fun AuthenticatedAppShell(
     val currentRoute = backStack.last()
     val section: AppSection = when (currentRoute) {
         ClassroomDetailRoute -> AppSection.CLASSROOMS
+        ClassroomOccupancyDetailRoute -> AppSection.CLASSROOM_OCCUPANCY
         HomeworkDetailRoute -> AppSection.HOMEWORK
         is AppSection -> currentRoute
     }
@@ -299,20 +311,26 @@ fun AuthenticatedAppShell(
     }
     val navigateToSection: (AppSection) -> Unit = { target ->
         if (backStack.lastOrNull() != target) {
-            if (
-                nativeNavigationEnabled &&
-                target in MoreGroupSections &&
-                target != AppSection.MORE
-            ) {
-                onOpenNativeRoute(target.name)
-            } else if (target in MoreGroupSections && target != AppSection.MORE) {
-                // 二级页：保留当前来源并 push，返回可准确预览来源页。
-                backStack.add(target)
-            } else {
-                // 一级底栏页：单层替换，不在下方压 HOME。
-                // 旧 popUpTo(HOME) 会形成 [HOME, 课表/作业…]，边缘侧滑/系统返回会误回首页。
-                backStack.clear()
-                backStack.add(target)
+            // 先 yield 一帧：让 NavigationBarItem 的 press/ripple 先上屏，
+            // 再替换 destination，避免首次点 tab 时内容重组抢掉按压反馈。
+            scope.launch {
+                yield()
+                if (backStack.lastOrNull() == target) return@launch
+                if (
+                    nativeNavigationEnabled &&
+                    target in MoreGroupSections &&
+                    target != AppSection.MORE
+                ) {
+                    onOpenNativeRoute(target.name)
+                } else if (target in MoreGroupSections && target != AppSection.MORE) {
+                    // 二级页：保留当前来源并 push，返回可准确预览来源页。
+                    backStack.add(target)
+                } else {
+                    // 一级底栏页：单层替换，不在下方压 HOME。
+                    // 旧 popUpTo(HOME) 会形成 [HOME, 课表/作业…]，边缘侧滑/系统返回会误回首页。
+                    backStack.clear()
+                    backStack.add(target)
+                }
             }
         }
     }
@@ -333,6 +351,7 @@ fun AuthenticatedAppShell(
                 AppSection.HOMEWORK -> homeworkModel.refresh()
                 AppSection.COURSEWARE -> coursewareModel.refresh()
                 AppSection.CLASSROOMS -> classroomModel.refresh()
+                AppSection.CLASSROOM_OCCUPANCY -> classroomOccupancyModel.refresh()
                 AppSection.MAILBOX -> mailboxModel.refresh()
                 AppSection.CALENDAR_DOWNLOAD -> Unit
                 AppSection.REPORT_CARD_DOWNLOAD -> Unit
@@ -411,11 +430,12 @@ fun AuthenticatedAppShell(
         idleStatusText: String? = null,
         content: @Composable () -> Unit,
     ) {
-        val showsCompactBottomBar = !expanded && !showBack && compactBottomBarOverlayPadding > 0.dp
+        // 一级页为底栏预留高度；底栏本身在 NavDisplay 外层，不随 destination 销毁。
+        val reserveBottomBarSpace = !expanded && !showBack && compactBottomBarOverlayPadding > 0.dp
         Box(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(
-                    bottom = if (showsCompactBottomBar) compactBottomBarOverlayPadding else 0.dp,
+                    bottom = if (reserveBottomBarSpace) compactBottomBarOverlayPadding else 0.dp,
                 ),
             ) {
                 if (!expanded) {
@@ -441,14 +461,6 @@ fun AuthenticatedAppShell(
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     content()
                 }
-            }
-            if (showsCompactBottomBar) {
-                // 底栏随一级场景一起运动；二/三级场景在其上方，返回预览不会提前跳出底栏。
-                CompactBottomNavigation(
-                    section = section,
-                    onSectionSelected = navigateToSection,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
             }
         }
     }
@@ -690,6 +702,28 @@ fun AuthenticatedAppShell(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+            AppSection.CLASSROOM_OCCUPANCY -> DestinationPage(
+                title = AppSection.CLASSROOM_OCCUPANCY.title,
+                expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = true,
+                modifier = modifier,
+            ) {
+                ClassroomOccupancyWorkspace(
+                    model = classroomOccupancyModel,
+                    expanded = expanded,
+                    onOpenBuilding = {
+                        // 先写完选中再 push，避免详情页打开时 selectedBuilding 仍为空。
+                        if (nativeNavigationEnabled) {
+                            onOpenNativeRoute(CLASSROOM_OCCUPANCY_DETAIL_ROUTE_ID)
+                        } else if (backStack.lastOrNull() != ClassroomOccupancyDetailRoute) {
+                            backStack.add(ClassroomOccupancyDetailRoute)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             ClassroomDetailRoute -> DestinationPage(
                 // 二级页标题用教学楼名；顶栏返回即原生层级返回，页内不再放「返回教学楼」。
                 title = classroomState.selectedBuilding ?: AppSection.CLASSROOMS.title,
@@ -702,6 +736,20 @@ fun AuthenticatedAppShell(
             ) {
                 ClassroomBuildingWorkspace(
                     model = classroomModel,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            ClassroomOccupancyDetailRoute -> DestinationPage(
+                // 二级页标题用教学楼名；顶栏返回即原生层级返回，页内不再放「返回教学楼」。
+                title = classroomOccupancyState.selectedBuilding?.name ?: AppSection.CLASSROOM_OCCUPANCY.title,
+                expanded = expanded,
+                refreshable = true,
+                isRefreshing = classroomOccupancyState.isLoading,
+                showBack = true,
+                modifier = modifier,
+            ) {
+                ClassroomOccupancyBuildingWorkspace(
+                    model = classroomOccupancyModel,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -815,6 +863,14 @@ fun AuthenticatedAppShell(
                             usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
                         )
                     }
+                    entry<ClassroomOccupancyDetailRoute> {
+                        SectionDestination(
+                            route = ClassroomOccupancyDetailRoute,
+                            expanded = true,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+                        )
+                    }
                     entry<HomeworkDetailRoute> {
                         SectionDestination(
                             route = HomeworkDetailRoute,
@@ -846,144 +902,166 @@ fun AuthenticatedAppShell(
             easing = androidPredictiveEasing,
         )
 
-        // Android 使用 Navigation 3 的 seekable 场景内核，并按 Google full-screen surface
-        // predictive-back 规范让前景 100%→90%、后景 110%→100%，同时保留小幅横向预览。
-        // iOS 使用可被 NavDisplay start-edge 手势 seek 的 UINavigationController 空间路径；
-        // macOS 的紧凑窗口仍遵守桌面习惯，不播放手机式整页滑动。
-        NavDisplay(
-            backStack = backStack,
-            onBack = popBackStack,
-            modifier = Modifier.fillMaxSize(),
-            transitionSpec = {
-                when {
-                    nativeNavigationEnabled ->
-                        EnterTransition.None togetherWith ExitTransition.None
-                    reduceMotion ->
-                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
-                    platform.family == PlatformFamily.Android ->
-                        (slideInHorizontally(
-                            initialOffsetX = { direction * it / 12 },
-                            animationSpec = androidOffsetSpec,
-                        ) + scaleIn(
-                            initialScale = 0.96f,
-                            animationSpec = androidScaleSpec,
-                        ) + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(
-                                targetOffsetX = { -direction * it / 20 },
+        // 仅五个一级 tab 显示底栏；更多子页与详情路由隐藏。底栏在 NavDisplay 外，tab 切换不重建。
+        val showsCompactBottomBar = currentRoute in BottomNavSections
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Android 使用 Navigation 3 的 seekable 场景内核，并按 Google full-screen surface
+            // predictive-back 规范让前景 100%→90%、后景 110%→100%，同时保留小幅横向预览。
+            // iOS 使用可被 NavDisplay start-edge 手势 seek 的 UINavigationController 空间路径；
+            // macOS 的紧凑窗口仍遵守桌面习惯，不播放手机式整页滑动。
+            NavDisplay(
+                backStack = backStack,
+                onBack = popBackStack,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    when {
+                        nativeNavigationEnabled ->
+                            EnterTransition.None togetherWith ExitTransition.None
+                        reduceMotion ->
+                            fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                        platform.family == PlatformFamily.Android ->
+                            (slideInHorizontally(
+                                initialOffsetX = { direction * it / 12 },
                                 animationSpec = androidOffsetSpec,
-                            ) + scaleOut(
-                                targetScale = 0.90f,
+                            ) + scaleIn(
+                                initialScale = 0.96f,
                                 animationSpec = androidScaleSpec,
-                            ) + fadeOut(tween(280)))
-                    platform.family == PlatformFamily.IOS ->
-                        slideInHorizontally(
-                            initialOffsetX = { direction * it },
-                            animationSpec = appleSpatialSpec,
-                        ) togetherWith slideOutHorizontally(
-                            targetOffsetX = { -direction * it / 3 },
-                            animationSpec = appleSpatialSpec,
-                        )
-                    else -> EnterTransition.None togetherWith ExitTransition.None
-                }
-            },
-            popTransitionSpec = {
-                when {
-                    nativeNavigationEnabled ->
-                        EnterTransition.None togetherWith ExitTransition.None
-                    reduceMotion ->
-                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
-                    platform.family == PlatformFamily.Android ->
-                        (slideInHorizontally(
-                            initialOffsetX = { -direction * it / 20 },
-                            animationSpec = androidOffsetSpec,
-                        ) + scaleIn(
-                            initialScale = 1.10f,
-                            animationSpec = androidScaleSpec,
-                        ) + fadeIn(tween(280))) togetherWith
-                            (slideOutHorizontally(
-                                targetOffsetX = { direction * it / 20 },
+                            ) + fadeIn(tween(220))) togetherWith
+                                (slideOutHorizontally(
+                                    targetOffsetX = { -direction * it / 20 },
+                                    animationSpec = androidOffsetSpec,
+                                ) + scaleOut(
+                                    targetScale = 0.90f,
+                                    animationSpec = androidScaleSpec,
+                                ) + fadeOut(tween(280)))
+                        platform.family == PlatformFamily.IOS ->
+                            slideInHorizontally(
+                                initialOffsetX = { direction * it },
+                                animationSpec = appleSpatialSpec,
+                            ) togetherWith slideOutHorizontally(
+                                targetOffsetX = { -direction * it / 3 },
+                                animationSpec = appleSpatialSpec,
+                            )
+                        else -> EnterTransition.None togetherWith ExitTransition.None
+                    }
+                },
+                popTransitionSpec = {
+                    when {
+                        nativeNavigationEnabled ->
+                            EnterTransition.None togetherWith ExitTransition.None
+                        reduceMotion ->
+                            fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                        platform.family == PlatformFamily.Android ->
+                            (slideInHorizontally(
+                                initialOffsetX = { -direction * it / 20 },
                                 animationSpec = androidOffsetSpec,
-                            ) + scaleOut(
-                                targetScale = 0.90f,
+                            ) + scaleIn(
+                                initialScale = 1.10f,
                                 animationSpec = androidScaleSpec,
-                            ) + fadeOut(tween(220)))
-                    platform.family == PlatformFamily.IOS ->
-                        slideInHorizontally(
-                            initialOffsetX = { -direction * it / 3 },
-                            animationSpec = appleSpatialSpec,
-                        ) togetherWith slideOutHorizontally(
-                            targetOffsetX = { direction * it },
-                            animationSpec = appleSpatialSpec,
-                        )
-                    else -> EnterTransition.None togetherWith ExitTransition.None
-                }
-            },
-            predictivePopTransitionSpec = { swipeEdge: Int ->
-                val gestureDirection = if (swipeEdge == NavigationEvent.EDGE_RIGHT) -1 else 1
-                when {
-                    nativeNavigationEnabled ->
-                        EnterTransition.None togetherWith ExitTransition.None
-                    reduceMotion ->
-                        fadeIn(tween(150)) togetherWith fadeOut(tween(150))
-                    platform.family == PlatformFamily.Android ->
-                        (slideInHorizontally(
-                            initialOffsetX = { -gestureDirection * it / 20 },
-                            animationSpec = androidOffsetSpec,
-                        ) + scaleIn(
-                            initialScale = 1.10f,
-                            animationSpec = androidScaleSpec,
-                        ) + fadeIn(tween(280))) togetherWith
-                            (slideOutHorizontally(
-                                targetOffsetX = { gestureDirection * it / 20 },
+                            ) + fadeIn(tween(280))) togetherWith
+                                (slideOutHorizontally(
+                                    targetOffsetX = { direction * it / 20 },
+                                    animationSpec = androidOffsetSpec,
+                                ) + scaleOut(
+                                    targetScale = 0.90f,
+                                    animationSpec = androidScaleSpec,
+                                ) + fadeOut(tween(220)))
+                        platform.family == PlatformFamily.IOS ->
+                            slideInHorizontally(
+                                initialOffsetX = { -direction * it / 3 },
+                                animationSpec = appleSpatialSpec,
+                            ) togetherWith slideOutHorizontally(
+                                targetOffsetX = { direction * it },
+                                animationSpec = appleSpatialSpec,
+                            )
+                        else -> EnterTransition.None togetherWith ExitTransition.None
+                    }
+                },
+                predictivePopTransitionSpec = { swipeEdge: Int ->
+                    val gestureDirection = if (swipeEdge == NavigationEvent.EDGE_RIGHT) -1 else 1
+                    when {
+                        nativeNavigationEnabled ->
+                            EnterTransition.None togetherWith ExitTransition.None
+                        reduceMotion ->
+                            fadeIn(tween(150)) togetherWith fadeOut(tween(150))
+                        platform.family == PlatformFamily.Android ->
+                            (slideInHorizontally(
+                                initialOffsetX = { -gestureDirection * it / 20 },
                                 animationSpec = androidOffsetSpec,
-                            ) + scaleOut(
-                                targetScale = 0.90f,
+                            ) + scaleIn(
+                                initialScale = 1.10f,
                                 animationSpec = androidScaleSpec,
-                            ) + fadeOut(tween(220)))
-                    platform.family == PlatformFamily.IOS ->
-                        slideInHorizontally(
-                            initialOffsetX = { -gestureDirection * it / 3 },
-                            animationSpec = appleInteractiveSpec,
-                        ) togetherWith slideOutHorizontally(
-                            targetOffsetX = { gestureDirection * it },
-                            animationSpec = appleInteractiveSpec,
+                            ) + fadeIn(tween(280))) togetherWith
+                                (slideOutHorizontally(
+                                    targetOffsetX = { gestureDirection * it / 20 },
+                                    animationSpec = androidOffsetSpec,
+                                ) + scaleOut(
+                                    targetScale = 0.90f,
+                                    animationSpec = androidScaleSpec,
+                                ) + fadeOut(tween(220)))
+                        platform.family == PlatformFamily.IOS ->
+                            slideInHorizontally(
+                                initialOffsetX = { -gestureDirection * it / 3 },
+                                animationSpec = appleInteractiveSpec,
+                            ) togetherWith slideOutHorizontally(
+                                targetOffsetX = { gestureDirection * it },
+                                animationSpec = appleInteractiveSpec,
+                            )
+                        else -> EnterTransition.None togetherWith ExitTransition.None
+                    }
+                },
+                entryProvider = entryProvider {
+                    entry<AppSection> { route ->
+                        SectionDestination(
+                            route = route,
+                            expanded = false,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = false,
                         )
-                    else -> EnterTransition.None togetherWith ExitTransition.None
-                }
-            },
-            entryProvider = entryProvider {
-                entry<AppSection> { route ->
-                    SectionDestination(
-                        route = route,
-                        expanded = false,
-                        modifier = Modifier.fillMaxSize(),
-                        usesLegacySmartTransport = false,
-                    )
-                }
-                entry<ClassroomDetailRoute> {
-                    SectionDestination(
-                        route = ClassroomDetailRoute,
-                        expanded = false,
-                        modifier = Modifier.fillMaxSize(),
-                        usesLegacySmartTransport = false,
-                    )
-                }
-                entry<HomeworkDetailRoute> {
-                    SectionDestination(
-                        route = HomeworkDetailRoute,
-                        expanded = false,
-                        modifier = Modifier.fillMaxSize(),
-                        usesLegacySmartTransport = false,
-                    )
-                }
-            },
-        )
+                    }
+                    entry<ClassroomDetailRoute> {
+                        SectionDestination(
+                            route = ClassroomDetailRoute,
+                            expanded = false,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = false,
+                        )
+                    }
+                    entry<ClassroomOccupancyDetailRoute> {
+                        SectionDestination(
+                            route = ClassroomOccupancyDetailRoute,
+                            expanded = false,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = false,
+                        )
+                    }
+                    entry<HomeworkDetailRoute> {
+                        SectionDestination(
+                            route = HomeworkDetailRoute,
+                            expanded = false,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = false,
+                        )
+                    }
+                },
+            )
+            if (showsCompactBottomBar && compactBottomBarOverlayPadding > 0.dp) {
+                CompactBottomNavigation(
+                    section = section,
+                    onSectionSelected = navigateToSection,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
+        }
     }
 }
 
 private fun String.toAppRoute(): AppRoute? =
     if (this == CLASSROOM_DETAIL_ROUTE_ID) {
         ClassroomDetailRoute
+    } else if (this == CLASSROOM_OCCUPANCY_DETAIL_ROUTE_ID) {
+        ClassroomOccupancyDetailRoute
     } else if (this == HOMEWORK_DETAIL_ROUTE_ID) {
         HomeworkDetailRoute
     } else {
@@ -1357,6 +1435,7 @@ private fun BackChevron() {
 
 /**
  * 紧凑底栏：Material3 官方 [NavigationBar] + [NavigationBarItem]。
+ * 挂在 NavDisplay 外层，一级 tab 切换时实例不销毁，按压/水波纹才能播完。
  * windowInsets 用 [WindowInsets.navigationBars]，由组件处理 Home Indicator / 手势条，
  * 避免自绘固定高度把标签裁切或与系统安全区叠错。
  */
@@ -1511,7 +1590,7 @@ private fun CompactTabIcon(section: AppSection) {
 /**
  * 「更多」页：iOS 设置式分块列表。
  * - 学业：考试、课件
- * - 校园：教室人数、邮箱
+ * - 校园：教室占用查询、教室人数估计、邮箱
  * - 下载：校历、成绩单
  * - 设置单独一块垫底
  */
@@ -1527,7 +1606,7 @@ private fun MoreWorkspace(
         ),
         MoreListSection(
             header = "校园",
-            items = listOf(AppSection.CLASSROOMS, AppSection.MAILBOX),
+            items = listOf(AppSection.CLASSROOM_OCCUPANCY, AppSection.CLASSROOMS, AppSection.MAILBOX),
         ),
         MoreListSection(
             header = "下载",
@@ -1726,7 +1805,7 @@ private fun GradeWorkspace(
                         ModalBottomSheet(
                             onDismissRequest = model::dismissGradeDetails,
                             sheetState = detailSheetState,
-                            sheetGesturesEnabled = false,
+                            sheetGesturesEnabled = true,
                             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                         ) {
                             GradeDetailSheetBody(
@@ -1749,7 +1828,7 @@ private fun GradeWorkspace(
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = sheetState,
-            sheetGesturesEnabled = false,
+            sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
             GradeFilterSheet(state = state, model = model)

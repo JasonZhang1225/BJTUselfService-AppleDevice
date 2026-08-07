@@ -224,6 +224,46 @@
 - **遗留**：课表课程详情弹窗仍是 `skipPartiallyExpanded=false`（全项目唯一一处），若用户反馈卡半高再对齐 true。
 - **验证**：`:shared` desktop / iOS Simulator / Android 编译与 desktop 单测通过；**用户 iPhone 真机目视通过**（作业详情二级页跳转/返回、首页与各科「已同步 ✓」胶囊、课件选课弹窗展开）。
 
+## M11：教室占用查询与壳层/教室体验修复（2026-08-07）
+
+新功能，原冻结 Android 1.7.0 **没有**。入口「更多 → 校园 → 教室占用查询」，与第三方「教室人数估计」并存。
+
+### 数据与解析
+
+- 教务 `aa.bjtu.edu.cn/classroom/timeholdresult/room_view/?zc=<周>&jxlh=<楼ID>&page=1&perpage=500`（可选 `zxjxjhh` 学期）。HTML 表：行首教室号+容量，49 格（7 天×7 节）靠 `title`+`background-color` 映射占用类型。
+- 色值与线上图例核对：`#e46868` 排课、`#9e6868` 调课、`#394ed6` 考试、`#77bf6d` 实验、`#d8cc56` 其他、`#fff` 空闲；展示层空闲改软绿 `#D8F5E2`/`#0D6B35` 与其它态拉开对比。
+- **`jxlh` 必须传数字楼 ID**（传中文楼名线上返回空表头——单楼全空 bug 根因）。35 栋教学楼名单与 ID 取自线上 jxlh 下拉，顺序与线上一致（末几栋含外校区，按序列表不额外分区）。
+- 学期下拉来自同页 `zxjxjhh`；当前学期多由脚本 `$("[name=zxjxjhh]").val(...)` 回填而非 `selected`，解析需脚本兜底。占用成功响应顺带解析学期，避免单独预取失败后弹层只剩「当前学期」。
+- 周→日期：bksy `SemesterTranPage.aspx?noRemark=1` 的 **hidJson**（ASP.NET 动态渲染，静态表格无用）；标题 `hidTitle_<Id>` 只有 id 无 name。aa `zc` 跳过「休」列，第二学期夏季段从 19 续编。
+- 节次时间：`SLOT_TIME_RANGES` 与 aa stuschedule 表头一致（第1节 08:00-09:50 … 第7节 21:00-21:50）。
+
+### 交互与导航
+
+- 紧凑端两级：一级教学楼列表，二级选中楼占用视图；routeId `CLASSROOM_OCCUPANCY` / `CLASSROOM_OCCUPANCY_DETAIL`，仿教室人数估计原生 push。
+- 周/学期：`OccupancyWeekPickerSheet`（学期横滑 chips + 周 FlowRow，「本周（第N周）」快捷）；默认周跟课表 `currentWeek`。星期客户端筛选，课表同款「一二三四五六日」七等分。
+- `selectBuilding` 只同步写状态再 push；查询由详情/工作区 `LaunchedEffect(selectedBuilding)` 在 Idle 时补发（避免点楼等网络、push 动画被拖）。
+- 切周保留旧列表 + 顶栏/细进度；有失败/超时不清空已成功列表。
+
+### 网络与「同步中」卡死
+
+- 共享 `KtorSchoolHttpTransport` 会话锁保护 Cookie jar。bksy 校历与 aa 不同域：若走同一 `execute`，代理下 bksy 挂起会堵所有 aa 请求。新增 **`executePublic`**：独立客户端、不进会话 Mutex、更短超时；校历只走公开通道。
+- 弹层选周真因（真机转一分钟、列表仍在、顶栏一直「同步中」）：`rememberCoroutineScope()` 在弹层内 `launch{selectWeek}` 后立刻 `onDismiss`，弹层销毁取消协程，`refreshing` 永不清除。**改详情页 `hostScope` 发起查询**；12s 超时必清进度。Live probe（本机登录）：思源西楼首查约 1.6s、切周约 1.4–2.2s、结束后 `isLoading=false`。
+- `initialize` 不再预取学期/校历占锁；校历/学期空结果允许弹层再试。
+
+### 同里程碑壳层与教室人数估计
+
+- 底栏：从每个 `DestinationPage` 挪到 `NavDisplay` 外；一级 tab `yield()` 后再换栈，避免首次点 tab 水波纹被整页销毁掐断。
+- 教室人数估计搜索：本地 draft + 约 180ms 防抖；`visibleClassrooms` 写入 state 时预计算，去掉 composition getter 重算。
+- Android 恢复 `yaya.csoci.com` 明文（`network_security_config` + `classroomLegacyHttpAvailable=true`），人数估计可用。
+- 更多校园分组顺序：教室占用查询 → 教室人数估计 → 邮箱；功能名「教室占用查询」。
+- 多页 `ModalBottomSheet` 恢复 `sheetGesturesEnabled=true`（可下滑关闭）。
+- iOS Xcode `embedAndSignAppleFrameworkForXcode`：Compose 1.12 `syncComposeResourcesForIos` 需要 `UNLOCALIZED_RESOURCES_FOLDER_PATH`；Build Phase 脚本缺省时从 `CONTENTS_FOLDER_PATH`/`FULL_PRODUCT_NAME`/`PRODUCT_NAME` 推导，去掉仅 `--no-daemon` 导致的慢冷启动。`gradle.properties` 增加 `android.experimental.disableCompileSdkChecks=true` 以过 compose 1.12 AAR compileSdk 37 元数据检查（本机 SDK 36.1）。
+
+### 验证边界
+
+- commonTest：classroomoccupancy 解析/ScreenModel、classroom 搜索缓存用例通过；三端编译路径与 assembleDebug 曾通过；Live probe 本机网络通过。
+- 用户 iPhone 真机：占用查询进楼/切周/弹层、人数估计明文、空闲绿色与底栏反馈有多轮目视；代理下 bksy 日期仍可能空（不挡占用）。未做正式签名分发。
+
 ## 决策记录
 
 - 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。
