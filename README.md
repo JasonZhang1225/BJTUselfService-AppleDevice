@@ -17,7 +17,7 @@
 
 所有数据解析（包括验证码识别）均在**本地完成**，无需上传至第三方服务器，充分保障用户隐私安全。
 
-本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做三端共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。当前 pre-release 版本号 **1.7.1 KMP**。
+本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做三端共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。当前 pre-release 版本号 **1.7.1-KMP**。
 
 相对原版新增/增强（节选）：
 - **教室占用查询**（教务 `room_view`，原 1.7.0 安卓无）
@@ -127,7 +127,7 @@ chmod +x gradlew
 | [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) | 原作者安卓版与正式 Release |
 | [JasonZhang1225/BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed) | 本 KMP 三端 fork 与 pre-release |
 
-本 fork 的 1.7.1 KMP 预发布包由本地构建后上传 Release，**不依赖**上游 `v*` 标签自动打包工作流。
+本 fork 的 1.7.1-KMP 预发布包由本地构建后上传 Release，**不依赖**上游 `v*` 标签自动打包工作流。
 
 ## 📱 支持平台
 

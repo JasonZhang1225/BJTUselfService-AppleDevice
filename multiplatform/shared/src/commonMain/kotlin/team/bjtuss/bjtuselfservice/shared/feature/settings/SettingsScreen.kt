@@ -141,7 +141,7 @@ fun SettingsWorkspace(
             ) {
                 Text("版本与项目", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${platform.displayName} · KMP 迁移构建 v1.7.1\n功能对齐基线：原安卓 v1.7.0",
+                    "${platform.displayName} · KMP 迁移构建 v1.7.1-KMP\n功能对齐基线：原安卓 v1.7.0",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedButton(
