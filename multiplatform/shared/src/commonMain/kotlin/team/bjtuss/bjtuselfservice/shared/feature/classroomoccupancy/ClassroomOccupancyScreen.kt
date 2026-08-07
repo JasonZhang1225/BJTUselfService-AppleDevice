@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -116,7 +115,7 @@ fun ClassroomOccupancyWorkspace(
                 buildings = state.buildings,
                 showListHeading = true,
                 onSelect = { building -> model.selectBuilding(building) },
-                modifier = Modifier.width(230.dp).fillMaxHeight(),
+                modifier = Modifier.weight(0.32f).fillMaxHeight(),
             )
             OccupancyDetail(
                 state = state,
@@ -125,7 +124,7 @@ fun ClassroomOccupancyWorkspace(
                 showBuildingHeader = true,
                 emptyMessage = "从左侧选择教学楼",
                 emptyHint = "选择后显示该楼教室的排课/调课/考试占用。",
-                modifier = Modifier.weight(1f).fillMaxHeight(),
+                modifier = Modifier.weight(0.68f).fillMaxHeight(),
             )
         }
     } else {
@@ -372,28 +371,28 @@ private fun OccupancyDetail(
                 )
             }
             is ClassroomOccupancyQueryState.Loaded -> {
-                // 切周/刷新时保留旧列表 + 顶部细进度，避免整页转圈把用户卡死。
-                if (query.refreshing) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
-                }
-                if (query.rooms.isEmpty() && !query.refreshing) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "当前条件下没有教室占用数据",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else if (query.rooms.isEmpty() && query.refreshing) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        CircularProgressIndicator()
-                        Text("正在查询教室占用…", modifier = Modifier.padding(top = 10.dp))
+                // 刷新进度只靠 shell 顶栏「同步中」；页内不再叠一条 LinearProgress，避免双进度条。
+                // 有旧列表时刷新中继续展示；无列表时整页转圈（首查/空结果再刷）。
+                if (query.rooms.isEmpty()) {
+                    if (query.refreshing) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            CircularProgressIndicator()
+                            Text("正在查询教室占用…", modifier = Modifier.padding(top = 10.dp))
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "当前条件下没有教室占用数据",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 } else {
                     LazyColumn(

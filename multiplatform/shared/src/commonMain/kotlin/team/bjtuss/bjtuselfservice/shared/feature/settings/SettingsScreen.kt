@@ -30,7 +30,9 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
+import team.bjtuss.bjtuselfservice.shared.platformSupportsDynamicColor
 
 @Composable
 fun SettingsWorkspace(
@@ -50,7 +52,9 @@ fun SettingsWorkspace(
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("清除当前账号离线缓存？") },
-            text = { Text("成绩、课表、考试和作业的离线副本会被删除；不会退出账号，也不会清除主题设置。之后可从学校系统重新下载。") },
+            text = {
+                Text("成绩、课表、考试和作业的离线副本会被删除；不会退出账号。之后可从学校系统重新下载。")
+            },
             confirmButton = {
                 Button(onClick = {
                     confirmClear = false
@@ -74,17 +78,38 @@ fun SettingsWorkspace(
         }
         SettingCard("账户", accountName.ifBlank { "未登录" })
 
-        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("主题设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "应用始终跟随系统浅色/深色外观，不再提供单独切换。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        // 仅 Android 展示动态取色开关；iOS/桌面无 Material You，不出现「主题设置」整块。
+        if (platformSupportsDynamicColor()) {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("动态取色", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "打开后使用系统壁纸颜色（Material You）；关闭则使用应用默认配色。浅色/深色仍跟随系统。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "动态取色",
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = state.preferences.dynamicColor,
+                            onCheckedChange = model::setDynamicColor,
+                        )
+                    }
+                    if (state.saveFailed) {
+                        Feedback("设置保存失败，请重试。", true, model::dismissFeedback)
+                    }
+                }
             }
         }
 
@@ -103,7 +128,7 @@ fun SettingsWorkspace(
                 AutoSyncSettingRow("自动同步作业", state.preferences.autoSyncHomework, model::setAutoSyncHomework)
                 AutoSyncSettingRow("自动同步课表", state.preferences.autoSyncSchedule, model::setAutoSyncSchedule)
                 AutoSyncSettingRow("自动同步考试", state.preferences.autoSyncExams, model::setAutoSyncExams)
-                if (state.saveFailed) {
+                if (state.saveFailed && !platformSupportsDynamicColor()) {
                     Feedback("同步设置保存失败，请重试。", true, model::dismissFeedback)
                 }
             }
@@ -123,7 +148,12 @@ fun SettingsWorkspace(
                     Text("打开 GitHub 项目")
                 }
                 Text(
-                    "Apple 端不复制 Android APK 下载流程；正式发布后由 App Store、签名安装包或项目发布页提供更新。",
+                    when (platform.family) {
+                        PlatformFamily.Android ->
+                            "正式发布后由应用商店或项目发布页提供更新。"
+                        PlatformFamily.IOS, PlatformFamily.MacOS ->
+                            "正式发布后由 App Store、签名安装包或项目发布页提供更新。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -138,8 +168,10 @@ fun SettingsWorkspace(
                 Text("本地数据与会话", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 when (state.cacheAction) {
                     OfflineCacheActionState.Clearing -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    OfflineCacheActionState.Cleared -> Feedback("离线缓存已清除；账号和主题仍保留。", false, model::dismissFeedback)
-                    OfflineCacheActionState.Failed -> Feedback("离线缓存清除失败，请稍后重试。", true, model::dismissFeedback)
+                    OfflineCacheActionState.Cleared ->
+                        Feedback("离线缓存已清除；账号仍保留。", false, model::dismissFeedback)
+                    OfflineCacheActionState.Failed ->
+                        Feedback("离线缓存清除失败，请稍后重试。", true, model::dismissFeedback)
                     OfflineCacheActionState.Idle -> Unit
                 }
                 if (expanded) {
@@ -164,11 +196,14 @@ fun SettingsWorkspace(
                         LogoutButton(onClick = onLogout, modifier = Modifier.fillMaxWidth())
                     }
                 }
-                Text(
-                    "macOS 关闭窗口只关闭窗口，不退出账号、不清除会话。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // 仅桌面宽屏布局提示窗口行为；手机设置页不提 macOS。
+                if (expanded && platform.family == PlatformFamily.MacOS) {
+                    Text(
+                        "关闭窗口只关闭窗口，不退出账号、不清除会话。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

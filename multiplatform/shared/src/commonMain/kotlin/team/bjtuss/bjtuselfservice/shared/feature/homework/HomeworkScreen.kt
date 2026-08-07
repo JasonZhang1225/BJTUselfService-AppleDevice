@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -56,10 +55,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,6 +81,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.homework.typeLabel
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFilePickResult
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
+import team.bjtuss.bjtuselfservice.shared.files.safeExportFileName
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 import team.bjtuss.bjtuselfservice.shared.feature.shell.LegacySmartTransportWarning
 
@@ -113,27 +115,6 @@ fun HomeworkWorkspace(
         },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (expanded) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "作业",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "按课程和截止时间整理平时作业、课程设计与实验报告",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                    Text(if (state.isRefreshing) "正在同步" else "同步作业")
-                }
-            }
-        }
-
         // 明文通道提示：仅在 shell 判定「本会话尚未关闭」时显示一条可关闭横幅。
         // 以前在 dismiss 后又画一条无 onDismiss 的副本，导致关不掉。
         if (legacyWarningVisible) {
@@ -155,8 +136,11 @@ fun HomeworkWorkspace(
             state.homework.isEmpty() -> HomeworkEmptyState(onRefresh)
             else -> {
                 if (expanded) {
-                    HomeworkSummary(state)
-                    HomeworkExpandedFilters(state, model)
+                    // 与移动端一致：同步态在顶栏；Banner 内筛选入口；课程/过期/排序进 sheet。
+                    HomeworkSummary(
+                        state = state,
+                        onOpenFilter = { showFilterSheet = true },
+                    )
                     if (state.visibleHomework.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Column(
@@ -164,10 +148,11 @@ fun HomeworkWorkspace(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
                                 Text("当前筛选下没有作业", style = MaterialTheme.typography.titleMedium)
-                                TextButton(onClick = model::clearCourseFilter) { Text("清除课程筛选") }
+                                TextButton(onClick = { showFilterSheet = true }) { Text("调整筛选") }
                             }
                         }
                     } else {
+                        // 宽屏固定四六开：列表 40% / 详情 60%，不再提供拖拽调宽。
                         Row(
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -180,7 +165,7 @@ fun HomeworkWorkspace(
                                     transfer.fileFeedback = null
                                     scope.launch { model.showDetails(key) }
                                 },
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                modifier = Modifier.weight(0.4f).fillMaxHeight(),
                             )
                             HomeworkDetailPanel(
                                 homework = state.selectedHomework,
@@ -196,8 +181,14 @@ fun HomeworkWorkspace(
                                 onDownloadTeacher = transfer::saveTeacherAttachment,
                                 onDownloadSubmitted = transfer::saveSubmittedAttachment,
                                 onUpload = transfer::openUpload,
+                                onCopyMarkdown = { markdown ->
+                                    transfer.copyMarkdown(markdown)
+                                },
+                                onSaveMarkdown = { markdown, fileName ->
+                                    transfer.saveMarkdown(markdown, fileName)
+                                },
                                 isSubmitting = state.isSubmitting,
-                                modifier = Modifier.widthIn(min = 320.dp, max = 420.dp).fillMaxHeight(),
+                                modifier = Modifier.weight(0.6f).fillMaxHeight(),
                             )
                         }
                     }
@@ -241,12 +232,38 @@ private class HomeworkTransferState(
     private val model: HomeworkScreenModel,
     private val fileGateway: HomeworkFileGateway,
     private val scope: CoroutineScope,
+    private val copyText: (String) -> Unit,
 ) {
     var showUpload by mutableStateOf(false)
     var uploadFiles by mutableStateOf<List<HomeworkFileContent>>(emptyList())
     var uploadContent by mutableStateOf("")
     var uploadFeedback by mutableStateOf<String?>(null)
     var fileFeedback by mutableStateOf<String?>(null)
+
+    fun copyMarkdown(markdown: String) {
+        copyText(markdown)
+        fileFeedback = "已复制为 Markdown"
+    }
+
+    fun saveMarkdown(markdown: String, suggestedName: String) {
+        if (!fileGateway.isAvailable) {
+            fileFeedback = "当前平台的系统保存面板尚未接入。"
+            return
+        }
+        scope.launch {
+            fileFeedback = null
+            val file = HomeworkFileContent(
+                fileName = safeExportFileName(suggestedName),
+                contentType = "text/markdown",
+                bytes = markdown.encodeToByteArray(),
+            )
+            fileFeedback = when (val result = fileGateway.saveFile(file)) {
+                HomeworkFileSaveResult.Saved -> "Markdown 已保存"
+                HomeworkFileSaveResult.Cancelled -> null
+                is HomeworkFileSaveResult.Failed -> result.saveFeedback()
+            }
+        }
+    }
 
     fun saveTeacherAttachment(attachmentId: Int) {
         if (!fileGateway.isAvailable) {
@@ -350,7 +367,15 @@ private fun rememberHomeworkTransferState(
     fileGateway: HomeworkFileGateway,
 ): HomeworkTransferState {
     val scope = rememberCoroutineScope()
-    return remember(model, fileGateway) { HomeworkTransferState(model, fileGateway, scope) }
+    val clipboard = LocalClipboardManager.current
+    return remember(model, fileGateway, clipboard) {
+        HomeworkTransferState(
+            model = model,
+            fileGateway = fileGateway,
+            scope = scope,
+            copyText = { text -> clipboard.setText(AnnotatedString(text)) },
+        )
+    }
 }
 
 /** 上传作业对话框：宽屏与紧凑详情二级页统一用 AlertDialog。 */
@@ -544,31 +569,6 @@ private fun HomeworkSortBarsIcon(
         ys.zip(ends).forEach { (y, endX) ->
             drawLine(tint, Offset(left, y), Offset(endX, y), stroke, StrokeCap.Round)
         }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun HomeworkExpandedFilters(state: HomeworkUiState, model: HomeworkScreenModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = state.selectedCourses.isEmpty(),
-                onClick = model::clearCourseFilter,
-                label = { Text("全部课程") },
-            )
-            state.courseOptions.forEach { course ->
-                FilterChip(
-                    selected = course in state.selectedCourses,
-                    onClick = { model.toggleCourse(course) },
-                    label = { Text(course, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                )
-            }
-        }
-        HomeworkBehaviorFilters(state, model)
     }
 }
 
@@ -878,6 +878,8 @@ private fun HomeworkDetailPanel(
     onDownloadTeacher: (Int) -> Unit,
     onDownloadSubmitted: (String) -> Unit,
     onUpload: () -> Unit,
+    onCopyMarkdown: (String) -> Unit,
+    onSaveMarkdown: (String, String) -> Unit,
     isSubmitting: Boolean,
     modifier: Modifier,
 ) {
@@ -905,6 +907,8 @@ private fun HomeworkDetailPanel(
                 onDownloadTeacher = onDownloadTeacher,
                 onDownloadSubmitted = onDownloadSubmitted,
                 onUpload = onUpload,
+                onCopyMarkdown = onCopyMarkdown,
+                onSaveMarkdown = onSaveMarkdown,
                 isSubmitting = isSubmitting,
                 contentPadding = PaddingValues(22.dp),
                 modifier = Modifier.fillMaxSize(),
@@ -929,15 +933,45 @@ private fun HomeworkDetailContent(
     onDownloadTeacher: (Int) -> Unit,
     onDownloadSubmitted: (String) -> Unit,
     onUpload: () -> Unit,
+    onCopyMarkdown: (String) -> Unit,
+    onSaveMarkdown: (String, String) -> Unit,
     isSubmitting: Boolean,
     modifier: Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
+    val markdown = remember(homework, detail, submittedAttachments) {
+        homeworkDetailToMarkdown(homework, detail, submittedAttachments)
+    }
+    val markdownFileName = remember(homework) {
+        safeExportFileName("${homework.courseName}-${homework.title}.md")
+    }
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
             .padding(contentPadding),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "作业详情",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f).semantics { heading() },
+            )
+            TextButton(onClick = { onCopyMarkdown(markdown) }) {
+                Text("复制为 Markdown")
+            }
+            OutlinedButton(
+                onClick = { onSaveMarkdown(markdown, markdownFileName) },
+                enabled = fileGatewayAvailable,
+            ) {
+                Text("保存为 Markdown")
+            }
+        }
         HomeworkDetailSheetBody(
             homework = homework,
             detail = detail,
@@ -953,8 +987,55 @@ private fun HomeworkDetailContent(
             onDownloadSubmitted = onDownloadSubmitted,
             onUpload = onUpload,
             isSubmitting = isSubmitting,
+            showHeading = false,
         )
     }
+}
+
+internal fun homeworkDetailToMarkdown(
+    homework: Homework,
+    detail: HomeworkDetail?,
+    submittedAttachments: List<SubmittedHomeworkAttachment>,
+): String {
+    val content = schoolRichTextToPlainMultiline(detail?.content).ifBlank { "老师未填写文字要求。" }
+    val teacherAttachments = detail?.attachments.orEmpty()
+    return buildString {
+        appendLine("# ${homework.title}")
+        appendLine()
+        appendLine("- 课程：${homework.courseName}")
+        appendLine("- 类型：${homework.typeLabel()}")
+        appendLine("- 开放时间：${homework.openDate.ifBlank { "未提供" }}")
+        appendLine("- 截止时间：${homework.endTime.ifBlank { "未提供" }}")
+        appendLine("- 提交状态：${homework.subStatus.ifBlank { "未标明" }}")
+        if (homework.score.isNotBlank()) appendLine("- 评分：${homework.score}")
+        appendLine()
+        appendLine("## 作业要求")
+        appendLine()
+        appendLine(content)
+        appendLine()
+        appendLine("## 老师提供的附件")
+        appendLine()
+        if (teacherAttachments.isEmpty()) {
+            appendLine("- 暂无附件")
+        } else {
+            teacherAttachments.forEach { attachment ->
+                appendLine("- ${attachment.fileName.ifBlank { "附件 ${attachment.id}" }}")
+            }
+        }
+        if (homework.idSnId != null || homework.subStatus == "已提交") {
+            appendLine()
+            appendLine("## 我已提交的附件")
+            appendLine()
+            if (submittedAttachments.isEmpty()) {
+                appendLine("- 没有找到已提交附件")
+            } else {
+                submittedAttachments.forEach { attachment ->
+                    appendLine("- ${attachment.fileName.ifBlank { "附件 ${attachment.id}" }}")
+                }
+            }
+        }
+        appendLine()
+    }.trimEnd() + "\n"
 }
 
 /** 作业详情正文（详情页与宽屏侧栏共用）；滚动由调用方 Modifier 提供。宽屏侧栏保留「作业详情」小标题，详情页由顶栏显示标题、正文不重复。 */

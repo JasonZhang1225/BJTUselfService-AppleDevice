@@ -100,15 +100,17 @@ fun main(args: Array<String>) {
                     onDispose { registerDesktopCredentialWindowHandle(0L) }
                 }
                     MenuBar {
+                        // 与壳层一级入口一致；考试/课件/教室/邮箱/设置走「更多」或菜单二级。
                         Menu("前往") {
                             Item("首页", onClick = { appCommandBus.send(AppCommand.NAVIGATE_HOME) }, enabled = shellReady)
-                            Item("成绩", onClick = { appCommandBus.send(AppCommand.NAVIGATE_GRADES) }, enabled = shellReady)
                             Item("课程表", onClick = { appCommandBus.send(AppCommand.NAVIGATE_SCHEDULE) }, enabled = shellReady)
-                            Item("考试安排", onClick = { appCommandBus.send(AppCommand.NAVIGATE_EXAMS) }, enabled = shellReady)
-                            Separator()
+                            Item("成绩", onClick = { appCommandBus.send(AppCommand.NAVIGATE_GRADES) }, enabled = shellReady)
                             Item("作业", onClick = { appCommandBus.send(AppCommand.NAVIGATE_HOMEWORK) }, enabled = shellReady)
+                            Separator()
+                            Item("考试安排", onClick = { appCommandBus.send(AppCommand.NAVIGATE_EXAMS) }, enabled = shellReady)
                             Item("课件", onClick = { appCommandBus.send(AppCommand.NAVIGATE_COURSEWARE) }, enabled = shellReady)
-                            Item("教室", onClick = { appCommandBus.send(AppCommand.NAVIGATE_CLASSROOMS) }, enabled = shellReady)
+                            Item("教室占用查询", onClick = { appCommandBus.send(AppCommand.NAVIGATE_CLASSROOM_OCCUPANCY) }, enabled = shellReady)
+                            Item("教室人数估计", onClick = { appCommandBus.send(AppCommand.NAVIGATE_CLASSROOMS) }, enabled = shellReady)
                             Item("邮箱", onClick = { appCommandBus.send(AppCommand.NAVIGATE_MAILBOX) }, enabled = shellReady)
                             Separator()
                             Item(

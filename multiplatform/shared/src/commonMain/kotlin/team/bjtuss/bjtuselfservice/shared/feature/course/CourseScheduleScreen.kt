@@ -29,7 +29,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
@@ -104,28 +103,7 @@ fun CourseScheduleWorkspace(
         },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (expanded) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "课程表",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "查看本学期或选课课表，并按教学周过滤",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                    Text(if (state.isRefreshing) "正在同步" else "同步课表")
-                }
-            }
-        }
-
-        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
+        // 同步态在 DestinationPage 顶栏；此处不再放页内「同步课表」。
         state.failure?.let { failure ->
             CourseFailureBanner(
                 failure = failure,
@@ -154,11 +132,11 @@ fun CourseScheduleWorkspace(
                                 courses = state.visibleCourses,
                                 selectedCourseId = state.selectedCourseId,
                                 onOpen = model::showCourseDetails,
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                modifier = Modifier.weight(0.65f).fillMaxHeight(),
                             )
                             CourseDetailPanel(
                                 course = state.selectedCourse,
-                                modifier = Modifier.widthIn(min = 270.dp, max = 340.dp).fillMaxHeight(),
+                                modifier = Modifier.weight(0.35f).fillMaxHeight(),
                             )
                         }
                     }

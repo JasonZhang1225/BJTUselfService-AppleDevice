@@ -29,7 +29,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -84,27 +83,6 @@ fun ExamScheduleWorkspace(
         },
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (expanded) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "考试安排",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "按考试类型筛选并查看完整时间、地点和状态",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                FilledTonalButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                    Text(if (state.isRefreshing) "正在同步" else "同步考试")
-                }
-            }
-        }
-
         // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
             ExamFailureBanner(
@@ -120,15 +98,20 @@ fun ExamScheduleWorkspace(
             state.exams.isEmpty() -> ExamEmptyState(onRefresh)
             else -> {
                 if (expanded) {
-                    // 宽屏：Banner 带筛选入口 + 类型 chips 仍可常驻，便于鼠标点选。
+                    // 与移动端一致：同步态在顶栏；Banner 内筛选入口；类型 chips 进 sheet（不再页内重复）。
                     ExamSummary(
                         state = state,
                         onOpenFilter = { showFilterSheet = true },
                     )
-                    ExamTypeFilters(state, model)
                     if (state.visibleExams.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Text("当前类型下没有考试安排", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick = { showFilterSheet = true }) { Text("调整筛选") }
+                            }
                         }
                     } else {
                         Row(
@@ -139,11 +122,11 @@ fun ExamScheduleWorkspace(
                                 exams = state.visibleExams,
                                 selectedExamId = state.selectedExamId,
                                 onOpen = model::showExamDetails,
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                modifier = Modifier.weight(0.58f).fillMaxHeight(),
                             )
                             ExamDetailPanel(
                                 exam = state.selectedExam,
-                                modifier = Modifier.widthIn(min = 290.dp, max = 380.dp).fillMaxHeight(),
+                                modifier = Modifier.weight(0.42f).fillMaxHeight(),
                             )
                         }
                     }

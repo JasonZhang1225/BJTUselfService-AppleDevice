@@ -171,25 +171,52 @@ abstract class FinalizeMacDistributable : DefaultTask() {
         // createDistributable 可能为 UP-TO-DATE，因此收尾任务必须可重复执行。
         val encryptionKey = ":ITSAppUsesNonExemptEncryption"
         val infoPlist = bundle.resolve("Contents/Info.plist").absolutePath
-        val setResult = execOperations.exec {
-            commandLine(
-                "/usr/libexec/PlistBuddy",
-                "-c",
-                "Set $encryptionKey false",
-                infoPlist,
-            )
-            isIgnoreExitValue = true
-        }
-        if (setResult.exitValue != 0) {
-            execOperations.exec {
+        fun setOrAddPlistString(key: String, value: String) {
+            val setResult = execOperations.exec {
                 commandLine(
                     "/usr/libexec/PlistBuddy",
                     "-c",
-                    "Add $encryptionKey bool false",
+                    "Set :$key $value",
                     infoPlist,
                 )
-            }.assertNormalExitValue()
+                isIgnoreExitValue = true
+            }
+            if (setResult.exitValue != 0) {
+                execOperations.exec {
+                    commandLine(
+                        "/usr/libexec/PlistBuddy",
+                        "-c",
+                        "Add :$key string $value",
+                        infoPlist,
+                    )
+                }.assertNormalExitValue()
+            }
         }
+        fun setOrAddPlistBool(key: String, value: Boolean) {
+            val setResult = execOperations.exec {
+                commandLine(
+                    "/usr/libexec/PlistBuddy",
+                    "-c",
+                    "Set :$key $value",
+                    infoPlist,
+                )
+                isIgnoreExitValue = true
+            }
+            if (setResult.exitValue != 0) {
+                execOperations.exec {
+                    commandLine(
+                        "/usr/libexec/PlistBuddy",
+                        "-c",
+                        "Add :$key bool $value",
+                        infoPlist,
+                    )
+                }.assertNormalExitValue()
+            }
+        }
+        // 菜单栏应用名 / Launchpad / 某些系统对话框用这两个键；packageName 保持英文文件名。
+        setOrAddPlistString("CFBundleName", "交大自由行 KMP")
+        setOrAddPlistString("CFBundleDisplayName", "交大自由行 KMP")
+        setOrAddPlistBool("ITSAppUsesNonExemptEncryption", false)
 
         execOperations.exec {
             commandLine(
@@ -244,13 +271,14 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             modules("java.sql")
             packageName = "BJTUselfServiceKMP"
-            packageVersion = "1.0.0"
+            packageVersion = "1.7.1"
             description = "交大自由行 Kotlin Multiplatform macOS 应用"
             vendor = "BJTUselfService Contributors"
             macOS {
                 iconFile.set(project.file("src/main/resources/BJTUselfServiceKMP-v2.icns"))
                 bundleID = "team.bjtuss.bjtuselfservice.kmp.macos"
-                dockName = "交大自由行"
+                // 菜单栏 / Dock / About·Hide·Quit 显示名；packageName 仍用英文，保证 .app/.dmg 文件名稳定。
+                dockName = "交大自由行 KMP"
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
                 packageBuildVersion = "1"
@@ -304,6 +332,11 @@ val finalizeMacDistributable by tasks.registering(FinalizeMacDistributable::clas
 
 tasks.matching { it.name == "createDistributable" }.configureEach {
     finalizedBy(finalizeMacDistributable)
+}
+
+// packageDmg 只 dependsOn createDistributable，不保证等 finalizedBy 跑完；显式挂上，避免 Info.plist 中文名还没写进就打 DMG。
+tasks.matching { it.name == "packageDmg" }.configureEach {
+    dependsOn(finalizeMacDistributable)
 }
 
 tasks.matching { it.name == "run" }.configureEach {

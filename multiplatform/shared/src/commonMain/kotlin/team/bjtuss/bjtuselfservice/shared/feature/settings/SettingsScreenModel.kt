@@ -18,7 +18,10 @@ data class SettingsUiState(
     val saveFailed: Boolean = false,
 )
 
-/** 设置状态只保存普通偏好；凭据与 Cookie 仍由现有安全退出路径管理。主题始终跟随系统，不再提供切换。 */
+/**
+ * 设置状态只保存普通偏好；凭据与 Cookie 仍由现有安全退出路径管理。
+ * 浅深色始终跟随系统；[AppPreferences.dynamicColor] 仅 Android 设置页暴露开关。
+ */
 class SettingsScreenModel(
     initialPreferences: AppPreferences,
     private val persistPreferences: (AppPreferences) -> Boolean,
@@ -41,6 +44,11 @@ class SettingsScreenModel(
 
     fun setAutoSyncExams(enabled: Boolean) = updatePreferences {
         copy(autoSyncExams = enabled)
+    }
+
+    /** Android Material You 动态取色；其它平台设置页不展示，即使写入也无视觉效果。 */
+    fun setDynamicColor(enabled: Boolean) = updatePreferences {
+        copy(dynamicColor = enabled)
     }
 
     suspend fun clearOfflineCache() {
