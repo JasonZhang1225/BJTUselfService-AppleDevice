@@ -39,7 +39,7 @@
 - 验证码使用 `pytorch_android` 加载 `app/src/main/assets/model.pt`。
 - 目标架构是 Kotlin Multiplatform + Compose Multiplatform，支持 Android、iOS、macOS。
 - 新实现必须放在独立 `multiplatform/` Gradle 工程中；不要修改 `app/`、现有根 `build.gradle.kts`、`settings.gradle.kts`、`gradle/`、Android Manifest、资源或现有测试。
-- 最新正式 Release 和功能对齐基线是 `v1.7.0@419313d`；`ZJG@9d8da18` 只是迁移分支创建点。
+- 当前 KMP 三端发布基线为 pre-release `1.7.1-KMP`（本地构建上传 GitHub Release，无 git tag）；上游 Android 对照基线保留 `v1.7.0@419313d`；`ZJG@9d8da18` 只是迁移分支创建点。
 - 当前冻结 Android 工作树不是完整的 1.7.0 源码参考。需要查看 1.7.0 时使用隔离的只读参考目录或独立工作树，不把发布提交混入冻结根工程或 `multiplatform/`。
 
 > 动态进度（当前做到哪一步、近期计划）见 `memory.md`；历史验收与验证证据见 `history_full.md`；本文件只讲原则与边界。
@@ -232,4 +232,4 @@
 
 ## 当前首要任务
 
-当前最优先任务是 **M5.5：登录页 UI 优化 + 验证码自动识别**，范围与验收见 `goal.md` M5.5 节。所有新实现只写入 `multiplatform/` 和迁移文档，不修改冻结根 Android 工程。联网下载、签名、提交、推送和发布等继续遵守各自权限边界。每次交付前更新 `goal.md` 与 `memory.md`。
+当前最优先任务是 **M12 考试导出到日历** 与 **M13 物理在线（phyvlab）接入**，范围与验收见 `goal.md` 对应节及 `docs/migration/` 规划文档。M5.5/M5.6 已完成。所有新实现只写入 `multiplatform/` 和迁移文档，不修改冻结根 Android 工程。联网下载、签名、提交、推送和发布等继续遵守各自权限边界。每次交付前更新 `goal.md` 与 `memory.md`。
