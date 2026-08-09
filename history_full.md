@@ -264,6 +264,12 @@
 - commonTest：classroomoccupancy 解析/ScreenModel、classroom 搜索缓存用例通过；三端编译路径与 assembleDebug 曾通过；Live probe 本机网络通过。
 - 用户 iPhone 真机：占用查询进楼/切周/弹层、人数估计明文、空闲绿色与底栏反馈有多轮目视；代理下 bksy 日期仍可能空（不挡占用）。未做正式签名分发。
 
+## M12 前置：M5.5/M5.6 收口与第一阶段发布（2026-08-09）
+
+- M5.5 登录页 UI 优化 + 验证码自动识别、M5.6 用户手动确认全部 UI 与真实数据验证由用户确认完成；第一阶段（M0–M11 + M5.5 + M5.6）全部收口。
+- KMP 三端发布 pre-release `1.7.1-KMP`，git tag `v1.7.1-KMP` 指向 `8498f32`；自该版本起取代 `v1.7.0` 成为新功能与回归验收的对照基线。
+- 当前最优先转为 M12 考试导出日历、M13 物理在线接入；规划文档 `docs/migration/m12-exam-calendar-export-plan.md`、`m13-phyvlab-integration-plan.md`。
+
 ## 决策记录
 
 - 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。
@@ -280,3 +286,4 @@
 - 2026-08-01：真实作业上传延期到学校后续布置作业时再做；不制造作业或上传无关文件。
 - 2026-08-05：紧凑端二/三级页导航交给平台原生容器（Android 系统 Activity、iOS UIKit `UINavigationController`），Compose `NavDisplay` 只保留宽屏/回退路径与一级 tab 容器；底栏一级 tab 永不触发原生 push。
 - 2026-08-06：去掉 Compose 下拉刷新（与系统过滚互抢）；紧凑可刷新页改用顶栏圆形刷新按钮 + 平台原生 overscroll；原生 SwiftUI `.refreshable` 留到日后 SwiftUI 重写再做。
+- 2026-08-09：第一阶段（M0–M11 + M5.5 + M5.6）全部收口，KMP 三端发布 pre-release `1.7.1-KMP`（git tag `v1.7.1-KMP`，`8498f32`）；自该版本起取代 `v1.7.0` 成为新功能对照基线，后续新功能走 M12+ 独立里程碑。
