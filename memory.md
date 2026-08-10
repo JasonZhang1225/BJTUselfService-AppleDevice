@@ -28,7 +28,7 @@
 
 ## 3. 接下来 1～3 个阶段
 
-1. **M12 课程表体验整合**（a 日期跳转 / b 手机一周视图 / c 课程表导出 ICS）→ **M13 物理在线接入**（需内网调研，外网 443 不通）。规划文档 `docs/migration/m12-course-schedule-plan.md`、`m13-phyvlab-integration-plan.md`。
+1. **M12 课程表体验整合**（a 日期跳转 / b 手机一周视图 / c 课程表与考试导出 ICS）→ **M13 物理在线接入**（需内网调研，外网 443 不通）。规划文档 `docs/migration/m12-course-schedule-plan.md`、`m13-phyvlab-integration-plan.md`。
 2. **自然样本补证与公版门禁**：课件文件夹、作业上传、信息流变化、验证码扩样；UI 逐页按用户指定推进。
 
 ## 维护规则
