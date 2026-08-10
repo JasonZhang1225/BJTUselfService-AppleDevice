@@ -1,5 +1,9 @@
 package team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -342,8 +346,32 @@ private fun OccupancyDetail(
             model = model,
             onOpenWeekPicker = { showWeekPicker = true },
         )
-        SlotTimeRangesLegend()
-        OccupancyLegend()
+        var showSlotTimes by remember { mutableStateOf(false) }
+        // 只用外层 animateContentSize 一个动画驱动高度，星期条和教室卡片严格跟随，
+        // 不再嵌套第二个垂直动画（两个动画速率不一致会显得不同步）。
+        Column(
+            modifier = Modifier.animateContentSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OccupancyLegendRow(
+                showSlotTimes = showSlotTimes,
+                onToggleSlotTimes = { showSlotTimes = !showSlotTimes },
+            )
+            // 时段区只做淡出/淡入（不影响高度），高度变化全交给外层 animateContentSize，
+            // 位移只有一个速率来源。fadeIn 初始 0f 让展开时也从透明渐显，避免突兀。
+            AnimatedVisibility(
+                visible = showSlotTimes,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                SlotTimeRangesLegend()
+            }
+        }
+        // 星期条挪到图例下、紧贴教室卡片，是切换占用格的直接操作。
+        OccupancyCompactDaySelector(
+            selectedDay = state.selectedWeekday,
+            onSelect = { model.selectWeekday(it) },
+        )
 
         when (val query = state.queryState) {
             ClassroomOccupancyQueryState.Idle, ClassroomOccupancyQueryState.Loading -> {
@@ -583,7 +611,7 @@ private fun WeekChipLabel(
     }
 }
 
-/** 筛选区：周选择箭头 + 可点击周文本（开学期/周弹层）+ 星期 chips。 */
+/** 筛选区：周选择箭头 + 可点击周文本（开学期/周弹层）。星期条已拆到详情层。 */
 @Composable
 private fun ClassroomOccupancyFilters(
     state: ClassroomOccupancyUiState,
@@ -591,57 +619,49 @@ private fun ClassroomOccupancyFilters(
     onOpenWeekPicker: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        WeekArrow(
+            label = "‹",
+            contentDescription = "上一周",
+            enabled = state.selectedWeek > MIN_WEEK,
+            onClick = { scope.launch { model.selectWeek(state.selectedWeek - 1) } },
+        )
+        // 中间整块可点击打开弹层：带下箭头暗示可展开，与两侧箭头同款药丸样式。
+        Surface(
+            onClick = onOpenWeekPicker,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            shape = RoundedCornerShape(999.dp),
+            modifier = Modifier.weight(1f),
         ) {
-            WeekArrow(
-                label = "‹",
-                contentDescription = "上一周",
-                enabled = state.selectedWeek > MIN_WEEK,
-                onClick = { scope.launch { model.selectWeek(state.selectedWeek - 1) } },
-            )
-            // 中间整块可点击打开弹层：带下箭头暗示可展开，与两侧箭头同款药丸样式。
-            Surface(
-                onClick = onOpenWeekPicker,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                shape = RoundedCornerShape(999.dp),
-                modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Text(
-                        "第 ${state.selectedWeek} 周",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        "▾",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                }
+                Text(
+                    "第 ${state.selectedWeek} 周",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    "▾",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
             }
-            WeekArrow(
-                label = "›",
-                contentDescription = "下一周",
-                enabled = state.selectedWeek < MAX_WEEK,
-                onClick = { scope.launch { model.selectWeek(state.selectedWeek + 1) } },
-            )
         }
-        // 与课程表一致：单字「一二三四五六日」固定七等分一行，选中态靠容器色区分；
-        // 「周一」双字在 Pro Max 上会折行/溢出，横滚又显得拥挤。
-        OccupancyCompactDaySelector(
-            selectedDay = state.selectedWeekday,
-            onSelect = { model.selectWeekday(it) },
+        WeekArrow(
+            label = "›",
+            contentDescription = "下一周",
+            enabled = state.selectedWeek < MAX_WEEK,
+            onClick = { scope.launch { model.selectWeek(state.selectedWeek + 1) } },
         )
     }
 }
@@ -741,29 +761,70 @@ private fun SlotTimeRangesLegend() {
     }
 }
 
-/** 图例：五种占用 + 空闲 + 未知色（教务出现新底色时的兜底）。 */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 图例七等分：空闲/排课/调课/考试/实验/其他（合并未知）+ 「时段▾」展开钮，
+ * 与星期条同为七格视觉对齐。点「时段▾」在下方展开节次时间。
+ */
 @Composable
-private fun OccupancyLegend() {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+private fun OccupancyLegendRow(
+    showSlotTimes: Boolean,
+    onToggleSlotTimes: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.48f),
+        shape = RoundedCornerShape(14.dp),
     ) {
-        legendEntries().forEach { (kind, label) ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            legendEntries().forEach { (kind, label) ->
+                val (bg, fg) = occupancyCellColors(kind)
+                // 色块作背景、文字放进色块里，与教室卡片占用格同款表达。
+                // 固定 40dp 高度：在 animateContentSize 的 Column 里 heightIn(min=) 无上限，
+                // 若再用 fillMaxSize 会把格子撑到剩余全屏；固定高度即可让文字居中。
                 Surface(
-                    color = occupancyCellColors(kind).first,
-                    shape = RoundedCornerShape(3.dp),
-                    modifier = Modifier.size(12.dp),
-                ) {}
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                    color = bg,
+                    contentColor = fg,
+                    shape = RoundedCornerShape(11.dp),
+                    modifier = Modifier.weight(1f).height(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            // 第七格：时段展开钮。
+            Surface(
+                onClick = onToggleSlotTimes,
+                color = if (showSlotTimes) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    Color.Transparent
+                },
+                contentColor = if (showSlotTimes) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                shape = RoundedCornerShape(11.dp),
+                modifier = Modifier.weight(1f).height(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        if (showSlotTimes) "时段▴" else "时段▾",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -775,8 +836,8 @@ private fun legendEntries(): List<Pair<OccupancyKind, String>> = listOf(
     OccupancyKind.RESCHEDULED to "调课",
     OccupancyKind.EXAM to "考试",
     OccupancyKind.EXPERIMENT to "实验",
+    // 「其他」合并未知兜底：格子仍可能染未知色，图例不单列，凑齐六格 + 时段钮。
     OccupancyKind.OTHER to "其他",
-    OccupancyKind.UNKNOWN to "未知",
 )
 
 /**
