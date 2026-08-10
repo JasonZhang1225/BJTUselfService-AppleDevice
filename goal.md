@@ -23,7 +23,7 @@
 - [ ] Apple Developer Team、真机、Archive、正式签名、公证、App Store 隐私问卷。
 
 ### 当前最优先（按顺序执行）
-- [ ] **M12 考试导出到日历**（Android/iOS/macOS，规划中）。
+- [ ] **M12 课程表体验整合**（a 日期跳转 / b 手机一周视图 / c 课程表导出，规划中）。
 - [ ] **M13 物理在线（phyvlab）接入**（需内网调研先行，规划中）。
 
 > M5.5 登录页 UI + 验证码、M5.6 全部 UI 手动确认与真实数据验证已于 2026-08-09 由用户确认完成。当前进度细节见 `memory.md`（实时工作记忆）与 `history_full.md`（按里程碑归档的完整历史）。本文件只描述规划与验收标准。M12–M13 详细目标文档见 `docs/migration/`。
@@ -315,9 +315,9 @@ Apple 端曾出现模型可以生成或加载、但实际验证码识别很差�
 
 状态：**已完成**。新功能，原冻结 Android 1.7.0 没有。教务 `room_view` 两级楼→占用，`jxlh` 数字 ID，学期/周弹层，bksy 校历 `executePublic` 公开通道，弹层选周改详情 hostScope 修「同步中」卡死。细节见 `history_full.md` M11 节。
 
-### M12：考试导出到日历
+### M12：课程表体验整合
 
-状态：**规划中**。把考试安排导出到系统日历（Android/iOS/macOS），支持全部与单条导出；首版以 ICS 文件为基线，直接写系统日历作为增强。范围、平台差异、验收与待调研见 `docs/migration/m12-exam-calendar-export-plan.md`。
+状态：**规划中**。整合三个课程表体验子项：M12a 日期跳转（按日期查课）、M12b 手机一周整合视图、M12c 课程表导出日历（ICS）。范围、平台差异、验收与待调研见 `docs/migration/m12-course-schedule-plan.md`。
 
 ### M13：物理在线（phyvlab）接入
 
