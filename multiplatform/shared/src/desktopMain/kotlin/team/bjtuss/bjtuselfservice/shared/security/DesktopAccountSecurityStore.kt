@@ -3,7 +3,13 @@ package team.bjtuss.bjtuselfservice.shared.security
 import java.util.prefs.Preferences
 
 fun createDesktopAccountSecurityStore(): AccountSecurityStore = AccountSecurityStore(
-    credentialVault = MacOsKeychainCredentialVault(),
+    // Keychain 是 macOS 专属。Windows 首版不把密码降级存入明文 Preferences；
+    // 后续接入 Credential Manager/DPAPI 前，界面会隐藏“记住密码”能力。
+    credentialVault = if (System.getProperty("os.name").startsWith("Mac", ignoreCase = true)) {
+        MacOsKeychainCredentialVault()
+    } else {
+        null
+    },
     preferences = DesktopAccountPreferences(),
 )
 

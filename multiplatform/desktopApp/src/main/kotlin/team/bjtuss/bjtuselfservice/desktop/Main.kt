@@ -20,7 +20,7 @@ import kotlinx.coroutines.runBlocking
 import team.bjtuss.bjtuselfservice.shared.App
 import team.bjtuss.bjtuselfservice.shared.registerDesktopCredentialWindowHandle
 import team.bjtuss.bjtuselfservice.shared.auth.CaptchaRecognitionResult
-import team.bjtuss.bjtuselfservice.shared.auth.DesktopCoreMlCaptchaRecognizer
+import team.bjtuss.bjtuselfservice.shared.auth.createDesktopCaptchaRecognizer
 import team.bjtuss.bjtuselfservice.shared.cache.createDesktopCacheStore
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommand
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommandBus
@@ -31,7 +31,8 @@ import team.bjtuss.bjtuselfservice.shared.system.DesktopWindowLifecycle
 private const val CAPTCHA_VERIFICATION_ARGUMENT = "--verify-captcha-model="
 
 fun main(args: Array<String>) {
-    val captchaRecognizer = DesktopCoreMlCaptchaRecognizer()
+    val isMacOs = System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
+    val captchaRecognizer = createDesktopCaptchaRecognizer()
     args.firstOrNull { it.startsWith(CAPTCHA_VERIFICATION_ARGUMENT) }?.let { argument ->
         val image = File(argument.removePrefix(CAPTCHA_VERIFICATION_ARGUMENT))
         require(image.isFile) { "验证码验证图片不存在：${image.absolutePath}" }
@@ -66,12 +67,14 @@ fun main(args: Array<String>) {
             }
 
             DisposableEffect(desktop, reopenListener) {
-                desktop?.addAppEventListener(reopenListener)
-                onDispose { desktop?.removeAppEventListener(reopenListener) }
+                val registered = runCatching { desktop?.addAppEventListener(reopenListener) }.isSuccess
+                onDispose {
+                    if (registered) runCatching { desktop?.removeAppEventListener(reopenListener) }
+                }
             }
 
             Window(
-                onCloseRequest = { lifecycle.closeWindow() },
+                onCloseRequest = { if (isMacOs) lifecycle.closeWindow() else exitApplication() },
                 title = "交大自由行 KMP",
                 state = state,
             ) {
@@ -85,7 +88,7 @@ fun main(args: Array<String>) {
                             window.isVisible = true
                             window.toFront()
                             window.requestFocus()
-                            desktop?.requestForeground(true)
+                            runCatching { desktop?.requestForeground(true) }
                         }
                     }
                 }

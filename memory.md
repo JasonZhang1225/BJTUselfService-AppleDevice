@@ -28,8 +28,9 @@
 
 ## 3. 接下来 1～3 个阶段
 
-1. **M12 课程表体验整合**（a 日期跳转 / b 手机一周视图 / c 课程表与考试导出 ICS）→ **M13 物理在线接入**（需内网调研，外网 443 不通）。规划文档 `docs/migration/m12-course-schedule-plan.md`、`m13-phyvlab-integration-plan.md`。
-2. **自然样本补证与公版门禁**：课件文件夹、作业上传、信息流变化、验证码扩样；UI 逐页按用户指定推进。
+1. **Windows 移植首版**：已从 `1.7.1-KMP` 接入 Compose Desktop 当前宿主依赖与 MSI/EXE 打包、Windows 关闭生命周期；验证码实验性复用原 TorchScript（本机 Python/PyTorch/Pillow 桥接，缺失时回退手填），凭据保存待 Credential Manager/DPAPI 后再开放。仍需 Windows 真机打包、启动与登录验收。
+2. **M12 课程表体验整合**（a 日期跳转 / b 手机一周视图 / c 课程表与考试导出 ICS）→ **M13 物理在线接入**（需内网调研，外网 443 不通）。规划文档 `docs/migration/m12-course-schedule-plan.md`、`m13-phyvlab-integration-plan.md`。
+3. **自然样本补证与公版门禁**：课件文件夹、作业上传、信息流变化、验证码扩样；UI 逐页按用户指定推进。
 
 ## 维护规则
 

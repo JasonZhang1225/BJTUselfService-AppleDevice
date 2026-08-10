@@ -250,7 +250,7 @@ java {
 
 dependencies {
     implementation(project(":shared"))
-    implementation(libs.compose.desktop.macos.arm64)
+    implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.core)
 }
 
@@ -260,15 +260,22 @@ compose.desktop {
         val captchaBuildDirectory = layout.buildDirectory.dir("generated/captcha")
         val inputSourceHelperFile =
             layout.buildDirectory.file("generated/input-source/libBJTUInputSourceHelper.dylib")
-        jvmArgs += listOf(
-            "--enable-native-access=ALL-UNNAMED",
-            "-Dbjtu.captcha.helper=${captchaBuildDirectory.get().file("BJTUCaptchaHelper").asFile.absolutePath}",
-            "-Dbjtu.captcha.model=${captchaBuildDirectory.get().dir("model/BJTUCaptcha.mlmodelc").asFile.absolutePath}",
-            "-Dbjtu.input-source.helper=${inputSourceHelperFile.get().asFile.absolutePath}",
-        )
+        if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+            jvmArgs += listOf(
+                "--enable-native-access=ALL-UNNAMED",
+                "-Dbjtu.captcha.helper=${captchaBuildDirectory.get().file("BJTUCaptchaHelper").asFile.absolutePath}",
+                "-Dbjtu.captcha.model=${captchaBuildDirectory.get().dir("model/BJTUCaptcha.mlmodelc").asFile.absolutePath}",
+                "-Dbjtu.input-source.helper=${inputSourceHelperFile.get().asFile.absolutePath}",
+            )
+        }
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg)
+            val hostOs = org.gradle.internal.os.OperatingSystem.current()
+            when {
+                hostOs.isWindows -> targetFormats(TargetFormat.Msi, TargetFormat.Exe)
+                hostOs.isMacOsX -> targetFormats(TargetFormat.Dmg)
+                else -> targetFormats(TargetFormat.Deb)
+            }
             modules("java.sql")
             packageName = "BJTUselfServiceKMP"
             // Compose Desktop 的 packageVersion 仅允许数字点号；展示名/Release 用 1.7.1-KMP。
@@ -283,6 +290,10 @@ compose.desktop {
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
                 packageBuildVersion = "1"
+            }
+            windows {
+                menuGroup = "交大自由行 KMP"
+                upgradeUuid = "67732ddd-7d37-44a0-ae80-909c7b9f11c9"
             }
         }
     }
@@ -332,14 +343,24 @@ val finalizeMacDistributable by tasks.registering(FinalizeMacDistributable::clas
 }
 
 tasks.matching { it.name == "createDistributable" }.configureEach {
-    finalizedBy(finalizeMacDistributable)
+    if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) finalizedBy(finalizeMacDistributable)
 }
 
 // packageDmg 只 dependsOn createDistributable，不保证等 finalizedBy 跑完；显式挂上，避免 Info.plist 中文名还没写进就打 DMG。
 tasks.matching { it.name == "packageDmg" }.configureEach {
-    dependsOn(finalizeMacDistributable)
+    if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) dependsOn(finalizeMacDistributable)
 }
 
 tasks.matching { it.name == "run" }.configureEach {
-    dependsOn(compileMacCaptchaModel, compileMacCaptchaHelper, compileMacInputSourceHelper)
+    if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+        dependsOn(compileMacCaptchaModel, compileMacCaptchaHelper, compileMacInputSourceHelper)
+    }
+}
+
+// Windows 使用原版 TorchScript 模型。当前桥接器优先调用用户机器上的
+// Python/PyTorch；环境不可用时登录页会按既有策略回退到手动验证码。
+tasks.named<ProcessResources>("processResources") {
+    from(project(":androidApp").file("src/main/assets/BJTUCaptcha.pt")) {
+        into("captcha")
+    }
 }

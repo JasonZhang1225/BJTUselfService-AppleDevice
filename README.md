@@ -1,7 +1,7 @@
 # 🚄 交大自由行 (BJTU Self Service)
 
 > 北京交通大学校园服务客户端 —— 让校园生活触手可及  
-> 本仓库为 **Kotlin Multiplatform 三端刷新版**（Android / iOS / macOS），在原安卓项目功能基线 `v1.7.0` 上迁移与增强。
+> 本仓库为 **Kotlin Multiplatform 刷新版**（Android / iOS / macOS / Windows），Windows 版基于 `1.7.1-KMP` 继续移植。
 
 [![KMP Pre-release](https://img.shields.io/github/v/release/JasonZhang1225/BJTUselfService-KMP-Refreshed?include_prereleases&style=flat-square&label=KMP%20版本)](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases)
 [![Upstream](https://img.shields.io/github/v/release/HFDLYS/BJTUselfService?style=flat-square&label=原作者安卓)](https://github.com/HFDLYS/BJTUselfService/releases/latest)
@@ -17,7 +17,7 @@
 
 所有数据解析（包括验证码识别）均在**本地完成**，无需上传至第三方服务器，充分保障用户隐私安全。
 
-本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做三端共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。当前 pre-release 版本号 **1.7.1-KMP**。
+本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做跨平台共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。Windows 移植以 pre-release **1.7.1-KMP** 为功能基线。
 
 相对原版新增/增强（节选）：
 - **教室占用查询**（教务 `room_view`，原 1.7.0 安卓无）
@@ -63,13 +63,13 @@
 ```
 ┌─────────────────────────────────────────────┐
 │              UI（Compose Multiplatform）      │
-│     Android / iOS / macOS 共享 Screen + 壳层  │
+│ Android / iOS / macOS / Windows 共享 Screen  │
 ├─────────────────────────────────────────────┤
 │           shared 领域 / 仓库 / 登录协议        │
 │  SQLDelight 缓存 · 平台 Keystore/Keychain     │
 │  Ktor + 各平台引擎 · HTML 解析                 │
 ├─────────────────────────────────────────────┤
-│  验证码：Android TorchScript / Apple Core ML  │
+│ Android/Windows TorchScript / Apple Core ML   │
 └─────────────────────────────────────────────┘
 ```
 
@@ -81,7 +81,7 @@
 | 网络 | Ktor |
 | 本地缓存 | SQLDelight |
 | 凭据 | Android Keystore / Apple Keychain |
-| 验证码 | Android TorchScript、Apple Core ML |
+| 验证码 | Android TorchScript、Apple Core ML；Windows 实验性复用 TorchScript |
 | 宿主 | androidApp · iosApp · desktopApp |
 
 ## 🚀 快速开始
@@ -92,6 +92,7 @@
 - Android SDK（KMP `androidApp` 当前 compileSdk 见 `multiplatform/`）
 - Xcode（构建 iOS / 相关原生辅助）
 - Apple Silicon macOS（Desktop 当前 arm64 自包含包）
+- Windows 10/11 x64（打包需在 Windows 主机运行，并安装 WiX Toolset）
 
 ### 构建步骤（KMP）
 
@@ -109,6 +110,9 @@ chmod +x gradlew
 
 # 4. macOS DMG（Apple Silicon）
 ./gradlew :desktopApp:packageDmg
+
+# Windows（PowerShell / cmd，在 Windows 主机）
+gradlew.bat :desktopApp:packageMsi
 
 # iOS 请用 Xcode 打开 multiplatform/iosApp，按开发证书签名安装；
 # 或本地打未签名 IPA 后侧载（见 builtapps/README.md）。
@@ -134,6 +138,7 @@ chmod +x gradlew
 - **Android**：minSdk 28+，KMP 包名 `team.bjtuss.bjtuselfservice.kmp`（与原版包名不同）
 - **iOS**：开发/侧载构建（未签名 IPA 需自行重签名）
 - **macOS**：Apple Silicon 自包含 `.app` / `.dmg`（开发 ad-hoc 签名，未公证）
+- **Windows**：x64 `.msi` / `.exe` 宿主已接入；验证码尝试调用本机 Python 3 + PyTorch + Pillow 加载原版 TorchScript，环境不可用时自动回退手动填写。首版不保存密码，避免在接入 Windows Credential Manager 前降级明文存储
 
 ## 🔒 隐私与安全
 
