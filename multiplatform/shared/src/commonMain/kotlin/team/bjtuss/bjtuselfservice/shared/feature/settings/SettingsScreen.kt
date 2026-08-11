@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 import team.bjtuss.bjtuselfservice.shared.platformSupportsDynamicColor
+import team.bjtuss.bjtuselfservice.shared.update.AppUpdateChecker
 
 @Composable
 fun SettingsWorkspace(
@@ -64,6 +65,10 @@ fun SettingsWorkspace(
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
         )
     }
+
+    // 检查结果弹窗提到 SettingsWorkspace 外层渲染：「前往下载」属于应用壳层导航动作，
+    // 挂在页面里时用户不在设置页就永远看不到自动检测出的新版本提示。
+    AppUpdateResultDialog(state.updateCheck, model::dismissUpdateCheck)
 
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(
@@ -141,9 +146,16 @@ fun SettingsWorkspace(
             ) {
                 Text("版本与项目", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${platform.displayName} · KMP 迁移构建 v1.7.1-KMP\n功能对齐基线：原安卓 v1.7.0",
+                    "${platform.displayName} · KMP 迁移构建 v${AppUpdateChecker.CURRENT_VERSION}\n功能对齐基线：原安卓 v1.7.0",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                OutlinedButton(
+                    onClick = { scope.launch { model.checkForUpdate() } },
+                    enabled = state.updateCheck !is UpdateCheckState.Checking,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (state.updateCheck is UpdateCheckState.Checking) "正在检查更新…" else "检查更新")
+                }
                 OutlinedButton(
                     onClick = { uriHandler.openUri("https://github.com/HFDLYS/BJTUselfService") },
                     modifier = Modifier.fillMaxWidth(),
@@ -159,12 +171,7 @@ fun SettingsWorkspace(
                     Text("本仓库 GitHub（KMP 三端）")
                 }
                 Text(
-                    when (platform.family) {
-                        PlatformFamily.Android ->
-                            "正式发布后由应用商店或项目发布页提供更新。"
-                        PlatformFamily.IOS, PlatformFamily.MacOS ->
-                            "正式发布后由 App Store、签名安装包或项目发布页提供更新。"
-                    },
+                    "预发布阶段更新检测指向本仓库 GitHub Releases（含 pre-release）。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -224,6 +231,76 @@ fun SettingsWorkspace(
 private fun CacheClearButton(onClick: () -> Unit, enabled: Boolean, modifier: Modifier) {
     OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier) {
         Text("清除离线缓存")
+    }
+}
+
+/** GitHub `published_at` 是 ISO-8601（如 2026-08-09T13:24:35Z），弹窗里只展示日期；格式不符时回退原文。 */
+private fun formatPublishedAt(iso: String): String =
+    if (iso.length >= 10 && iso[4] == '-' && iso[7] == '-') iso.substring(0, 10) else iso
+
+/**
+ * 更新检测结果弹窗。应用壳（AuthenticatedAppShell）在 SettingsWorkspace 外层渲染它，
+ * 因此自动/手动检查出的新版本提示不依赖用户停留在设置页。
+ * 新版本 → 「前往下载」跳 GitHub 发布页；已最新/失败 → 轻量提示；Idle/Checking 不渲染。
+ */
+@Composable
+fun AppUpdateResultDialog(check: UpdateCheckState, onDismiss: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    when (check) {
+        is UpdateCheckState.Done -> {
+            if (check.hasUpdate) {
+                AlertDialog(
+                    onDismissRequest = onDismiss,
+                    title = { Text("发现新版本 ${check.release.tagName}") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            check.release.publishedAt?.let { publishedAt ->
+                                Text(
+                                    "发布时间：${formatPublishedAt(publishedAt)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                            check.release.body?.takeIf { it.isNotBlank() }?.let { body ->
+                                Text(
+                                    body,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            onDismiss()
+                            uriHandler.openUri(check.release.htmlUrl)
+                        }) { Text("前往下载") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = onDismiss) { Text("暂不更新") }
+                    },
+                )
+            } else {
+                AlertDialog(
+                    onDismissRequest = onDismiss,
+                    title = { Text("已是最新版本") },
+                    text = { Text("当前 v${AppUpdateChecker.CURRENT_VERSION} 已是最新发布（${check.release.tagName}）。") },
+                    confirmButton = {
+                        TextButton(onClick = onDismiss) { Text("好") }
+                    },
+                )
+            }
+        }
+        UpdateCheckState.Failed -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("检查更新失败") },
+                text = { Text("无法连接 GitHub，请检查网络后重试。") },
+                confirmButton = {
+                    TextButton(onClick = onDismiss) { Text("好") }
+                },
+            )
+        }
+        UpdateCheckState.Idle, UpdateCheckState.Checking -> Unit
     }
 }
 

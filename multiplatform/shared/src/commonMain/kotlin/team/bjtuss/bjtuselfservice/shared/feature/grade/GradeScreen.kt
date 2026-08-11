@@ -138,6 +138,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomUiState
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyBuildingWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.settings.AppUpdateResultDialog
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxScreenModel
@@ -267,6 +268,7 @@ fun AuthenticatedAppShell(
     val classroomOccupancyState by classroomOccupancyModel.state.collectAsState()
     val mailboxState by mailboxModel.state.collectAsState()
     val homeState by homeModel.state.collectAsState()
+    val settingsState by settingsModel.state.collectAsState()
     val homeChanges by homeChangeFeed.records.collectAsState()
     // 挂 session：原生二级页重建 Compose 时仍记住本登录态是否关过提示。
     // 同时必须有本地 mutableState，否则只写 session 字段不会触发重组，Banner 点了不关。
@@ -422,6 +424,18 @@ fun AuthenticatedAppShell(
             }
         }
     }
+
+    // 进入主界面后静默检查一次更新（对齐原安卓启动时自动检测）：
+    // 仅发现新版本才弹「前往下载」；失败或无更新不打扰用户。
+    // settingsModel 与 login 同生命周期、按 studentId remember，每次登录各弹一次。
+    LaunchedEffect(settingsModel, entryLoggingIn) {
+        if (entryLoggingIn) return@LaunchedEffect
+        settingsModel.checkForUpdate(silentOnMiss = true)
+    }
+
+    // 检查结果弹窗放在整个壳内容之后渲染：发现新版本时无论当前在哪个页面都能看到
+    // 「前往下载」，不依赖用户停留在设置页（设置页内按钮触发的结果也走同一弹窗）。
+    AppUpdateResultDialog(settingsState.updateCheck, settingsModel::dismissUpdateCheck)
 
     // 页面骨架（顶栏 + 下拉刷新）包在各目的地内部而非 NavHost 外层：
     // 1) 外层容器若随当前页面切换（如“更多”页不可刷新、考试安排页可刷新），NavHost 会在
