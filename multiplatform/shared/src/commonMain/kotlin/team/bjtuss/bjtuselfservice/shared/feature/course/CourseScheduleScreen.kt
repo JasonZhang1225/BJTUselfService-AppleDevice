@@ -72,9 +72,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.time.Clock
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
@@ -344,7 +347,15 @@ fun CourseScheduleWorkspace(
                                 showSchedulePicker = false
                             },
                             label = {
-                                Text(if (week == state.currentWeek) "第${week}周（当前）" else "第${week}周")
+                                Text(
+                                    if (state.scheduleType == CourseScheduleType.CURRENT &&
+                                        week == state.currentWeek
+                                    ) {
+                                        "第${week}周（当前）"
+                                    } else {
+                                        "第${week}周"
+                                    },
+                                )
                             },
                         )
                     }
@@ -458,7 +469,7 @@ private fun CourseSummary(
         else -> "第 ${state.selectedWeek} 周"
     }
     // 副行只保留当前教学周提示；条数对用户无意义，已去掉。
-    val subtitle = if (state.currentWeek > 0) "当前第 ${state.currentWeek} 周" else null
+    val subtitle = state.semesterStatusSubtitle()
 
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
@@ -540,6 +551,9 @@ private fun CourseDatePickerDialog(
 ) {
     val initialMillis = selectedDate?.toEpochDays()?.times(MILLIS_PER_DAY)
     val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    val today = remember {
+        Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
+    }
     DatePickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -556,17 +570,21 @@ private fun CourseDatePickerDialog(
     ) {
         DatePicker(
             state = pickerState,
-            title = { Text("前往日期", modifier = Modifier.padding(start = 24.dp, top = 18.dp)) },
-            headline = {
-                Text(
-                    if (locateWeekOnly) {
-                        "选择日期后前往所在教学周，必要时自动切换课表"
-                    } else {
-                        "选择日期后定位当天，必要时自动切换课表"
-                    },
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 8.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "前往日期",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    TextButton(onClick = { onSelect(today) }) {
+                        Text("今天")
+                    }
+                }
             },
             showModeToggle = true,
         )
@@ -633,11 +651,7 @@ private fun LocalDate.displayChineseMonthDay(): String = "${month.ordinal + 1}�
 private fun LocalDate.displayDate(): String = "${year}年${month.ordinal + 1}月${day}日"
 
 private fun CourseScheduleUiState.compactSummarySubtitle(includeToday: Boolean): String? {
-    val currentWeekText = if (scheduleType == CourseScheduleType.CURRENT && currentWeek > 0) {
-        "当前第 $currentWeek 周"
-    } else {
-        null
-    }
+    val currentWeekText = semesterStatusSubtitle()
     val todayText = if (includeToday) todayDate?.let { "今天是 ${it.displayChineseMonthDay()}" } else null
     return listOfNotNull(currentWeekText, todayText).joinToString("，").ifBlank { null }
 }

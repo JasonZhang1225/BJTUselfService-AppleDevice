@@ -385,6 +385,57 @@ class CourseScheduleScreenModelTest {
     }
 
     @Test
+    fun selectionSubtitleUsesSelectionCalendarInsteadOfSnapshotCurrentWeek() {
+        val state = CourseScheduleUiState(
+            currentWeek = 24,
+            scheduleType = CourseScheduleType.SELECTION,
+            selectedWeek = 1,
+            todayDate = LocalDate(2026, 8, 11),
+            academicWeeks = listOf(week(1, LocalDate(2026, 9, 7))),
+        )
+
+        assertEquals("学期尚未开始", state.semesterStatusSubtitle())
+    }
+
+    @Test
+    fun currentSubtitleStillUsesSnapshotCurrentWeek() {
+        val state = CourseScheduleUiState(
+            currentWeek = 24,
+            scheduleType = CourseScheduleType.CURRENT,
+            todayDate = LocalDate(2026, 8, 11),
+        )
+
+        assertEquals("当前第 24 周", state.semesterStatusSubtitle())
+    }
+
+    @Test
+    fun startedSelectionSubtitleComputesWeekFromItsOwnCalendar() {
+        val state = CourseScheduleUiState(
+            currentWeek = 24,
+            scheduleType = CourseScheduleType.SELECTION,
+            selectedWeek = 2,
+            todayDate = LocalDate(2026, 9, 16),
+            academicWeeks = listOf(
+                week(1, LocalDate(2026, 9, 7)),
+                week(2, LocalDate(2026, 9, 14)),
+            ),
+        )
+
+        assertEquals("当前第 2 周", state.semesterStatusSubtitle())
+    }
+
+    @Test
+    fun selectionWithoutCalendarDoesNotGuessSemesterStatus() {
+        val state = CourseScheduleUiState(
+            currentWeek = 24,
+            scheduleType = CourseScheduleType.SELECTION,
+            todayDate = LocalDate(2026, 8, 11),
+        )
+
+        assertEquals(null, state.semesterStatusSubtitle())
+    }
+
+    @Test
     fun compactViewModeDoesNotLoseWeekOrDaySelection() = runBlocking {
         val snapshot = CourseScheduleSnapshot(listOf(course(1, week = 3)), 3)
         val model = CourseScheduleScreenModel(FakeRepository(snapshot, snapshot))

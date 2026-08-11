@@ -148,6 +148,27 @@ data class CourseScheduleUiState(
 
     fun dateFor(week: Int, dayIndex: Int): LocalDate? =
         weekDate(week)?.startDate?.plus(dayIndex, DateTimeUnit.DAY)
+
+    /**
+     * 副标题中的“当前周”提示：
+     * - 本学期课表直接使用教务快照 currentWeek；
+     * - 选课课表必须按自己的校历判断。学期未开始显示“学期尚未开始”，
+     *   已开始则按校历计算当前周；快照 currentWeek 属于本学期，不能用于选课课表。
+     */
+    fun semesterStatusSubtitle(): String? {
+        if (scheduleType == CourseScheduleType.CURRENT) {
+            return if (currentWeek > 0) "当前第 $currentWeek 周" else null
+        }
+        val today = todayDate ?: return null
+        val firstStart = academicWeeks.mapNotNull(OccupancyWeekDate::startDate).minOrNull()
+            ?: return null
+        if (today < firstStart) return "学期尚未开始"
+        val currentSelectionWeek = academicWeeks.firstOrNull { week ->
+            val start = week.startDate ?: return@firstOrNull false
+            today >= start && today <= start.plus(6, DateTimeUnit.DAY)
+        }?.week
+        return currentSelectionWeek?.let { "当前第 $it 周" }
+    }
 }
 
 class CourseScheduleScreenModel(
