@@ -335,6 +335,11 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "team.bjtuss.bjtuselfservice.desktop.MainKt"
+        // jpackage 只在完整 JDK 有，Android Studio JBR 没有；运行时检测/打包单独指向系统完整 JDK，
+        // 与守护进程 JDK 解耦（Kotlin 编译仍在 JBR 下跑，避免 KGP 在 JDK 25 下崩溃）。
+        javaHome = providers.environmentVariable("DESKTOP_PACKAGE_JAVA_HOME")
+            .orElse("/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home")
+            .get()
         val captchaBuildDirectory = layout.buildDirectory.dir("generated/captcha")
         val inputSourceHelperFile =
             layout.buildDirectory.file("generated/input-source/libBJTUInputSourceHelper.dylib")
