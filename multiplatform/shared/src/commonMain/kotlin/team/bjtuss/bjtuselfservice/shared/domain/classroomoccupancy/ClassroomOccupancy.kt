@@ -1,5 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.domain.classroomoccupancy
 
+import kotlinx.datetime.LocalDate
+
 /**
  * “教室占用”切片的共享领域对象：教务 room_view 周视图 → 教室 × 星期 × 节次占用。
  *
@@ -64,6 +66,11 @@ data class OccupancyWeekDate(
     val week: Int,
     val startMonthDay: String,
     val endMonthDay: String,
+    /**
+     * M12 需要日期跳转与日历导出，不能只靠不含年份的 `M/d` 文案反推日期。
+     * 旧 fixture / 调用方可继续只传前三项；线上 hidJson 解析会始终填入完整周一日期。
+     */
+    val startDate: LocalDate? = null,
 )
 
 /**

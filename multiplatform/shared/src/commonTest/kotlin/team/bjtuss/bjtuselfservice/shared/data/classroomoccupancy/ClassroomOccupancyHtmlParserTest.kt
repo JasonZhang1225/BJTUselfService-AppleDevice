@@ -163,15 +163,15 @@ class ClassroomOccupancyHtmlParserTest {
         assertEquals(setOf("2026-2027-1"), weeks.keys)
         val fall = assertNotNull(weeks["2026-2027-1"])
         assertEquals(18, fall.size)
-        assertEquals(OccupancyWeekDate(1, "9/7", "9/13"), fall.first())
-        assertEquals(OccupancyWeekDate(2, "9/14", "9/20"), fall.first { it.week == 2 })
-        assertEquals(OccupancyWeekDate(3, "9/21", "9/27"), fall.first { it.week == 3 })
+        assertEquals(weekDate(1, "9/7", "9/13", 2026, 9, 7), fall.first())
+        assertEquals(weekDate(2, "9/14", "9/20", 2026, 9, 14), fall.first { it.week == 2 })
+        assertEquals(weekDate(3, "9/21", "9/27", 2026, 9, 21), fall.first { it.week == 3 })
         // “休”行（9/28）被跳过，第 4 周是 10/5 那周，而不是 9/28。
-        assertEquals(OccupancyWeekDate(4, "10/5", "10/11"), fall.first { it.week == 4 })
+        assertEquals(weekDate(4, "10/5", "10/11", 2026, 10, 5), fall.first { it.week == 4 })
         // 12/28 周跨月，1/11 周跨年（2027）。
-        assertEquals(OccupancyWeekDate(16, "12/28", "1/3"), fall.first { it.week == 16 })
-        assertEquals(OccupancyWeekDate(17, "1/4", "1/10"), fall.first { it.week == 17 })
-        assertEquals(OccupancyWeekDate(18, "1/11", "1/17"), fall.last())
+        assertEquals(weekDate(16, "12/28", "1/3", 2026, 12, 28), fall.first { it.week == 16 })
+        assertEquals(weekDate(17, "1/4", "1/10", 2027, 1, 4), fall.first { it.week == 17 })
+        assertEquals(weekDate(18, "1/11", "1/17", 2027, 1, 11), fall.last())
     }
 
     @Test
@@ -189,12 +189,12 @@ class ClassroomOccupancyHtmlParserTest {
 
         val spring = assertNotNull(weeks["2025-2026-2"])
         assertEquals(27, spring.size)
-        assertEquals(OccupancyWeekDate(1, "3/2", "3/8"), spring.first())
-        assertEquals(OccupancyWeekDate(18, "6/29", "7/5"), spring.first { it.week == 18 })
+        assertEquals(weekDate(1, "3/2", "3/8", 2026, 3, 2), spring.first())
+        assertEquals(weekDate(18, "6/29", "7/5", 2026, 6, 29), spring.first { it.week == 18 })
         // 夏季段第 1 周 = aa zc 19，周次文本回落到 1。
-        assertEquals(OccupancyWeekDate(19, "7/6", "7/12"), spring.first { it.week == 19 })
-        assertEquals(OccupancyWeekDate(23, "8/3", "8/9"), spring.first { it.week == 23 })
-        assertEquals(OccupancyWeekDate(27, "8/31", "9/6"), spring.last())
+        assertEquals(weekDate(19, "7/6", "7/12", 2026, 7, 6), spring.first { it.week == 19 })
+        assertEquals(weekDate(23, "8/3", "8/9", 2026, 8, 3), spring.first { it.week == 23 })
+        assertEquals(weekDate(27, "8/31", "9/6", 2026, 8, 31), spring.last())
     }
 
     @Test
@@ -209,7 +209,10 @@ class ClassroomOccupancyHtmlParserTest {
 
         assertEquals(setOf("2024-2025-2"), weeks.keys)
         assertEquals(
-            listOf(OccupancyWeekDate(1, "3/3", "3/9"), OccupancyWeekDate(19, "7/7", "7/13")),
+            listOf(
+                weekDate(1, "3/3", "3/9", 2025, 3, 3),
+                weekDate(19, "7/7", "7/13", 2025, 7, 7),
+            ),
             assertNotNull(weeks["2024-2025-2"]),
         )
     }
@@ -231,6 +234,15 @@ class ClassroomOccupancyHtmlParserTest {
         )
     }
 }
+
+private fun weekDate(
+    week: Int,
+    startMonthDay: String,
+    endMonthDay: String,
+    year: Int,
+    month: Int,
+    day: Int,
+) = OccupancyWeekDate(week, startMonthDay, endMonthDay, LocalDate(year, month, day))
 
 private fun occupancyTable(vararg rows: String): String =
     "<table><tr><th>教室</th></tr>${rows.joinToString("")}</table>"

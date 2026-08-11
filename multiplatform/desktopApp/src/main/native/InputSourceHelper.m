@@ -3,6 +3,7 @@
 #include <pthread.h>
 
 typedef void (*BJTUCredentialCallback)(int32_t event, const char *value);
+typedef void (*BJTUTrackpadPagerCallback)(int32_t direction);
 
 static const int32_t BJTUCredentialEventUsernameChanged = 1;
 static const int32_t BJTUCredentialEventPasswordChanged = 2;
@@ -490,6 +491,152 @@ static NSView *BJTUContentViewForWindowHandle(uint64_t windowHandle) {
         return view.window.contentView ?: view;
     }
     return nil;
+}
+
+/**
+ * 原生触摸板分页器：只读取手指 phase，momentumPhase（松手后的惯性）完全忽略。
+ * 因此一次物理手势最多回调一页；下一次 Began 立即恢复，不需要猜测冷却时间。
+ */
+@interface BJTUTrackpadPagerHost : NSObject
+@property(nonatomic, weak) NSView *contentView;
+@property(nonatomic, weak) NSWindow *window;
+@property(nonatomic, assign) BJTUTrackpadPagerCallback callback;
+@property(nonatomic, assign) NSRect targetFrame;
+@property(nonatomic, strong) id eventMonitor;
+@property(nonatomic, assign) BOOL gestureActive;
+@property(nonatomic, assign) BOOL pageSent;
+@property(nonatomic, assign) CGFloat accumulatedX;
+@property(nonatomic, assign) NSTimeInterval lastEventTimestamp;
+- (instancetype)initWithContentView:(NSView *)contentView callback:(BJTUTrackpadPagerCallback)callback;
+- (void)updateFrameX:(double)x y:(double)y width:(double)width height:(double)height density:(double)density;
+- (void)stop;
+@end
+
+@implementation BJTUTrackpadPagerHost
+
+- (instancetype)initWithContentView:(NSView *)contentView callback:(BJTUTrackpadPagerCallback)callback {
+    self = [super init];
+    if (self == nil) return nil;
+    _contentView = contentView;
+    _window = contentView.window;
+    _callback = callback;
+    _targetFrame = NSZeroRect;
+    _lastEventTimestamp = 0.0;
+    __weak BJTUTrackpadPagerHost *weakSelf = self;
+    _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
+        handler:^NSEvent *(NSEvent *event) {
+            BJTUTrackpadPagerHost *host = weakSelf;
+            if (host == nil || event.window != host.window || host.contentView == nil) return event;
+            NSPoint point = [host.contentView convertPoint:event.locationInWindow fromView:nil];
+            if (!NSPointInRect(point, host.targetFrame)) return event;
+
+            NSEventPhase momentum = event.momentumPhase;
+            if (momentum != NSEventPhaseNone) return event;
+
+            NSEventPhase phase = event.phase;
+            BOOL began = (phase & (NSEventPhaseBegan | NSEventPhaseMayBegin)) != 0;
+            BOOL ended = (phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) != 0;
+            // 少数驱动不给 phase；仅对此退化路径使用很短的事件间隔识别新手势。
+            BOOL fallbackNewGesture = phase == NSEventPhaseNone &&
+                host.lastEventTimestamp > 0.0 &&
+                event.timestamp - host.lastEventTimestamp > 0.08;
+            if (began || !host.gestureActive || fallbackNewGesture) {
+                host.gestureActive = YES;
+                host.pageSent = NO;
+                host.accumulatedX = 0.0;
+            }
+            host.lastEventTimestamp = event.timestamp;
+            if (ended) {
+                host.gestureActive = NO;
+                host.pageSent = NO;
+                host.accumulatedX = 0.0;
+                return event;
+            }
+            if (host.pageSent) return event;
+
+            CGFloat deltaX = event.scrollingDeltaX;
+            CGFloat deltaY = event.scrollingDeltaY;
+            if (fabs(deltaX) <= fabs(deltaY) || deltaX == 0.0) return event;
+            if (host.accumulatedX != 0.0 && (host.accumulatedX > 0.0) != (deltaX > 0.0)) {
+                host.accumulatedX = 0.0;
+            }
+            host.accumulatedX += deltaX;
+            if (fabs(host.accumulatedX) >= 28.0 && host.callback != NULL) {
+                host.pageSent = YES;
+                host.callback(host.accumulatedX > 0.0 ? 1 : -1);
+            }
+            return event;
+        }];
+    return self;
+}
+
+- (void)updateFrameX:(double)x y:(double)y width:(double)width height:(double)height density:(double)density {
+    if (self.contentView == nil || width <= 0.0 || height <= 0.0) return;
+    CGFloat scale = density > 0.0 ? density : 1.0;
+    CGFloat pointX = x / scale;
+    CGFloat pointY = y / scale;
+    CGFloat pointWidth = width / scale;
+    CGFloat pointHeight = height / scale;
+    self.targetFrame = NSMakeRect(
+        pointX,
+        self.contentView.bounds.size.height - pointY - pointHeight,
+        pointWidth,
+        pointHeight
+    );
+}
+
+- (void)stop {
+    if (self.eventMonitor != nil) {
+        [NSEvent removeMonitor:self.eventMonitor];
+        self.eventMonitor = nil;
+    }
+}
+
+- (void)dealloc {
+    [self stop];
+}
+
+@end
+
+__attribute__((visibility("default")))
+void *bjtuCreateTrackpadPager(uint64_t windowHandle, BJTUTrackpadPagerCallback callback) {
+    __block void *result = NULL;
+    dispatch_block_t work = ^{
+        NSView *contentView = BJTUContentViewForWindowHandle(windowHandle);
+        if (contentView == nil || callback == NULL) return;
+        BJTUTrackpadPagerHost *host = [[BJTUTrackpadPagerHost alloc]
+            initWithContentView:contentView
+            callback:callback];
+        result = (__bridge_retained void *)host;
+    };
+    if (pthread_main_np() != 0) work(); else dispatch_sync(dispatch_get_main_queue(), work);
+    return result;
+}
+
+__attribute__((visibility("default")))
+void bjtuSetTrackpadPagerFrame(
+    void *hostPointer,
+    double x,
+    double y,
+    double width,
+    double height,
+    double density
+) {
+    if (hostPointer == NULL) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BJTUTrackpadPagerHost *host = (__bridge BJTUTrackpadPagerHost *)hostPointer;
+        [host updateFrameX:x y:y width:width height:height density:density];
+    });
+}
+
+__attribute__((visibility("default")))
+void bjtuDestroyTrackpadPager(void *hostPointer) {
+    if (hostPointer == NULL) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BJTUTrackpadPagerHost *host = (__bridge_transfer BJTUTrackpadPagerHost *)hostPointer;
+        [host stop];
+        (void)host;
+    });
 }
 
 static NSTextInputContext *gRestrictedContext = nil;

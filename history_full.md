@@ -270,6 +270,20 @@
 - KMP 三端发布 pre-release `1.7.1-KMP`，git tag `v1.7.1-KMP` 指向 `8498f32`；自该版本起取代 `v1.7.0` 成为新功能与回归验收的对照基线。
 - 当前最优先转为 M12 课程表体验整合（a 日期跳转 / b 一周视图 / c 课程表与考试导出）、M13 物理在线接入；规划文档 `docs/migration/m12-course-schedule-plan.md`、`m13-phyvlab-integration-plan.md`。
 
+## M12：课程表日期、一周表格与系统日历（2026-08-10～11，已完成）
+
+- **日期与缓存**：课程表复用 M11 `hidJson` 校历，把 `OccupancyWeekDate` 从月日文字扩展为完整 `LocalDate`；日期选择原子更新周/星期，非教学周进入空态。Computer Use 在 iPhone 17 Pro 实测 2026-08-12 → 第 24 周周三。视觉验收还发现缓存第 23 周先到会错误关闭 `followCurrentWeek`，导致网络第 24 周不再跟随；现只有用户手选周/日期才冻结，缓存/网络自动结果保持跟随，并把支持范围从 26 周扩到 30 周以覆盖夏季续编。
+- **课程浏览连续改进**：首版纵向七日卡片被用户否决，最终紧凑端改为带左侧图标的“概览表格 / 列表”，概览在左并作为默认；列表用七页横滑在当前周内切日，概览为一屏 7 天 × 7 节表格。用户进一步去掉表格上方重复周数，标题栏最终为左侧放大的五个性质色胶囊“必修/限选/任选/体育/未知”与右侧“滑动切换周数”。大日期 banner 删除，顶部日期改为“6月15日”中文月日。iPhone 与 Android 均完成真实视觉和手势复核。
+- **课程性质与全部页**：色块不再按名称/哈希随机分配，而是复用成绩培养方案的课程号→必修/限选/任选/体育映射，课程号可剥离 `[04]` 等教学班后缀；真实缓存 `C108002B` 为必修，微积分色块已恢复红色，未知才灰色。“全部教学周”成为分页最左侧第 0 页，紧邻第 1 周，不再显示或滑动回当前周；同一格的单双周/交替课程按时间范围排序并排为半格。iPhone 17 Pro 已实测全部→第 1 周→全部双向滑动和半格详情。
+- **课程日历**：课程表顶栏右上角在同步胶囊旁显示“加入日历”。当前课表类型按真实教学周逐条展开，北京时区，默认独立日历名严格为“本学期课表”/“选课课表”。iOS/macOS EventKit 创建或复用同名日历，notes 首行 `[BJTU-ID:...]` 用于更新；地点/教师/标题不进入稳定 ID，服务端顺序与展示字段变化不会产生新 UID。Apple 端保留 `.ics`，Android 走文件分享/保存。
+- **考试边界**：用户明确考试服务端增删改可能滞后，禁止批量或合并导入。实现只在单场考试详情显示“加入日历”，每次生成 `listOf(exam)`，系统日历名“考试安排”，`.ics` 也只含当前一场；缺日期/开始时间时禁用，不猜全天事件。
+- **macOS 真机 Calendar 验证**：打包 App 首次请求日历权限后创建 iCloud 日历“本学期课表”，新增 266 项；Calendar.app 侧栏与 2026-07-26 实际课程事件均可见。第二次加入结果新增 0、更新 266，去重/更新成立。未出现钥匙串密码框；按用户约定若出现则取消。
+- **iOS EventKit 验证**：iPhone 17 Pro / iOS 26.5 Simulator 在用户手动登录后通过系统“完全访问日历”权限弹窗，真实创建“选课课表”并新增 226 项；相同范围第二次加入显示新增 0、更新 226，证明稳定标记幂等更新成立。
+- **Android 真实导出验证**：Pixel 10 Pro XL 通过系统 DocumentsUI 保存“本学期课表.ics”，文件含 266 个 `VEVENT`、`Asia/Shanghai` 时区与正确结束标记。真实考试详情只出现单场“加入日历”，保存的“考试安排”文件恰好含 1 个 `VEVENT`，时间为 2026-07-01 09:00–11:00；未出现批量考试入口。
+- **Xcode Beta**：`xcode-select -p` 仍是 `/Library/Developer/CommandLineTools`，没有改全局；`desktopApp` Core ML/Swift helper 的 `xcrun` 子进程在未显式设置时优先 `/Applications/Xcode-beta.app/Contents/Developer`。Xcode Beta iPhone 17 Pro/iOS 26.5 host build 成功。
+- **门禁**：`AcademicCalendarExportTest` 覆盖真实周展开、中文/数字考试时间、非法日期不猜、稳定 ID 顺序/教室/教师变化；`CourseScheduleScreenModelTest` 覆盖缓存→网络当前周、手选冻结、日期与第 27 周续编。`:shared:desktopTest`、`:androidApp:assembleDebug`、Xcode Simulator host、`:desktopApp:packageDistributionForCurrentOS` 均成功；macOS app 内含 Calendar helper、日历用途说明且 `codesign --verify --deep --strict` 通过。
+- **完成边界**：M12 已完成并保持未提交状态；未执行提交、标签、推送或发布。未来学校出现新的课程/考试时间文本时，仍需按“无法解析则禁用/跳过，不猜日期”的现有边界补回归样本。
+
 ## 决策记录
 
 - 2026-07-29：采用 Kotlin Multiplatform + Compose Multiplatform。
@@ -287,3 +301,28 @@
 - 2026-08-05：紧凑端二/三级页导航交给平台原生容器（Android 系统 Activity、iOS UIKit `UINavigationController`），Compose `NavDisplay` 只保留宽屏/回退路径与一级 tab 容器；底栏一级 tab 永不触发原生 push。
 - 2026-08-06：去掉 Compose 下拉刷新（与系统过滚互抢）；紧凑可刷新页改用顶栏圆形刷新按钮 + 平台原生 overscroll；原生 SwiftUI `.refreshable` 留到日后 SwiftUI 重写再做。
 - 2026-08-09：第一阶段（M0–M11 + M5.5 + M5.6）全部收口，KMP 三端发布 pre-release `1.7.1-KMP`（git tag `v1.7.1-KMP`，`8498f32`）；自该版本起取代 `v1.7.0` 成为新功能对照基线，后续新功能走 M12+ 独立里程碑。M12 定为课程表体验整合（a 日期跳转 / b 一周视图 / c 课程表与考试导出），M13 为物理在线接入。
+
+## M12 后续：选课校历、重复日程与桌面切周修复（2026-08-11）
+
+- **旧学期导入根因与修复**：`CourseScheduleScreenModel` 原先只有一份共享 `academicWeeks`，切换到选课课表仍复用当前第二学期/暑假校历，导致下一学期课程写到旧日期。现按课表类型保存校历映射：本学期使用当前学期；选课课表使用语义上的下一学期（第二学期→下一学年第一学期）。下一学期校历缺失时禁用导出，不回退到旧学期。真实 macOS 导出弹层核对为 `2026-2027-1`，第 1 周从 `2026-09-07` 开始。
+- **可批量修改后续课程**：课程不再展开成几百条独立事件，而是按课程号、星期和节次合并为 weekly recurrence；停课、单双周与不连续周通过例外 occurrence 保留，重复缓存行先合并。`.ics` 输出 `RRULE`/`EXDATE`；iOS/macOS EventKit 使用 weekly `EKRecurrenceRule`，更新已有系列时使用 future-events span，旧受管独立事件会按稳定标记迁移，用户自行创建的日程不删除。考试保持单条导入，不进入重复系列。
+- **真实 EventKit 证据**：macOS 已登录开发包对“选课课表”首次导入显示新增 21 个系列、更新 0；第二次显示新增 0、更新 21。Calendar.app 侧栏出现“选课课表”。日历 App 被用户同时操作时 Computer Use 停止抢焦点，因此没有用自动化修改真实课程来弹出范围选择；重复规则与 future-events 更新由 EventKit 实现、ICS 断言和专项测试覆盖。
+- **桌面课程表**：宽屏七日网格接入与成绩页相同的课程号→性质配色，未知才灰色；表格标题栏左侧显示必修/限选/任选/体育/未知图例，右上角新增上一周/下一周圆形按钮。Computer Use 实测第 24 周→第 23 周（8月3日）→第 24 周（8月10日），banner 与七列日期同步。
+- **触摸板横滑**：桌面 `actual` 监听水平滚轮事件，累计 36px 才翻页；纵向分量占优不触发，同一段惯性在 180ms 安静间隔前只翻一周。Android/iOS `actual` 返回原 Modifier，避免桌面 API 污染移动端。Computer Use 对非原生滚动容器的水平 scroll 没有合成真实触摸板事件，因此自动化只覆盖按钮与状态机；真实触摸板手感保留用户复核边界。
+- **桌面翻页动画**：按钮与触摸板横滑共用 `selectedWeek` 驱动的方向性 `AnimatedContent`；下一周从右向左、上一周反向，使用无回弹 spring 且可被连续操作打断。图例和切换按钮固定，旧周课程数据随旧表格滑出，避免动画期间新旧周日期与色块错配。重打包后 Computer Use 实测第 2 周→第 1 周，日期和课程内容同步切换；自动截图只覆盖动画完成态。
+- **门禁**：`:shared:desktopTest`、`:shared:compileKotlinIosSimulatorArm64`、`:androidApp:assembleDebug`、`:desktopApp:createDistributable` 同次成功；macOS EventKit Swift helper 编译通过。新增测试覆盖下一学期选择、缺失禁用、重复行合并、RRULE/EXDATE、横滑方向/阈值/惯性锁。仍未提交、打标签、推送或发布。
+- **系统 Xcode 选择更新**：2026-08-11 用户明确要求并在 macOS 管理员授权弹窗中手动确认，将全局 `xcode-select` 从 `/Library/Developer/CommandLineTools` 切换到 `/Applications/Xcode-beta.app/Contents/Developer`。切换后复核 `xcode-select -p` 为 Beta 路径，`xcrun xcodebuild -version` 为 Xcode 27.0（Build `27A5228h`），`xcrun --find simctl` 为 Beta 内的 `usr/bin/simctl`。
+
+## M12 收口：紧凑文案、地点层级与 macOS 原生触摸板（2026-08-11）
+
+- **日期语义分离**：概览表格不再保留“某一天”的选择概念，右侧统一显示“前往日期”，选择日期只前往所在教学周；列表模式仍定位到具体日期，标题在“第 x 周”后显示所选月日，小字显示当前周与今天日期。教学周弹层删除“全部位于第 1 周左侧”等实现说明。
+- **日历确认文案**：课程页入口改为“添加到日历”；课程弹层标题按类型显示“导出本学期课表到日历”或“导出选课课表到日历”，删除重复规则说明，成功消息明确日历名与新增/更新数量。考试仍为单场入口，确认弹层直接展示考试名称、时间、地点，成功消息明确写入“考试安排”的数量。
+- **地点层级**：服务端 `Course.coursePlace` 继续保存原值；UI、首页变化与课程日历导出在边界处按中英文逗号分段、整体倒序并用 `-` 连接。规则不依赖首段是否为“xx校区”，专项测试同时覆盖“海淀西校区，思源楼，SY101”和“研究生唐山研究院，教学楼，A101”。
+- **触摸板原生化**：先后验证 Compose 距离累计方案会产生单次长滑跨多周、惯性尾流及 2～5 秒假冷却，最终改为打包 AppKit helper 读取 `NSEvent.phase`/`momentumPhase`。一次手指手势达到横向阈值后最多回调一页，抬手惯性完全忽略；下一次 `Began` 立即解锁，不再推测冷却时长。Compose 状态机仅作为 helper 缺失时回退；按钮与手势继续共用方向性、无回弹、可中断的 `AnimatedContent`。
+- **本轮门禁**：`:shared:desktopTest` 与 `:desktopApp:createDistributable` 成功，打包 dylib 导出原生分页接口；`:androidApp:assembleDebug` 与 `:shared:compileKotlinIosSimulatorArm64` 同次成功。Mac 开发包已重启供用户实体触摸板复核；未提交、打标签、推送或发布。
+- **方向校正**：首个 AppKit 包实机暴露 `scrollingDeltaX` 表示内容滚动方向、与页面导航方向相反；已只反转原生回调映射，保持 Compose 回退和移动端不变。旧进程明确退出后重新启动修正版，并增加桌面测试锁定“正 delta → 上一周、负 delta → 下一周”。
+
+## M12 最终验收（2026-08-11）
+
+- **跨学期前往日期**：日期选择不再局限于当前课表校历。模型优先匹配当前课表，再匹配另一课表；命中另一学期时原子更新课表类型、`calendarSemesterLabel`、`academicWeeks`、周次和日期。本学期选择 9 月日期会自动进入选课课表，选课课表选择当前学期日期可切回；两套校历都不包含的日期继续显示非教学周空态。专项测试覆盖双向往返，用户在 macOS 真实会话确认可用。
+- **用户最终确认**：AppKit 原生触摸板在修正内容滚动方向后，双指向左进入下一周、向右返回上一周；长滑最多翻一周，连续手势不再出现 2～5 秒冷却。跨学期“前往日期”随后由用户确认通过，M12 获准最终验收并提交。

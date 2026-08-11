@@ -5,6 +5,19 @@ import kotlin.test.assertEquals
 
 class CourseRulesTest {
     @Test
+    fun schoolLocationHierarchyIsReversedForDisplayRegardlessOfBroadPlaceName() {
+        assertEquals(
+            "SY101-思源楼-海淀西校区",
+            displayCoursePlace("海淀西校区，思源楼，SY101"),
+        )
+        assertEquals(
+            "A101-教学楼-研究生唐山研究院",
+            displayCoursePlace("研究生唐山研究院, 教学楼, A101"),
+        )
+        assertEquals("思源101", displayCoursePlace("思源101"))
+    }
+
+    @Test
     fun parsesRangesAndIndividualWeeks() {
         assertEquals(listOf(1, 2, 3, 5, 8, 9), parseCourseWeeks("第1-3周,第5周,第8-9周"))
     }

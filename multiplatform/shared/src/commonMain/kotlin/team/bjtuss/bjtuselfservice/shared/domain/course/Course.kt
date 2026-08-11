@@ -12,6 +12,19 @@ data class Course(
 )
 
 /**
+ * 学校课表地点按“大地点 → 楼宇 → 教室”返回，大地点也可能是研究院而非“××校区”。
+ * 展示和系统日历统一把所有逗号分隔层级倒序；无层级分隔的自由文本保持不变。
+ * 原始 Course 始终保存服务器顺序，因此该函数只在展示/导出边界调用一次。
+ */
+fun displayCoursePlace(value: String): String {
+    val parts = value.split(Regex("[,，]"))
+        .map(String::trim)
+        .filter(String::isNotBlank)
+    if (parts.size < 2) return value.trim()
+    return parts.reversed().joinToString("-")
+}
+
+/**
  * 解析 Android v1.7.0 使用的周次文本，例如“第1-3周,第5周”。
  * 任意一段格式不合法时整条记录返回空集合，与原实现一致。
  */

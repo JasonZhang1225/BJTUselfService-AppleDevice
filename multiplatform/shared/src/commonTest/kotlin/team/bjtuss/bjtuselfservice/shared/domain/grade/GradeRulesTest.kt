@@ -149,6 +149,20 @@ class GradeRulesTest {
     }
 
     @Test
+    fun scheduleCourseIdWithSectionSuffixUsesTrainingProgramType() {
+        val mapping = mapOf("C108002B" to CourseType.REQUIRED)
+
+        assertEquals(
+            CourseType.REQUIRED,
+            courseTypeForCourseName("C108002B [04]", mapping),
+        )
+        assertEquals(
+            CourseType.UNKNOWN,
+            courseTypeForCourseName("C108002B [04]", emptyMap()),
+        )
+    }
+
+    @Test
     fun filterGradesByTypeExcludesOnlyRequestedTypes() {
         val grades = listOf(
             grade(1, "2025-2026-1", "A,95", name = "C312009B高级英语视听说[04]"),

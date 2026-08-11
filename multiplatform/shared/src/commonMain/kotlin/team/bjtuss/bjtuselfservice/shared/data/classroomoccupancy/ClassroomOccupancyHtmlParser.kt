@@ -258,6 +258,7 @@ private fun buildWeeks(rows: List<StrictJsonValue>, isSpring: Boolean): List<Occ
             week = zc,
             startMonthDay = "${monday.month.ordinal + 1}/${monday.day}",
             endMonthDay = "${end.month.ordinal + 1}/${end.day}",
+            startDate = monday,
         )
     }
     return weeks

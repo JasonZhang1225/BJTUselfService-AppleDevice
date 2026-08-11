@@ -236,9 +236,9 @@ fun registerDesktopCredentialWindowHandle(windowHandle: Long) {
     desktopCredentialWindowHandle.longValue = windowHandle
 }
 
-private val desktopCredentialWindowHandle = mutableLongStateOf(0L)
+internal val desktopCredentialWindowHandle = mutableLongStateOf(0L)
 
-private fun locateInputSourceHelper(): File? {
+internal fun locateInputSourceHelper(): File? {
     System.getProperty(INPUT_SOURCE_HELPER_PROPERTY)?.let(::File)?.takeIf(File::isFile)?.let {
         return it
     }

@@ -135,11 +135,13 @@ fun main(args: Array<String>) {
                     val homeworkFileGateway = remember(window) {
                         DesktopHomeworkFileGateway { window }
                     }
+                    val systemCalendarGateway = remember { DesktopSystemCalendarGateway() }
                     App(
                         accountSecurityStore = accountSecurityStore,
                         cacheStoreHandle = cacheStoreHandle,
                         homeworkFileGateway = homeworkFileGateway,
                         coursewareDirectoryGateway = homeworkFileGateway,
+                        systemCalendarGateway = systemCalendarGateway,
                         appCommandBus = appCommandBus,
                         captchaRecognizer = captchaRecognizer,
                     )

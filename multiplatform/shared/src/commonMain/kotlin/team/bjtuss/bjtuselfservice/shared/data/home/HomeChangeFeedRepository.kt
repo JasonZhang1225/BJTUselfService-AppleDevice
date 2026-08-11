@@ -10,6 +10,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeKind
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
 import team.bjtuss.bjtuselfservice.shared.domain.change.detectDataChanges
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
+import team.bjtuss.bjtuselfservice.shared.domain.course.displayCoursePlace
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeDomain
@@ -103,7 +104,7 @@ fun courseChangeRecorder(feed: HomeChangeFeedRepository): DataChangeRecorder<Cou
         identity = { listOf(it.courseId, it.isCurrentSemester, it.courseTime, it.courseLocationIndex) },
         equivalent = { old, new -> old.copy(id = 0) == new.copy(id = 0) },
         title = Course::courseName,
-        detail = { "${it.courseTeacher} · ${it.courseTime} · ${it.coursePlace}" },
+        detail = { "${it.courseTeacher} · ${it.courseTime} · ${displayCoursePlace(it.coursePlace)}" },
     )
 
 fun examChangeRecorder(feed: HomeChangeFeedRepository): DataChangeRecorder<ExamSchedule> =

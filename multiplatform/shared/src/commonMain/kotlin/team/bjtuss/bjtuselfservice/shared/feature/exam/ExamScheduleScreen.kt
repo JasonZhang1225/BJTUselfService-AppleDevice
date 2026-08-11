@@ -57,7 +57,10 @@ import androidx.compose.ui.unit.dp
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.exam.ExamScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
+import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
+import team.bjtuss.bjtuselfservice.shared.feature.calendar.SingleExamCalendarSheet
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
+import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +68,8 @@ fun ExamScheduleWorkspace(
     state: ExamScheduleUiState,
     expanded: Boolean,
     model: ExamScheduleScreenModel,
+    fileGateway: HomeworkFileGateway,
+    systemCalendarGateway: SystemCalendarGateway,
     onRefresh: () -> Unit,
     modifier: Modifier,
 ) {
@@ -73,6 +78,7 @@ fun ExamScheduleWorkspace(
         model.initialize(refreshFromNetwork = false)
     }
     var showFilterSheet by remember { mutableStateOf(false) }
+    var examToCalendar by remember { mutableStateOf<ExamSchedule?>(null) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Column(
@@ -126,6 +132,7 @@ fun ExamScheduleWorkspace(
                             )
                             ExamDetailPanel(
                                 exam = state.selectedExam,
+                                onAddToCalendar = { examToCalendar = it },
                                 modifier = Modifier.weight(0.42f).fillMaxHeight(),
                             )
                         }
@@ -148,6 +155,10 @@ fun ExamScheduleWorkspace(
                         ) {
                             ExamDetailSheetBody(
                                 exam = exam,
+                                onAddToCalendar = {
+                                    model.dismissExamDetails()
+                                    examToCalendar = exam
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .verticalScroll(rememberScrollState())
@@ -176,6 +187,23 @@ fun ExamScheduleWorkspace(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 28.dp),
+            )
+        }
+    }
+
+    examToCalendar?.let { exam ->
+        val exportSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { examToCalendar = null },
+            sheetState = exportSheetState,
+            sheetGesturesEnabled = true,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        ) {
+            SingleExamCalendarSheet(
+                exam = exam,
+                fileGateway = fileGateway,
+                systemCalendarGateway = systemCalendarGateway,
+                onDone = { examToCalendar = null },
             )
         }
     }
@@ -434,7 +462,11 @@ private fun ExamCardLine(label: String, value: String) {
 }
 
 @Composable
-private fun ExamDetailPanel(exam: ExamSchedule?, modifier: Modifier) {
+private fun ExamDetailPanel(
+    exam: ExamSchedule?,
+    onAddToCalendar: (ExamSchedule) -> Unit,
+    modifier: Modifier,
+) {
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.54f),
@@ -447,6 +479,7 @@ private fun ExamDetailPanel(exam: ExamSchedule?, modifier: Modifier) {
         } else {
             ExamDetailContent(
                 exam = exam,
+                onAddToCalendar = onAddToCalendar,
                 contentPadding = PaddingValues(22.dp),
                 modifier = Modifier.fillMaxSize(),
             )
@@ -457,6 +490,7 @@ private fun ExamDetailPanel(exam: ExamSchedule?, modifier: Modifier) {
 @Composable
 private fun ExamDetailContent(
     exam: ExamSchedule,
+    onAddToCalendar: (ExamSchedule) -> Unit,
     modifier: Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
@@ -465,13 +499,14 @@ private fun ExamDetailContent(
             .verticalScroll(rememberScrollState())
             .padding(contentPadding),
     ) {
-        ExamDetailSheetBody(exam)
+        ExamDetailSheetBody(exam, onAddToCalendar = onAddToCalendar)
     }
 }
 
 @Composable
 private fun ExamDetailSheetBody(
     exam: ExamSchedule,
+    onAddToCalendar: (ExamSchedule) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -486,6 +521,9 @@ private fun ExamDetailSheetBody(
         ExamDetailLine("时间地点", exam.examTimeAndPlace)
         ExamDetailLine("状态", exam.examStatus)
         ExamDetailLine("详情", exam.detail.ifBlank { "未提供" })
+        Button(onClick = { onAddToCalendar(exam) }, modifier = Modifier.fillMaxWidth()) {
+            Text("添加到日历")
+        }
     }
 }
 

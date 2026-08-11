@@ -3,14 +3,18 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
+import java.io.File
 import javax.inject.Inject
 
 @DisableCachingByDefault(because = "Invokes Apple's Core ML compiler")
@@ -21,6 +25,10 @@ abstract class CompileMacCaptchaModel : DefaultTask() {
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
+    @get:Input
+    @get:Optional
+    abstract val developerDirectory: Property<String>
+
     @get:Inject
     abstract val execOperations: ExecOperations
 
@@ -30,6 +38,7 @@ abstract class CompileMacCaptchaModel : DefaultTask() {
         output.deleteRecursively()
         output.mkdirs()
         execOperations.exec {
+            developerDirectory.orNull?.let { environment("DEVELOPER_DIR", it) }
             commandLine(
                 "xcrun",
                 "coremlcompiler",
@@ -53,6 +62,10 @@ abstract class CompileMacCaptchaHelper : DefaultTask() {
     @get:OutputFile
     abstract val executable: RegularFileProperty
 
+    @get:Input
+    @get:Optional
+    abstract val developerDirectory: Property<String>
+
     @get:Inject
     abstract val execOperations: ExecOperations
 
@@ -61,6 +74,7 @@ abstract class CompileMacCaptchaHelper : DefaultTask() {
         val output = executable.get().asFile
         output.parentFile.mkdirs()
         execOperations.exec {
+            developerDirectory.orNull?.let { environment("DEVELOPER_DIR", it) }
             commandLine(
                 "xcrun",
                 "swiftc",
@@ -84,6 +98,48 @@ abstract class CompileMacCaptchaHelper : DefaultTask() {
     }
 }
 
+@DisableCachingByDefault(because = "Invokes the Swift compiler")
+abstract class CompileMacCalendarHelper : DefaultTask() {
+    @get:InputFile
+    abstract val swiftSource: RegularFileProperty
+
+    @get:OutputFile
+    abstract val executable: RegularFileProperty
+
+    @get:Input
+    @get:Optional
+    abstract val developerDirectory: Property<String>
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun compile() {
+        val output = executable.get().asFile
+        output.parentFile.mkdirs()
+        execOperations.exec {
+            developerDirectory.orNull?.let { environment("DEVELOPER_DIR", it) }
+            commandLine(
+                "xcrun",
+                "swiftc",
+                "-O",
+                "-parse-as-library",
+                "-target",
+                "arm64-apple-macos12.0",
+                "-framework",
+                "AppKit",
+                "-framework",
+                "EventKit",
+                "-framework",
+                "Foundation",
+                swiftSource.get().asFile.absolutePath,
+                "-o",
+                output.absolutePath,
+            )
+        }.assertNormalExitValue()
+    }
+}
+
 @DisableCachingByDefault(because = "Invokes Apple's Clang compiler")
 abstract class CompileMacInputSourceHelper : DefaultTask() {
     @get:InputFile
@@ -91,6 +147,10 @@ abstract class CompileMacInputSourceHelper : DefaultTask() {
 
     @get:OutputFile
     abstract val library: RegularFileProperty
+
+    @get:Input
+    @get:Optional
+    abstract val developerDirectory: Property<String>
 
     @get:Inject
     abstract val execOperations: ExecOperations
@@ -100,6 +160,7 @@ abstract class CompileMacInputSourceHelper : DefaultTask() {
         val output = library.get().asFile
         output.parentFile.mkdirs()
         execOperations.exec {
+            developerDirectory.orNull?.let { environment("DEVELOPER_DIR", it) }
             commandLine(
                 "xcrun",
                 "clang",
@@ -138,6 +199,9 @@ abstract class FinalizeMacDistributable : DefaultTask() {
     @get:InputFile
     abstract val inputSourceHelper: RegularFileProperty
 
+    @get:InputFile
+    abstract val calendarHelper: RegularFileProperty
+
     @get:Inject
     abstract val execOperations: ExecOperations
 
@@ -167,6 +231,12 @@ abstract class FinalizeMacDistributable : DefaultTask() {
             inputSourceDirectory.resolve("libBJTUInputSourceHelper.dylib"),
             overwrite = true,
         )
+        val calendarDirectory = resourcesDirectory.resolve("Calendar")
+        calendarDirectory.deleteRecursively()
+        calendarDirectory.mkdirs()
+        val calendarHelperTarget = calendarDirectory.resolve("BJTUCalendarHelper")
+        calendarHelper.get().asFile.copyTo(calendarHelperTarget, overwrite = true)
+        calendarHelperTarget.setExecutable(true, false)
         // App Store 导出合规：仅使用系统 HTTPS/Keychain，无非豁免加密。
         // createDistributable 可能为 UP-TO-DATE，因此收尾任务必须可重复执行。
         val encryptionKey = ":ITSAppUsesNonExemptEncryption"
@@ -216,6 +286,14 @@ abstract class FinalizeMacDistributable : DefaultTask() {
         // 菜单栏应用名 / Launchpad / 某些系统对话框用这两个键；packageName 保持英文文件名。
         setOrAddPlistString("CFBundleName", "交大自由行 KMP")
         setOrAddPlistString("CFBundleDisplayName", "交大自由行 KMP")
+        setOrAddPlistString(
+            "NSCalendarsFullAccessUsageDescription",
+            "用于创建本学期课表、选课课表和单场考试日历，并更新同一日程。",
+        )
+        setOrAddPlistString(
+            "NSCalendarsUsageDescription",
+            "用于把你主动选择的课程表或单场考试加入系统日历。",
+        )
         setOrAddPlistBool("ITSAppUsesNonExemptEncryption", false)
 
         execOperations.exec {
@@ -260,11 +338,13 @@ compose.desktop {
         val captchaBuildDirectory = layout.buildDirectory.dir("generated/captcha")
         val inputSourceHelperFile =
             layout.buildDirectory.file("generated/input-source/libBJTUInputSourceHelper.dylib")
+        val calendarHelperFile = layout.buildDirectory.file("generated/calendar/BJTUCalendarHelper")
         jvmArgs += listOf(
             "--enable-native-access=ALL-UNNAMED",
             "-Dbjtu.captcha.helper=${captchaBuildDirectory.get().file("BJTUCaptchaHelper").asFile.absolutePath}",
             "-Dbjtu.captcha.model=${captchaBuildDirectory.get().dir("model/BJTUCaptcha.mlmodelc").asFile.absolutePath}",
             "-Dbjtu.input-source.helper=${inputSourceHelperFile.get().asFile.absolutePath}",
+            "-Dbjtu.calendar.helper=${calendarHelperFile.get().asFile.absolutePath}",
         )
 
         nativeDistributions {
@@ -294,26 +374,44 @@ val macPrivacyManifest = layout.projectDirectory.file(
 )
 val captchaSourceModel = project.file("../iosApp/iosApp/BJTUCaptcha.mlpackage")
 val captchaSwiftSource = project.file("src/main/swift/CaptchaCoreMLHelper.swift")
+val calendarSwiftSource = project.file("src/main/swift/SystemCalendarHelper.swift")
 val inputSourceHelperSource = project.file("src/main/native/InputSourceHelper.m")
 val captchaBuildDirectory = layout.buildDirectory.dir("generated/captcha")
 val captchaHelperFile = captchaBuildDirectory.map { it.file("BJTUCaptchaHelper") }
 val captchaModelDirectory = captchaBuildDirectory.map { it.dir("model/BJTUCaptcha.mlmodelc") }
 val inputSourceHelperFile =
     layout.buildDirectory.file("generated/input-source/libBJTUInputSourceHelper.dylib")
+val calendarHelperFile = layout.buildDirectory.file("generated/calendar/BJTUCalendarHelper")
+
+// 不改全局 xcode-select：显式环境优先，否则项目局部选择完整 Xcode（含 coremlcompiler）。
+val xcodeDeveloperDirectory = sequenceOf(
+    System.getenv("DEVELOPER_DIR"),
+    "/Applications/Xcode-beta.app/Contents/Developer",
+    "/Applications/Xcode.app/Contents/Developer",
+).filterNotNull().firstOrNull { candidate -> File(candidate).isDirectory }
 
 val compileMacCaptchaModel by tasks.registering(CompileMacCaptchaModel::class) {
     sourceModel.set(captchaSourceModel)
     outputDirectory.set(captchaBuildDirectory.map { it.dir("model") })
+    xcodeDeveloperDirectory?.let(developerDirectory::set)
 }
 
 val compileMacCaptchaHelper by tasks.registering(CompileMacCaptchaHelper::class) {
     swiftSource.set(captchaSwiftSource)
     executable.set(captchaHelperFile)
+    xcodeDeveloperDirectory?.let(developerDirectory::set)
+}
+
+val compileMacCalendarHelper by tasks.registering(CompileMacCalendarHelper::class) {
+    swiftSource.set(calendarSwiftSource)
+    executable.set(calendarHelperFile)
+    xcodeDeveloperDirectory?.let(developerDirectory::set)
 }
 
 val compileMacInputSourceHelper by tasks.registering(CompileMacInputSourceHelper::class) {
     source.set(inputSourceHelperSource)
     library.set(inputSourceHelperFile)
+    xcodeDeveloperDirectory?.let(developerDirectory::set)
 }
 
 // Compose Desktop's appResourcesRootDir is a JVM runtime resource directory
@@ -321,11 +419,12 @@ val compileMacInputSourceHelper by tasks.registering(CompileMacInputSourceHelper
 // Until formal Developer ID signing is configured, finish the local app image by
 // copying the manifest to the bundle root and renewing its existing ad-hoc seal.
 val finalizeMacDistributable by tasks.registering(FinalizeMacDistributable::class) {
-    dependsOn(compileMacCaptchaModel, compileMacCaptchaHelper, compileMacInputSourceHelper)
+    dependsOn(compileMacCaptchaModel, compileMacCaptchaHelper, compileMacInputSourceHelper, compileMacCalendarHelper)
     privacyManifest.set(macPrivacyManifest)
     captchaHelper.set(captchaHelperFile)
     captchaModel.set(captchaModelDirectory)
     inputSourceHelper.set(inputSourceHelperFile)
+    calendarHelper.set(calendarHelperFile)
     appBundle.set(
         layout.buildDirectory.dir("compose/binaries/main/app/BJTUselfServiceKMP.app"),
     )
@@ -341,5 +440,5 @@ tasks.matching { it.name == "packageDmg" }.configureEach {
 }
 
 tasks.matching { it.name == "run" }.configureEach {
-    dependsOn(compileMacCaptchaModel, compileMacCaptchaHelper, compileMacInputSourceHelper)
+    dependsOn(compileMacCaptchaModel, compileMacCaptchaHelper, compileMacInputSourceHelper, compileMacCalendarHelper)
 }

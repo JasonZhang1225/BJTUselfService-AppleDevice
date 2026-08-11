@@ -1,5 +1,14 @@
 package team.bjtuss.bjtuselfservice.shared.feature.course
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,11 +32,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -38,6 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,12 +69,26 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
+import team.bjtuss.bjtuselfservice.shared.domain.course.coursesForWeek
+import team.bjtuss.bjtuselfservice.shared.domain.course.displayCoursePlace
+import team.bjtuss.bjtuselfservice.shared.domain.course.parseCourseWeeks
+import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
+import team.bjtuss.bjtuselfservice.shared.domain.grade.courseTypeForCourseName
+import team.bjtuss.bjtuselfservice.shared.domain.grade.displayName
+import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
+import team.bjtuss.bjtuselfservice.shared.feature.calendar.CourseCalendarExportSheet
+import team.bjtuss.bjtuselfservice.shared.feature.grade.courseTypeColors
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
+import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 
 /** 详情/网格等完整日名。 */
 private val dayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -69,6 +97,15 @@ private val dayLabels = listOf("周一", "周二", "周三", "周四", "周五",
  * 选中态用容器色区分，不依赖长文案。
  */
 private val compactDayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
+private val compactSlotLabels = listOf(
+    "1\n08:00",
+    "2\n10:10",
+    "3\n12:10",
+    "4\n14:10",
+    "5\n16:20",
+    "6\n19:00",
+    "7\n21:00",
+)
 private val slotLabels = listOf(
     "第一节\n08:00–09:50",
     "第二节\n10:10–12:00",
@@ -78,17 +115,28 @@ private val slotLabels = listOf(
     "第六节\n19:00–20:50",
     "第七节\n21:00–21:50",
 )
+private const val MILLIS_PER_DAY = 86_400_000L
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(
+    ExperimentalLayoutApi::class,
+    ExperimentalMaterial3Api::class,
+)
 @Composable
 fun CourseScheduleWorkspace(
     state: CourseScheduleUiState,
+    courseTypesByCode: Map<String, CourseType>?,
     expanded: Boolean,
     model: CourseScheduleScreenModel,
+    fileGateway: HomeworkFileGateway,
+    systemCalendarGateway: SystemCalendarGateway,
+    showCalendarExportSheet: Boolean,
+    onDismissCalendarExport: () -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier,
 ) {
     var showSchedulePicker by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    val weekScrollAccumulator = remember { CourseWeekScrollAccumulator() }
 
     // 只灌缓存；网络自动同步由 AuthenticatedAppShell 在登录成功后触发（可重试）。
     LaunchedEffect(model) {
@@ -120,6 +168,7 @@ fun CourseScheduleWorkspace(
                     CourseSummary(
                         state = state,
                         onOpenPicker = { showSchedulePicker = true },
+                        onOpenDatePicker = { showDatePicker = true },
                     )
                     if (state.scheduleCourses.isEmpty()) {
                         CourseEmptyState(state.scheduleType, onRefresh)
@@ -128,12 +177,64 @@ fun CourseScheduleWorkspace(
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            WeekGrid(
-                                courses = state.visibleCourses,
-                                selectedCourseId = state.selectedCourseId,
-                                onOpen = model::showCourseDetails,
-                                modifier = Modifier.weight(0.65f).fillMaxHeight(),
-                            )
+                            if (state.dateOutsideTeachingWeeks) {
+                                NonTeachingDateState(state.selectedDate, Modifier.weight(0.65f).fillMaxHeight())
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(0.65f)
+                                        .fillMaxHeight()
+                                        .courseWeekScrollNavigation(weekScrollAccumulator) { direction ->
+                                            when (direction) {
+                                                CourseWeekScrollDirection.PREVIOUS -> model.moveWeekBy(-1)
+                                                CourseWeekScrollDirection.NEXT -> model.moveWeekBy(1)
+                                            }
+                                        },
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        CourseTypeLegend()
+                                        Spacer(Modifier.weight(1f))
+                                        CourseWeekNavigationControls(
+                                            selectedWeek = state.selectedWeek,
+                                            onPrevious = { model.moveWeekBy(-1) },
+                                            onNext = { model.moveWeekBy(1) },
+                                        )
+                                    }
+                                    AnimatedContent(
+                                        targetState = state.selectedWeek,
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        transitionSpec = {
+                                            val movingForward = targetState > initialState
+                                            val pagingSpring = spring<IntOffset>(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                            )
+                                            (slideInHorizontally(
+                                                animationSpec = pagingSpring,
+                                                initialOffsetX = { width -> if (movingForward) width else -width },
+                                            ) + fadeIn(tween(180))) togetherWith
+                                                (slideOutHorizontally(
+                                                    animationSpec = pagingSpring,
+                                                    targetOffsetX = { width -> if (movingForward) -width else width },
+                                                ) + fadeOut(tween(140)))
+                                        },
+                                        label = "desktop-course-week",
+                                    ) { week ->
+                                        WeekGrid(
+                                            courses = coursesForWeek(state.scheduleCourses, week),
+                                            courseTypesByCode = courseTypesByCode,
+                                            weekStartDate = state.weekDate(week)?.startDate,
+                                            selectedCourseId = state.selectedCourseId,
+                                            onOpen = model::showCourseDetails,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                    }
+                                }
+                            }
                             CourseDetailPanel(
                                 course = state.selectedCourse,
                                 modifier = Modifier.weight(0.35f).fillMaxHeight(),
@@ -147,7 +248,9 @@ fun CourseScheduleWorkspace(
                     ) {
                         CourseSummary(
                             state = state,
+                            compact = true,
                             onOpenPicker = { showSchedulePicker = true },
+                            onOpenDatePicker = { showDatePicker = true },
                         )
                         CourseEmptyState(state.scheduleType, onRefresh)
                     }
@@ -155,8 +258,10 @@ fun CourseScheduleWorkspace(
                     // 紧凑端：摘要 + 星期选择 + 日课表同一滚动体。
                     CourseCompactScrollableContent(
                         state = state,
+                        courseTypesByCode = courseTypesByCode,
                         model = model,
                         onOpenPicker = { showSchedulePicker = true },
+                        onOpenDatePicker = { showDatePicker = true },
                         onOpen = model::showCourseDetails,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
@@ -219,11 +324,6 @@ fun CourseScheduleWorkspace(
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    "“全部”显示该课表中的所有课程；本学期首次进入会优先跟随当前周。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -236,25 +336,16 @@ fun CourseScheduleWorkspace(
                         },
                         label = { Text("全部") },
                     )
-                    // 紧挨「全部」：快捷选到学校当前教学周（括号标明第几周）。
-                    if (state.currentWeek in 1..26) {
-                        FilterChip(
-                            selected = state.selectedWeek == state.currentWeek,
-                            onClick = {
-                                model.selectWeek(state.currentWeek)
-                                showSchedulePicker = false
-                            },
-                            label = { Text("当前（第${state.currentWeek}周）") },
-                        )
-                    }
-                    (1..26).forEach { week ->
+                    (1..COURSE_MAX_WEEK).forEach { week ->
                         FilterChip(
                             selected = state.selectedWeek == week,
                             onClick = {
                                 model.selectWeek(week)
                                 showSchedulePicker = false
                             },
-                            label = { Text("第${week}周") },
+                            label = {
+                                Text(if (week == state.currentWeek) "第${week}周（当前）" else "第${week}周")
+                            },
                         )
                     }
                 }
@@ -262,15 +353,110 @@ fun CourseScheduleWorkspace(
             }
         }
     }
+
+    if (showDatePicker) {
+        CourseDatePickerDialog(
+            selectedDate = state.selectedDate,
+            locateWeekOnly = expanded || state.compactViewMode == CourseCompactViewMode.WEEK,
+            onSelect = { date ->
+                model.selectDate(date)
+                showDatePicker = false
+            },
+            onDismiss = { showDatePicker = false },
+        )
+    }
+
+    if (showCalendarExportSheet) {
+        val exportSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = onDismissCalendarExport,
+            sheetState = exportSheetState,
+            sheetGesturesEnabled = true,
+            contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        ) {
+            CourseCalendarExportSheet(
+                courseState = state,
+                fileGateway = fileGateway,
+                systemCalendarGateway = systemCalendarGateway,
+                onDone = onDismissCalendarExport,
+            )
+        }
+    }
 }
 
 @Composable
 private fun CourseSummary(
     state: CourseScheduleUiState,
+    compact: Boolean = false,
     onOpenPicker: () -> Unit,
+    onOpenDatePicker: () -> Unit,
 ) {
     val typeLabel = if (state.scheduleType == CourseScheduleType.CURRENT) "本学期课表" else "选课课表"
-    val weekLabel = if (state.selectedWeek == 0) "全部教学周" else "第 ${state.selectedWeek} 周"
+    if (compact) {
+        val isOverview = state.compactViewMode == CourseCompactViewMode.WEEK
+        val compactWeekLabel = when {
+            state.dateOutsideTeachingWeeks -> "非教学周"
+            state.selectedWeek == 0 -> "全部教学周"
+            else -> "第 ${state.selectedWeek} 周"
+        }
+        val selectedDateSuffix = if (!isOverview && state.selectedWeek > 0) {
+            state.selectedDate?.let { " · ${it.displayChineseMonthDay()}" }.orEmpty()
+        } else {
+            ""
+        }
+        val subtitle = state.compactSummarySubtitle(includeToday = !isOverview)
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 42.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onOpenPicker)
+                    .padding(horizontal = 2.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    "$typeLabel · $compactWeekLabel$selectedDateSuffix",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                subtitle?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            SummaryAction("前往日期", "选择日期并前往对应课程", onOpenDatePicker)
+            Surface(
+                onClick = onOpenPicker,
+                color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.72f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(999.dp),
+                modifier = Modifier.semantics { contentDescription = "切换课表类型与周次" },
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ExchangeArrowsIcon(modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+        return
+    }
+    val weekLabel = when {
+        state.dateOutsideTeachingWeeks -> state.selectedDate?.displayDate() ?: "非教学周"
+        state.selectedWeek == 0 -> "全部教学周"
+        else -> "第 ${state.selectedWeek} 周"
+    }
     // 副行只保留当前教学周提示；条数对用户无意义，已去掉。
     val subtitle = if (state.currentWeek > 0) "当前第 ${state.currentWeek} 周" else null
 
@@ -305,21 +491,109 @@ private fun CourseSummary(
                     )
                 }
             }
-            Surface(
-                onClick = onOpenPicker,
-                color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                shape = RoundedCornerShape(999.dp),
-                modifier = Modifier.semantics { contentDescription = "切换课表类型与周次" },
-            ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center,
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                SummaryAction("前往日期", "选择日期并前往对应教学周", onOpenDatePicker)
+                Surface(
+                    onClick = onOpenPicker,
+                    color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.semantics { contentDescription = "切换课表类型与周次" },
                 ) {
-                    // 左右对向箭头：表示学期类型/周次互换，不引入 material-icons。
-                    ExchangeArrowsIcon(modifier = Modifier.size(20.dp))
+                    Box(
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ExchangeArrowsIcon(modifier = Modifier.size(19.dp))
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SummaryAction(label: String, description: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surface.accessibleAlpha(0.86f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(999.dp),
+        modifier = Modifier.semantics { contentDescription = description },
+    ) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CourseDatePickerDialog(
+    selectedDate: LocalDate?,
+    locateWeekOnly: Boolean,
+    onSelect: (LocalDate) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val initialMillis = selectedDate?.toEpochDays()?.times(MILLIS_PER_DAY)
+    val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = pickerState.selectedDateMillis != null,
+                onClick = {
+                    val epochDay = pickerState.selectedDateMillis?.floorDiv(MILLIS_PER_DAY)
+                        ?: return@TextButton
+                    onSelect(LocalDate.fromEpochDays(epochDay))
+                },
+            ) { Text(if (locateWeekOnly) "前往这一周" else "前往这一天") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    ) {
+        DatePicker(
+            state = pickerState,
+            title = { Text("前往日期", modifier = Modifier.padding(start = 24.dp, top = 18.dp)) },
+            headline = {
+                Text(
+                    if (locateWeekOnly) {
+                        "选择日期后前往所在教学周，必要时自动切换课表"
+                    } else {
+                        "选择日期后定位当天，必要时自动切换课表"
+                    },
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            showModeToggle = true,
+        )
+    }
+}
+
+@Composable
+private fun NonTeachingDateState(date: LocalDate?, modifier: Modifier) {
+    Box(modifier = modifier.padding(20.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                date?.displayDate() ?: "所选日期",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "不在当前学期的教学周内",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                "可能是假期、考试周，或当前学期校历未覆盖这一天。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.accessibleAlpha(0.76f),
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -350,9 +624,29 @@ private fun ExchangeArrowsIcon(
     }
 }
 
+private fun LocalDate.plusDays(days: Int): LocalDate = plus(days, DateTimeUnit.DAY)
+
+private fun LocalDate.displayMonthDay(): String = "${month.ordinal + 1}/${day}"
+
+private fun LocalDate.displayChineseMonthDay(): String = "${month.ordinal + 1}月${day}日"
+
+private fun LocalDate.displayDate(): String = "${year}年${month.ordinal + 1}月${day}日"
+
+private fun CourseScheduleUiState.compactSummarySubtitle(includeToday: Boolean): String? {
+    val currentWeekText = if (scheduleType == CourseScheduleType.CURRENT && currentWeek > 0) {
+        "当前第 $currentWeek 周"
+    } else {
+        null
+    }
+    val todayText = if (includeToday) todayDate?.let { "今天是 ${it.displayChineseMonthDay()}" } else null
+    return listOfNotNull(currentWeekText, todayText).joinToString("，").ifBlank { null }
+}
+
 @Composable
 private fun WeekGrid(
     courses: List<Course>,
+    courseTypesByCode: Map<String, CourseType>?,
+    weekStartDate: LocalDate?,
     selectedCourseId: Int?,
     onOpen: (Int) -> Unit,
     modifier: Modifier,
@@ -367,9 +661,18 @@ private fun WeekGrid(
     ) {
         Row(modifier = Modifier.fillMaxWidth().height(42.dp)) {
             Box(modifier = Modifier.width(78.dp).fillMaxHeight())
-            dayLabels.forEach { day ->
+            dayLabels.forEachIndexed { index, day ->
                 Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    Text(day, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(day, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        weekStartDate?.let { start ->
+                            Text(
+                                start.plusDays(index).displayMonthDay(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -390,6 +693,7 @@ private fun WeekGrid(
                     val location = slot * 8 + day + 1
                     CourseGridCell(
                         courses = byLocation[location].orEmpty(),
+                        courseTypesByCode = courseTypesByCode,
                         selectedCourseId = selectedCourseId,
                         onOpen = onOpen,
                         modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -403,6 +707,7 @@ private fun WeekGrid(
 @Composable
 private fun CourseGridCell(
     courses: List<Course>,
+    courseTypesByCode: Map<String, CourseType>?,
     selectedCourseId: Int?,
     onOpen: (Int) -> Unit,
     modifier: Modifier,
@@ -416,15 +721,20 @@ private fun CourseGridCell(
         } else {
             Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 courses.forEach { course ->
+                    val courseType = courseTypesByCode?.let { mapping ->
+                        courseTypeForCourseName(course.courseId, mapping)
+                    } ?: CourseType.UNKNOWN
+                    val colors = courseTypeColors(courseType)
+                    val isSelected = course.id == selectedCourseId
                     Surface(
                         onClick = { onOpen(course.id) },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
-                        color = if (course.id == selectedCourseId) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.primaryContainer.accessibleAlpha(0.72f)
-                        },
+                        color = colors.container,
                         shape = RoundedCornerShape(7.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = if (isSelected) 2.dp else 0.5.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else colors.border,
+                        ),
                     ) {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(3.dp),
@@ -437,18 +747,71 @@ private fun CourseGridCell(
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
+                                color = colors.onContainer,
                             )
                             Text(
-                                course.coursePlace,
+                                displayCoursePlace(course.coursePlace),
                                 style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = colors.onContainer.accessibleAlpha(0.78f),
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CourseWeekNavigationControls(
+    selectedWeek: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CourseWeekNavigationButton(
+            label = "‹",
+            contentDescription = if (selectedWeek == 1) "切换到全部教学周" else "切换到上一周",
+            enabled = selectedWeek > 0,
+            onClick = onPrevious,
+        )
+        CourseWeekNavigationButton(
+            label = "›",
+            contentDescription = "切换到下一周",
+            enabled = selectedWeek < COURSE_MAX_WEEK,
+            onClick = onNext,
+        )
+    }
+}
+
+@Composable
+private fun CourseWeekNavigationButton(
+    label: String,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .size(34.dp)
+            .semantics { this.contentDescription = contentDescription },
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                label,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium,
+            )
         }
     }
 }
@@ -503,46 +866,408 @@ private fun CompactDaySelector(selectedDay: Int, onSelect: (Int) -> Unit) {
 
 /**
  * 紧凑课表：
- * - Banner + 星期选择 **固定** 在上方（不随列表滚走）
+ * - 轻量控制栏 + 星期选择 **固定** 在上方（不随列表滚走）
  * - 下方 LazyColumn **占满剩余高度**，即使当天课很少也能在列表区域过滚/下拉刷新
  *
- * 以前把 Banner 塞进 LazyColumn：内容不满屏时整页几乎不能滑；内容超屏时 Banner
+ * 以前把控制区塞进 LazyColumn：内容不满屏时整页几乎不能滑；内容超屏时控制区
  * 又跟着滚，观感都不对。
  */
 @Composable
 private fun CourseCompactScrollableContent(
     state: CourseScheduleUiState,
+    courseTypesByCode: Map<String, CourseType>?,
     model: CourseScheduleScreenModel,
     onOpenPicker: () -> Unit,
+    onOpenDatePicker: () -> Unit,
     onOpen: (Int) -> Unit,
     modifier: Modifier,
 ) {
-    val courses = state.visibleCourses
-    val day = state.selectedDay
-    val byLocation = courses.groupBy(Course::courseLocationIndex)
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        CourseSummary(state = state, onOpenPicker = onOpenPicker)
-        CompactDaySelector(state.selectedDay, model::selectDay)
+        CourseSummary(
+            state = state,
+            compact = true,
+            onOpenPicker = onOpenPicker,
+            onOpenDatePicker = onOpenDatePicker,
+        )
+        CompactViewModeSelector(state.compactViewMode, model::selectCompactViewMode)
+        if (state.dateOutsideTeachingWeeks) {
+            NonTeachingDateState(state.selectedDate, Modifier.weight(1f).fillMaxWidth())
+        } else if (state.compactViewMode == CourseCompactViewMode.DAY) {
+            CompactDaySelector(state.selectedDay, model::selectDay)
+            CompactDayPager(
+                courses = state.visibleCourses,
+                selectedDay = state.selectedDay,
+                onSelectDay = model::selectDay,
+                onOpen = onOpen,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        } else {
+            CompactWeekPager(
+                state = state,
+                courseTypesByCode = courseTypesByCode,
+                model = model,
+                onOpen = onOpen,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactViewModeSelector(
+    mode: CourseCompactViewMode,
+    onSelect: (CourseCompactViewMode) -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = mode == CourseCompactViewMode.WEEK,
+            onClick = { onSelect(CourseCompactViewMode.WEEK) },
+            label = {
+                CompactViewModeLabel(
+                    text = "概览表格",
+                    icon = { CompactTableIcon(Modifier.size(17.dp)) },
+                )
+            },
+            modifier = Modifier.weight(1f),
+        )
+        FilterChip(
+            selected = mode == CourseCompactViewMode.DAY,
+            onClick = { onSelect(CourseCompactViewMode.DAY) },
+            label = {
+                CompactViewModeLabel(
+                    text = "列表",
+                    icon = { CompactListIcon(Modifier.size(17.dp)) },
+                )
+            },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun CompactViewModeLabel(
+    text: String,
+    icon: @Composable () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        icon()
+        Text(text)
+    }
+}
+
+@Composable
+private fun CompactListIcon(modifier: Modifier) {
+    val color = LocalContentColor.current
+    Canvas(modifier) {
+        val dotRadius = size.minDimension * 0.08f
+        val lineStart = size.width * 0.34f
+        val lineEnd = size.width * 0.92f
+        listOf(0.22f, 0.5f, 0.78f).forEach { fraction ->
+            val y = size.height * fraction
+            drawCircle(color, dotRadius, Offset(size.width * 0.12f, y))
+            drawLine(color, Offset(lineStart, y), Offset(lineEnd, y), strokeWidth = size.height * 0.1f, cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+private fun CompactTableIcon(modifier: Modifier) {
+    val color = LocalContentColor.current
+    Canvas(modifier) {
+        val stroke = size.minDimension * 0.09f
+        val left = stroke / 2f
+        val right = size.width - stroke / 2f
+        val top = stroke / 2f
+        val bottom = size.height - stroke / 2f
+        drawLine(color, Offset(left, top), Offset(right, top), stroke, StrokeCap.Round)
+        drawLine(color, Offset(left, bottom), Offset(right, bottom), stroke, StrokeCap.Round)
+        drawLine(color, Offset(left, top), Offset(left, bottom), stroke, StrokeCap.Round)
+        drawLine(color, Offset(right, top), Offset(right, bottom), stroke, StrokeCap.Round)
+        drawLine(color, Offset(size.width / 2f, top), Offset(size.width / 2f, bottom), stroke)
+        drawLine(color, Offset(left, size.height / 2f), Offset(right, size.height / 2f), stroke)
+    }
+}
+
+@Composable
+private fun CompactDayPager(
+    courses: List<Course>,
+    selectedDay: Int,
+    onSelectDay: (Int) -> Unit,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    val pagerState = rememberPagerState(initialPage = selectedDay) { 7 }
+    LaunchedEffect(pagerState.currentPage) {
+        if (selectedDay != pagerState.currentPage) onSelectDay(pagerState.currentPage)
+    }
+    LaunchedEffect(selectedDay) {
+        if (selectedDay != pagerState.currentPage) pagerState.scrollToPage(selectedDay)
+    }
+    HorizontalPager(
+        state = pagerState,
+        modifier = modifier,
+        beyondViewportPageCount = 1,
+        pageSpacing = 12.dp,
+    ) { day ->
+        val byLocation = courses.groupBy(Course::courseLocationIndex)
         LazyColumn(
-            // 占满剩余高度：短列表也能在空白区域拖动手势，便于过滚与下拉刷新
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 18.dp),
         ) {
-            items((0 until 7).toList(), key = { "slot-$it" }) { slot ->
+            items((0 until 7).toList(), key = { "day-$day-slot-$it" }) { slot ->
                 val location = slot * 8 + day + 1
-                val slotCourses = byLocation[location].orEmpty()
                 DayScheduleSlotRow(
                     slotLabel = slotLabels[slot],
-                    slotCourses = slotCourses,
+                    slotCourses = byLocation[location].orEmpty(),
                     onOpen = onOpen,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun CompactWeekPager(
+    state: CourseScheduleUiState,
+    courseTypesByCode: Map<String, CourseType>?,
+    model: CourseScheduleScreenModel,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    // Page 0 是“全部教学周”，page 1..30 与教学周编号一一对应。
+    // 这样“全部”既是周选择器最左侧，也是手势分页的物理最左侧，不再回退到当前周。
+    val initialPage = state.selectedWeek.takeIf { it in 0..COURSE_MAX_WEEK }
+        ?: state.currentWeek.takeIf { it in 1..COURSE_MAX_WEEK }
+        ?: 0
+    val pagerState = rememberPagerState(initialPage = overviewPageForWeek(initialPage)) {
+        COURSE_OVERVIEW_PAGE_COUNT
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        val week = weekForOverviewPage(pagerState.currentPage)
+        if (state.selectedWeek != week) model.selectWeek(week)
+    }
+    LaunchedEffect(state.selectedWeek) {
+        val target = overviewPageForWeek(state.selectedWeek)
+        if (target in 0..COURSE_MAX_WEEK && target != pagerState.currentPage) {
+            pagerState.scrollToPage(target)
+        }
+    }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CourseTypeLegend()
+            Spacer(Modifier.weight(1f))
+            Text(
+                "滑动切换周数",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            beyondViewportPageCount = 1,
+            pageSpacing = 12.dp,
+        ) { page ->
+            val week = page
+            CompactWeekGrid(
+                courses = coursesForWeek(state.scheduleCourses, week),
+                courseTypesByCode = courseTypesByCode,
+                aggregateAllWeeks = week == 0,
+                weekStartDate = state.weekDate(week)?.startDate,
+                onOpen = onOpen,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CourseTypeLegend(modifier: Modifier = Modifier) {
+    val types = listOf(
+        CourseType.REQUIRED,
+        CourseType.LIMITED,
+        CourseType.ELECTIVE,
+        CourseType.PHYSICAL_EDUCATION,
+        CourseType.UNKNOWN,
+    )
+    Row(
+        modifier = modifier.semantics {
+            contentDescription = "课程性质图例：必修、限选、任选、体育、未知"
+        },
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        types.forEach { type ->
+            val colors = courseTypeColors(type)
+            Surface(
+                color = colors.container,
+                shape = RoundedCornerShape(7.dp),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.border),
+            ) {
+                Text(
+                    type.displayName(),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = colors.onContainer,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactWeekGrid(
+    courses: List<Course>,
+    courseTypesByCode: Map<String, CourseType>?,
+    aggregateAllWeeks: Boolean,
+    weekStartDate: LocalDate?,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    val byLocation = courses.groupBy(Course::courseLocationIndex)
+    Column(
+        modifier = modifier
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(13.dp))
+            .padding(1.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().height(38.dp)) {
+            Box(modifier = Modifier.width(45.dp).fillMaxHeight())
+            compactDayLabels.forEachIndexed { day, label ->
+                Box(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        weekStartDate?.let { start ->
+                            Text(
+                                start.plusDays(day).displayMonthDay(),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        repeat(7) { slot ->
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Box(
+                    modifier = Modifier.width(45.dp).fillMaxHeight()
+                        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        compactSlotLabels[slot],
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                    )
+                }
+                repeat(7) { day ->
+                    val location = slot * 8 + day + 1
+                    CompactCourseGridCell(
+                        courses = byLocation[location].orEmpty(),
+                        courseTypesByCode = courseTypesByCode,
+                        aggregateAllWeeks = aggregateAllWeeks,
+                        onOpen = onOpen,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactCourseGridCell(
+    courses: List<Course>,
+    courseTypesByCode: Map<String, CourseType>?,
+    aggregateAllWeeks: Boolean,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    val cellModifier = modifier
+        .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+        .padding(2.dp)
+    if (aggregateAllWeeks && courses.size > 1) {
+        // “全部教学周”把同一时间位置的单双周/交替课程并排分格；具体周页仍只显示当周课程。
+        Row(
+            modifier = cellModifier,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            courses.sortedWith(
+                compareBy<Course>(
+                    { parseCourseWeeks(it.courseTime).minOrNull() ?: Int.MAX_VALUE },
+                    Course::courseId,
+                    Course::id,
+                ),
+            ).forEach { course ->
+                CompactCourseColorBlock(
+                    course = course,
+                    courseTypesByCode = courseTypesByCode,
+                    onOpen = onOpen,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
+        }
+        return
+    }
+    Column(
+        modifier = cellModifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        courses.forEach { course ->
+            CompactCourseColorBlock(
+                course = course,
+                courseTypesByCode = courseTypesByCode,
+                onOpen = onOpen,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactCourseColorBlock(
+    course: Course,
+    courseTypesByCode: Map<String, CourseType>?,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier,
+) {
+    // 与成绩页共用培养方案的“课程号 → 课程性质”映射；未同步/未命中才显示灰色未知。
+    val courseType = courseTypesByCode?.let { mapping ->
+        courseTypeForCourseName(course.courseId, mapping)
+    } ?: CourseType.UNKNOWN
+    val colors = courseTypeColors(courseType)
+    Surface(
+        onClick = { onOpen(course.id) },
+        modifier = modifier.semantics {
+            contentDescription = "${course.courseName}，${course.courseTime}，${displayCoursePlace(course.coursePlace)}，点按查看详情"
+        },
+        color = colors.container,
+        shape = RoundedCornerShape(5.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.border),
+    ) {}
 }
 
 @Composable
@@ -596,7 +1321,7 @@ private fun CourseListCard(course: Course, onOpen: (Int) -> Unit) {
         ) {
             Text(course.courseName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "${course.coursePlace} · ${course.courseTeacher.ifBlank { "教师未知" }}",
+                "${displayCoursePlace(course.coursePlace)} · ${course.courseTeacher.ifBlank { "教师未知" }}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.accessibleAlpha(0.78f),
             )
@@ -642,7 +1367,7 @@ private fun CourseDetailContent(course: Course, modifier: Modifier) {
         CourseDetailLine("编号", course.courseId)
         CourseDetailLine("教师", course.courseTeacher.ifBlank { "未提供" })
         CourseDetailLine("周次", course.courseTime)
-        CourseDetailLine("地点", course.coursePlace)
+        CourseDetailLine("地点", displayCoursePlace(course.coursePlace))
         val slot = course.courseLocationIndex / 8
         val day = course.courseLocationIndex % 8 - 1
         CourseDetailLine("时间", "${dayLabels.getOrElse(day) { "未知" }} · ${slotLabels.getOrElse(slot) { "未知" }.replace('\n', ' ')}")

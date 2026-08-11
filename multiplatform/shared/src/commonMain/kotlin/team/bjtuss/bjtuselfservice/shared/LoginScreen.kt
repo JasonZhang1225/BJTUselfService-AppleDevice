@@ -135,6 +135,7 @@ import team.bjtuss.bjtuselfservice.shared.network.createSchoolHttpTransport
 import team.bjtuss.bjtuselfservice.shared.security.AccountSecurityCoordinator
 import team.bjtuss.bjtuselfservice.shared.security.AccountSecurityStore
 import team.bjtuss.bjtuselfservice.shared.security.CredentialRestoreResult
+import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
 
 @Composable
 fun LoginRoute(
@@ -144,6 +145,7 @@ fun LoginRoute(
     cacheStoreHandle: CacheStoreHandle,
     homeworkFileGateway: HomeworkFileGateway,
     coursewareDirectoryGateway: CoursewareDirectoryGateway,
+    systemCalendarGateway: SystemCalendarGateway,
     appCommandBus: AppCommandBus?,
     appPreferences: AppPreferences,
     onPreferencesChanged: (AppPreferences) -> Boolean,
@@ -511,6 +513,12 @@ fun LoginRoute(
         val gradeModel = remember(gradeRepository, homeChangeFeed) {
             GradeScreenModel(gradeRepository, gradeChangeRecorder(homeChangeFeed))
         }
+        // M11/M12 共用同一校历与学期来源：避免课表日期跳转再建一套 bksy 请求。
+        val classroomOccupancyRepository = remember {
+            DefaultClassroomOccupancyRepository(
+                remote = SchoolClassroomOccupancyRemoteDataSource(transport.value),
+            )
+        }
         val courseScheduleRepository = remember(shellProfile.studentId, cacheStore) {
             DefaultCourseScheduleRepository(
                 accountScope = shellProfile.studentId,
@@ -518,10 +526,11 @@ fun LoginRoute(
                 remote = SchoolCourseScheduleRemoteDataSource(transport.value),
             )
         }
-        val courseScheduleModel = remember(courseScheduleRepository, homeChangeFeed) {
+        val courseScheduleModel = remember(courseScheduleRepository, homeChangeFeed, classroomOccupancyRepository) {
             CourseScheduleScreenModel(
                 repository = courseScheduleRepository,
                 changeRecorder = courseChangeRecorder(homeChangeFeed),
+                calendarRepository = classroomOccupancyRepository,
             )
         }
         val examScheduleRepository = remember(shellProfile.studentId, cacheStore) {
@@ -575,11 +584,6 @@ fun LoginRoute(
         }
         val classroomModel = remember(classroomRepository) {
             ClassroomScreenModel(classroomRepository)
-        }
-        val classroomOccupancyRepository = remember {
-            DefaultClassroomOccupancyRepository(
-                remote = SchoolClassroomOccupancyRemoteDataSource(transport.value),
-            )
         }
         val classroomOccupancyModel = remember(classroomOccupancyRepository) {
             ClassroomOccupancyScreenModel(
@@ -648,6 +652,7 @@ fun LoginRoute(
                 homeChangeFeed = homeChangeFeed,
                 homeworkFileGateway = homeworkFileGateway,
                 coursewareDirectoryGateway = coursewareDirectoryGateway,
+                systemCalendarGateway = systemCalendarGateway,
                 onLogout = { logout(shellProfile.studentId) },
             )
         }

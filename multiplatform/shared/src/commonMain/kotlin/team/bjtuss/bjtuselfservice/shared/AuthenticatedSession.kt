@@ -16,6 +16,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScr
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
+import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
 
 /**
  * 登录后页面共享的应用级会话。
@@ -42,6 +43,7 @@ class AuthenticatedSession(
     val homeChangeFeed: HomeChangeFeedRepository,
     val homeworkFileGateway: HomeworkFileGateway,
     val coursewareDirectoryGateway: CoursewareDirectoryGateway,
+    val systemCalendarGateway: SystemCalendarGateway,
     val onLogout: () -> Unit,
 ) {
     /**

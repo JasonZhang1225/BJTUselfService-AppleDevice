@@ -26,6 +26,10 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>用于创建“本学期课表”“选课课表”和单场考试日历，并在再次加入时更新同一日程。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>用于把你主动选择的课程表或单场考试加入系统日历。</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>

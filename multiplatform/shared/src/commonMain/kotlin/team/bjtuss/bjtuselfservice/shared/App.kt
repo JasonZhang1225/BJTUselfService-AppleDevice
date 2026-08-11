@@ -30,6 +30,8 @@ import team.bjtuss.bjtuselfservice.shared.system.rememberPlatformReduceMotion
 import team.bjtuss.bjtuselfservice.shared.system.rememberPlatformReduceTransparency
 import team.bjtuss.bjtuselfservice.shared.auth.CaptchaRecognizer
 import team.bjtuss.bjtuselfservice.shared.auth.UnavailableCaptchaRecognizer
+import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
+import team.bjtuss.bjtuselfservice.shared.calendar.UnavailableSystemCalendarGateway
 
 @Composable
 fun App(
@@ -37,6 +39,7 @@ fun App(
     cacheStoreHandle: CacheStoreHandle,
     homeworkFileGateway: HomeworkFileGateway = UnavailableHomeworkFileGateway,
     coursewareDirectoryGateway: CoursewareDirectoryGateway = UnavailableCoursewareDirectoryGateway,
+    systemCalendarGateway: SystemCalendarGateway = UnavailableSystemCalendarGateway,
     appCommandBus: AppCommandBus? = null,
     captchaRecognizer: CaptchaRecognizer = UnavailableCaptchaRecognizer,
     nativeNavigationEnabled: Boolean = false,
@@ -71,6 +74,7 @@ fun App(
                     cacheStoreHandle = cacheStoreHandle,
                     homeworkFileGateway = homeworkFileGateway,
                     coursewareDirectoryGateway = coursewareDirectoryGateway,
+                    systemCalendarGateway = systemCalendarGateway,
                     appCommandBus = appCommandBus,
                     appPreferences = appPreferences,
                     onPreferencesChanged = onPreferencesChanged,

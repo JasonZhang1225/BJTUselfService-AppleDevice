@@ -9,6 +9,7 @@ import team.bjtuss.bjtuselfservice.shared.cache.createIosCacheStore
 import team.bjtuss.bjtuselfservice.shared.security.createIosAccountSecurityStore
 import team.bjtuss.bjtuselfservice.shared.files.IosHomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.auth.IosCoreMlCaptchaRecognizer
+import team.bjtuss.bjtuselfservice.shared.calendar.IosSystemCalendarGateway
 
 // 预热 WebKit：首次创建 WKWebView 要启动 WebContent 进程并初始化渲染子系统（主线程，秒级），
 // 若等到进入邮箱页才创建会卡住主线程和进页转场动画。保留引用让进程池常驻。
@@ -71,6 +72,7 @@ private fun createMainViewController(
     val cacheStoreHandle = createIosCacheStore()
     lateinit var controller: UIViewController
     val homeworkFileGateway = IosHomeworkFileGateway { controller }
+    val systemCalendarGateway = IosSystemCalendarGateway()
     val captchaRecognizer = IosCoreMlCaptchaRecognizer()
     controller = ComposeUIViewController {
         App(
@@ -78,6 +80,7 @@ private fun createMainViewController(
             cacheStoreHandle = cacheStoreHandle,
             homeworkFileGateway = homeworkFileGateway,
             coursewareDirectoryGateway = homeworkFileGateway,
+            systemCalendarGateway = systemCalendarGateway,
             captchaRecognizer = captchaRecognizer,
             nativeNavigationEnabled = nativeNavigationEnabled,
             onOpenNativeRoute = onOpenNativeRoute,

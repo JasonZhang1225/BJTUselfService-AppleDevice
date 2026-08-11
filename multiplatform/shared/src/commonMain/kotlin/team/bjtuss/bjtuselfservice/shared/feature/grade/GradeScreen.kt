@@ -257,6 +257,7 @@ fun AuthenticatedAppShell(
     val homeChangeFeed = session.homeChangeFeed
     val homeworkFileGateway = homeworkFileGatewayOverride ?: session.homeworkFileGateway
     val coursewareDirectoryGateway = coursewareDirectoryGatewayOverride ?: session.coursewareDirectoryGateway
+    val systemCalendarGateway = session.systemCalendarGateway
     val onLogout = session.onLogout
     val gradeState by gradeModel.state.collectAsState()
     val courseState by courseScheduleModel.state.collectAsState()
@@ -280,6 +281,7 @@ fun AuthenticatedAppShell(
     var classroomIntroBannerDismissed by remember(session) {
         mutableStateOf(session.classroomIntroBannerDismissed)
     }
+    var showCourseCalendarExport by remember(session) { mutableStateOf(false) }
     val dismissClassroomIntroBanner: () -> Unit = {
         session.classroomIntroBannerDismissed = true
         classroomIntroBannerDismissed = true
@@ -419,6 +421,8 @@ fun AuthenticatedAppShell(
             launch {
                 // 课表：登录成功后才网络同步；失败重试在 ScreenModel 内（最多 3 次）。
                 courseScheduleModel.initialize(loginSyncPreferences.autoSyncSchedule)
+                // M12 校历映射独立于“自动同步课表”偏好，但同样必须等登录完成后再取学期。
+                courseScheduleModel.ensureCalendarLoaded()
             }
         }
     }
@@ -439,6 +443,8 @@ fun AuthenticatedAppShell(
         modifier: Modifier,
         /** 空闲时右上角状态文案（如课表「已同步/未同步」）；登录中/同步中优先覆盖。 */
         idleStatusText: String? = null,
+        /** 页面级动作，显示在同步状态胶囊旁（M12 课程表加入日历）。 */
+        topBarAction: (@Composable () -> Unit)? = null,
         content: @Composable () -> Unit,
     ) {
         // 一级页为底栏预留高度；底栏本身在 NavDisplay 外层，不随 destination 销毁。
@@ -455,6 +461,7 @@ fun AuthenticatedAppShell(
                     isRefreshing = isRefreshing,
                     isLoggingIn = entryLoggingIn,
                     idleStatusText = idleStatusText,
+                    action = topBarAction,
                     // 可刷新页：右上角「已同步」旁放刷新按钮；不再下拉刷新（保平台原生过滚）。
                     onRefresh = if (refreshable) refresh else null,
                     onBack = if (showBack) {
@@ -564,11 +571,22 @@ fun AuthenticatedAppShell(
                     courseState.source == CourseScheduleContentSource.CACHE -> "已同步"
                     else -> "未同步"
                 },
+                topBarAction = {
+                    TopBarCalendarAction(
+                        label = if (systemCalendarGateway.isAvailable) "添加到日历" else "导出",
+                        onClick = { showCourseCalendarExport = true },
+                    )
+                },
             ) {
                 CourseScheduleWorkspace(
                     state = courseState,
+                    courseTypesByCode = gradeState.courseTypesByCode,
                     expanded = expanded,
                     model = courseScheduleModel,
+                    fileGateway = homeworkFileGateway,
+                    systemCalendarGateway = systemCalendarGateway,
+                    showCalendarExportSheet = showCourseCalendarExport,
+                    onDismissCalendarExport = { showCourseCalendarExport = false },
                     onRefresh = refresh,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -592,6 +610,8 @@ fun AuthenticatedAppShell(
                     state = examState,
                     expanded = expanded,
                     model = examScheduleModel,
+                    fileGateway = homeworkFileGateway,
+                    systemCalendarGateway = systemCalendarGateway,
                     onRefresh = refresh,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1191,6 +1211,7 @@ private fun CompactAppTopBar(
     idleStatusText: String? = null,
     /** 非空时在状态文案旁显示刷新按钮（替代下拉刷新）。 */
     onRefresh: (() -> Unit)? = null,
+    action: (@Composable () -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     // 顶栏与页面背景同色：iOS 的 SwiftUI 根视图在状态栏下方铺的就是 background，
@@ -1235,6 +1256,10 @@ private fun CompactAppTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (action != null) {
+                action()
+                Spacer(Modifier.width(8.dp))
+            }
             // “登录中”优先于“同步中”，再回落到页面提供的空闲状态（如课表已同步）。
             // 状态文案与刷新并入同一胶囊，避免「已同步」与孤立圆钮两截破碎感。
             val busyText = when {
@@ -1311,6 +1336,24 @@ private fun CompactAppTopBar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TopBarCalendarAction(label: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = RoundedCornerShape(999.dp),
+        modifier = Modifier.semantics { contentDescription = label },
+    ) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
