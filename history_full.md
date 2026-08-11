@@ -338,3 +338,15 @@
 
 - **跨学期前往日期**：日期选择不再局限于当前课表校历。模型优先匹配当前课表，再匹配另一课表；命中另一学期时原子更新课表类型、`calendarSemesterLabel`、`academicWeeks`、周次和日期。本学期选择 9 月日期会自动进入选课课表，选课课表选择当前学期日期可切回；两套校历都不包含的日期继续显示非教学周空态。专项测试覆盖双向往返，用户在 macOS 真实会话确认可用。
 - **用户最终确认**：AppKit 原生触摸板在修正内容滚动方向后，双指向左进入下一周、向右返回上一周；长滑最多翻一周，连续手势不再出现 2～5 秒冷却。跨学期“前往日期”随后由用户确认通过，M12 获准最终验收并提交。
+
+## M12 发布：1.7.2-KMP 三端 pre-release（2026-08-11）
+
+- **范围**：在 M12（303fb08 + 补充 8482a63）基础上，并入 worktree 两项体验改动，发布 pre-release `1.7.2-KMP`，git tag `v1.7.2-KMP` 指向 `fff061f`（main 已推送 `mine`）。自该版本起 `1.7.2-KMP` 取代 `1.7.1-KMP` 成为对照基线。
+- **worktree → main 合并**：worktree `claude/frosty-williams-5d71d3` 三提交经 merge `8d22931` 并入——教室占用页筛选区/图例重组（`0f234b3`）、设置页更新检测（`cebcdb1`）、版本号统一 1.7.2-KMP（`38b1ca8`）。合并仅 `memory.md` 一处内容冲突（两条 worktree 事项状态更新），代码文件全部自动合并无冲突。
+- **应用内更新检测**（新增 `shared/update/AppUpdateChecker`，kotlinx.serialization）：指向本仓库 `JasonZhang1225/BJTUselfService-KMP-Refreshed`；用 `/releases` 列表而非 `/latest`（GitHub `/latest` 不返回 pre-release，而 1.7.x-KMP 正是 pre-release），取第一条非 draft；版本比较改数字段逐段比较（原版字符串比较会误判 1.7.10<1.7.9）。设置页「版本与项目」卡手动「检查更新」+ 进主界面后静默自动检测一次（`silentOnMiss`，仅新版本弹「前往下载」跳 `release.htmlUrl`，失败/已最新静默）；结果弹窗提升到 `AuthenticatedAppShell` 壳层，任意页面可见。
+- **版本号统一**：`AppUpdateChecker.CURRENT_VERSION`、androidApp `versionName=1.7.2-KMP`/`versionCode 9→10`、iosApp `CFBundleShortVersionString=1.7.2-KMP`/`CFBundleVersion 9→10`、desktopApp `packageVersion=1.7.2`。
+- **构建修复**：`desktopApp:packageDmg` 的 `checkRuntime` 报「'jpackage' is missing」——Android Studio JBR 21 不含 jpackage。在 `compose.desktop.application` 加 `javaHome` 指向系统完整 JDK（默认 temurin-25，可用 `DESKTOP_PACKAGE_JAVA_HOME` 覆盖），与守护进程 JDK 解耦；Kotlin 编译仍在 JBR 下跑（避免 KGP 在 JDK 25 下 `JavaVersion.parse("25.0.1")` 崩溃），只有运行时检测/jpackage 用完整 JDK。提交 `fff061f`。
+- **验证**：合并后 main 上 `:shared:desktopTest` 373 测试 0 失败（含 CourseSchedule 28、Settings 9）；`:androidApp:assembleDebug`、`shared:linkDebugFrameworkIosArm64`、`desktopApp:packageDmg` 全部 `--rerun-tasks` 真跑通过（配置缓存对 M12 补充改动误判 UP-TO-DATE，Android/iOS 强制重编后确认）。iOS 真机包（iPhone 15 Pro Max，Apple Development 签名）由用户在 Xcode 命令行 `BUILD SUCCEEDED` 后实机安装验证。
+- **产物**（本地上传 GitHub Release，Pre-release）：`BJTUSelfService-KMP-1.7.2-KMP-debug.apk`（350M）、`BJTUSelfService-KMP-1.7.2-KMP-iOS-unsigned.ipa`（45M，未签名需侧载自签）、`BJTUselfServiceKMP-1.7.2-KMP.dmg`（114M，中文名「交大自由行 KMP」）。
+- **release notes**：由用户在 `Desktop/172.md` 微调定稿，正文含 M12 课程表升级 / 应用内更新检测 / 教室占用页 UI 三块；发布时去掉末尾给 AI 的草稿注释段。
+- **同会话操作**：应用户要求用 gh 关闭 fork 上 PR #1（Windows desktop support / codex 分支）并删除远端分支 `codex/-1.7.1-kmp-windows`；M12 两个补充提交（`fca7010` 选课学期当前周、`50739ec` 今天按钮）应用户要求 squash 为单个 `8482a63`。

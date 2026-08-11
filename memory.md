@@ -2,8 +2,8 @@
 
 > 最后更新：2026-08-11
 > 当前分支：`main`（跟踪 `mine/main` → `JasonZhang1225/BJTUselfService-KMP-Refreshed`）
-> 阶段状态：**M12 已完成，下一阶段为 M13 物理在线接入调研**。第一阶段 pre-release `1.7.1-KMP` 仍为当前发布基线（tag `v1.7.1-KMP@8498f32`）。
-> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.1-KMP`（git tag，`8498f32`）**
+> 阶段状态：**M12 已完成并发布 `1.7.2-KMP` pre-release，下一阶段为 M13 物理在线接入调研**。当前发布基线 `1.7.2-KMP`（tag `v1.7.2-KMP@fff061f`）。
+> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.2-KMP`（git tag，`fff061f`）**
 > 远端历史：2026-08-03 曾强制改写，根提交为 `46f6ef9`；此后本地/远端已新增 16 个提交并带 `v1.7.1-KMP` 标签。旧 SHA 仍可被 GitHub 缓存直接解析；Support 要求先轮换泄露凭据，用户决定不再提交清缓存工单并自行更换密码。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
 > 本文件是实时工作记忆，不是只追加日志：任务开始读、结束改，只保留当前接续工作需要的状态。
@@ -18,7 +18,8 @@
 - **等外部条件**：真实数据变化样本、真实作业上传、退出账号往返（会话不再需要时）。
 - **缺权限/签名**：iOS Keychain 合法签名往返、Apple Developer 正式签名/公证/隐私问卷。
 - **本地分发包**：根目录 `builtapps/`（gitignore）含 1.7.0 原版与 KMP 三端 debug/开发签名包，非正式发布。
-- **更新检测 + 教室占用重组已并入 main（本次发布 1.7.2-KMP）**：worktree `claude/frosty-williams-5d71d3` 三个提交已合并——教室占用页筛选区/图例重组（`0f234b3`）、设置页更新检测指向本仓库 GitHub Releases（`cebcdb1`，新增 `shared/update/AppUpdateChecker`，用 `/releases` 列表含 pre-release；设置页手动「检查更新」+ 进主界面静默自动检测一次，仅新版本弹「前往下载」）、版本号统一 1.7.2-KMP（`38b1ca8`）。
+- **pre-release `1.7.2-KMP` 三端已发布**（2026-08-11）：本地构建上传 GitHub Release，git tag `v1.7.2-KMP` 指向 `fff061f`（main 已推送 `mine`）。内容 = M12 课程表体验升级 + 应用内更新检测 + 教室占用页 UI 优化。产物：debug APK（versionName `1.7.2-KMP`/versionCode 10）、iOS unsigned IPA（`1.7.2-KMP`/build 10）、macOS DMG（`1.7.2`，中文名「交大自由行 KMP」）。
+- **更新检测 + 教室占用重组（worktree 已并 main）**：worktree `claude/frosty-williams-5d71d3` 三提交（教室占用重组 `0f234b3`、更新检测 `cebcdb1`、版本 bump `38b1ca8`）经 merge `8d22931` 并入；另有 M12 补充 `8482a63`、jpackage JDK 修复 `fff061f`。细节见 `history_full.md`。
 
 ## 2. 当前痛点（≤8 条）
 
