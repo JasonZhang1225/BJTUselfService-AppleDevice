@@ -132,6 +132,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommandBus
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
 import team.bjtuss.bjtuselfservice.shared.network.createSchoolHttpTransport
+import team.bjtuss.bjtuselfservice.shared.update.AppUpdateChecker
 import team.bjtuss.bjtuselfservice.shared.security.AccountSecurityCoordinator
 import team.bjtuss.bjtuselfservice.shared.security.AccountSecurityStore
 import team.bjtuss.bjtuselfservice.shared.security.CredentialRestoreResult
@@ -601,6 +602,7 @@ fun LoginRoute(
                 clearAccountCache = {
                     runCatching { cacheStore.clearAccount(shellProfile.studentId) }.isSuccess
                 },
+                checkLatestRelease = { AppUpdateChecker.fetchLatest(transport.value) },
             )
         }
         val mailboxModel = remember(shellProfile.studentId) {

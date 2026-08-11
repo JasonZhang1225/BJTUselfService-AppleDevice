@@ -264,6 +264,18 @@
 - commonTest：classroomoccupancy 解析/ScreenModel、classroom 搜索缓存用例通过；三端编译路径与 assembleDebug 曾通过；Live probe 本机网络通过。
 - 用户 iPhone 真机：占用查询进楼/切周/弹层、人数估计明文、空闲绿色与底栏反馈有多轮目视；代理下 bksy 日期仍可能空（不挡占用）。未做正式签名分发。
 
+## 教室占用页筛选区重组（2026-08-10，worktree，未并 main）
+
+- 背景：占用二级页筛选区信息密度不合理——节次时间 7 个大节默认全展开占 3 行，把高频操作的星期条挤到远离教室卡片；图例 7 项平铺且「其他/未知」语义重叠。用户截图给出方向，两轮确认定稿。
+- 改动（仅 `ClassroomOccupancyScreen.kt`，不动 domain/data 层）：
+  - 星期条 `OccupancyCompactDaySelector` 从 `ClassroomOccupancyFilters` 拆出，挪到图例下、紧贴教室卡片。
+  - `OccupancyLegend` 重写为 `OccupancyLegendRow` 七等分：空闲/排课/调课/考试/实验/其他（合并未知兜底）6 项 + 第七格「时段▾」展开钮，与星期条同为七格视觉对齐；图例格为色块作背景、文字放进色块里（固定 40dp 高，避免 animateContentSize 内 fillMaxSize 撑满全屏）。
+  - 节次时间 `SlotTimeRangesLegend` 默认收起，点「时段▾」展开。
+  - 展开/收起动画：只用外层 `animateContentSize` 单一驱动高度，时段区仅做 `fadeIn`/`fadeOut`（不占高度），星期条与教室卡片作为同一整体平滑位移；早期嵌套 `AnimatedVisibility` 垂直动画因速率不同步、收起闪断被弃用。
+  - `legendEntries()` 移除 `UNKNOWN` 项；`OccupancyKind.UNKNOWN` 兜底渲染保留（格子仍可能染未知色），仅图例不单列。
+- 验证：`:shared:compileKotlinDesktop`、`desktopTest`、`:androidApp:assembleDebug`、`:shared:compileKotlinIosArm64` 与 `:shared:linkDebugFrameworkIosArm64`、xcodebuild 真机包均通过；用户 iPhone 15 Pro Max 真机多轮目视（图例样式、展开/收起动画速率与平滑度）确认通过。iOS 构建需 `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`（本机仅 Xcode-beta 27.0，shell 默认指向 Command Line Tools 会导致 xcrun 失败）。
+- 边界：另一 AI 正在 main 做 M12，本次仅 worktree 提交（最终 amend 为单提交 `710fafb`），后续由用户合并；goal.md 未改。
+
 ## M12 前置：M5.5/M5.6 收口与第一阶段发布（2026-08-09）
 
 - M5.5 登录页 UI 优化 + 验证码自动识别、M5.6 用户手动确认全部 UI 与真实数据验证由用户确认完成；第一阶段（M0–M11 + M5.5 + M5.6）全部收口。

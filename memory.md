@@ -18,7 +18,7 @@
 - **等外部条件**：真实数据变化样本、真实作业上传、退出账号往返（会话不再需要时）。
 - **缺权限/签名**：iOS Keychain 合法签名往返、Apple Developer 正式签名/公证/隐私问卷。
 - **本地分发包**：根目录 `builtapps/`（gitignore）含 1.7.0 原版与 KMP 三端 debug/开发签名包，非正式发布。
-- **更新检测已预埋（worktree，未提交/未合并）**：新增 `shared/update/AppUpdateChecker`（kotlinx.serialization，指向本仓库 `JasonZhang1225/BJTUselfService-KMP-Refreshed`，用 `/releases` 列表含 pre-release，因 GitHub `/latest` 不返回 pre-release）；设置页「版本与项目」卡有手动「检查更新」按钮，进主界面后静默自动检测一次（仅新版本弹「前往下载」跳 GitHub 发布页，失败/无更新静默）；结果弹窗提升到 `AuthenticatedAppShell` 壳层。三端编译+339 桌面测试过，已 curl 验证真实 API 返回 `v1.7.1-KMP`。与教室占用重组（`0f234b3`）同在 worktree `claude/frosty-williams-5d71d3`，待 M12 落定后由用户合并。
+- **更新检测 + 教室占用重组已并入 main（本次发布 1.7.2-KMP）**：worktree `claude/frosty-williams-5d71d3` 三个提交已合并——教室占用页筛选区/图例重组（`0f234b3`）、设置页更新检测指向本仓库 GitHub Releases（`cebcdb1`，新增 `shared/update/AppUpdateChecker`，用 `/releases` 列表含 pre-release；设置页手动「检查更新」+ 进主界面静默自动检测一次，仅新版本弹「前往下载」）、版本号统一 1.7.2-KMP（`38b1ca8`）。
 
 ## 2. 当前痛点（≤8 条）
 

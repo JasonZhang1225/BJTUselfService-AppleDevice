@@ -2,6 +2,7 @@ package team.bjtuss.bjtuselfservice.shared.feature.settings
 
 import kotlinx.coroutines.runBlocking
 import team.bjtuss.bjtuselfservice.shared.cache.AppPreferences
+import team.bjtuss.bjtuselfservice.shared.update.AppUpdateChecker
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -9,14 +10,24 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class SettingsScreenModelTest {
+    private fun model(
+        initialPreferences: AppPreferences = AppPreferences(),
+        persistPreferences: (AppPreferences) -> Boolean = { true },
+        clearAccountCache: () -> Boolean = { true },
+        checkLatestRelease: suspend () -> AppUpdateChecker.Result = {
+            AppUpdateChecker.Result.Unavailable
+        },
+    ) = SettingsScreenModel(
+        initialPreferences = initialPreferences,
+        persistPreferences = persistPreferences,
+        clearAccountCache = clearAccountCache,
+        checkLatestRelease = checkLatestRelease,
+    )
+
     @Test
     fun autoSyncOptionsPersistAndUpdateVisiblePreferences() {
         val saved = mutableListOf<AppPreferences>()
-        val model = SettingsScreenModel(
-            initialPreferences = AppPreferences(),
-            persistPreferences = { saved += it; true },
-            clearAccountCache = { true },
-        )
+        val model = model(persistPreferences = { saved += it; true })
 
         model.setAutoSyncGrades(true)
         model.setAutoSyncHomework(true)
@@ -34,10 +45,9 @@ class SettingsScreenModelTest {
     @Test
     fun dynamicColorTogglePersists() {
         val saved = mutableListOf<AppPreferences>()
-        val model = SettingsScreenModel(
+        val model = model(
             initialPreferences = AppPreferences(dynamicColor = true),
             persistPreferences = { saved += it; true },
-            clearAccountCache = { true },
         )
 
         model.setDynamicColor(false)
@@ -49,11 +59,7 @@ class SettingsScreenModelTest {
 
     @Test
     fun failedAutoSyncSaveKeepsPreviousValueAndReportsFailure() {
-        val model = SettingsScreenModel(
-            initialPreferences = AppPreferences(),
-            persistPreferences = { false },
-            clearAccountCache = { true },
-        )
+        val model = model(persistPreferences = { false })
 
         model.setAutoSyncSchedule(false)
 
@@ -65,14 +71,10 @@ class SettingsScreenModelTest {
     fun successfulCacheClearReportsSuccessAndCanBeDismissed() {
         runBlocking {
             var calls = 0
-            val model = SettingsScreenModel(
-                initialPreferences = AppPreferences(),
-                persistPreferences = { true },
-                clearAccountCache = {
-                    calls += 1
-                    true
-                },
-            )
+            val model = model(clearAccountCache = {
+                calls += 1
+                true
+            })
 
             model.clearOfflineCache()
 
@@ -86,15 +88,113 @@ class SettingsScreenModelTest {
     @Test
     fun cacheClearExceptionReportsFailure() {
         runBlocking {
-            val model = SettingsScreenModel(
-                initialPreferences = AppPreferences(),
-                persistPreferences = { true },
-                clearAccountCache = { error("database") },
-            )
+            val model = model(clearAccountCache = { error("database") })
 
             model.clearOfflineCache()
 
             assertIs<OfflineCacheActionState.Failed>(model.state.value.cacheAction)
+        }
+    }
+
+    @Test
+    fun newerRemoteReleaseReportsUpdateAndCanBeDismissed() {
+        runBlocking {
+            val newer = AppUpdateChecker.Release(
+                tagName = "v9.9.9-KMP",
+                body = "更新说明",
+                htmlUrl = "https://github.com/${AppUpdateChecker.REPO}/releases/tag/v9.9.9-KMP",
+            )
+            val model = model(
+                checkLatestRelease = { AppUpdateChecker.Result.Success(newer) },
+            )
+
+            model.checkForUpdate()
+
+            val done = assertIs<UpdateCheckState.Done>(model.state.value.updateCheck)
+            assertTrue(done.hasUpdate)
+            assertEquals(newer, done.release)
+
+            model.dismissUpdateCheck()
+            assertIs<UpdateCheckState.Idle>(model.state.value.updateCheck)
+        }
+    }
+
+    @Test
+    fun sameVersionRemoteReleaseReportsNoUpdate() {
+        runBlocking {
+            val model = model(
+                checkLatestRelease = {
+                    AppUpdateChecker.Result.Success(
+                        AppUpdateChecker.Release(
+                            tagName = AppUpdateChecker.CURRENT_VERSION,
+                            htmlUrl = "https://github.com/${AppUpdateChecker.REPO}/releases",
+                        ),
+                    )
+                },
+            )
+
+            model.checkForUpdate()
+
+            val done = assertIs<UpdateCheckState.Done>(model.state.value.updateCheck)
+            assertFalse(done.hasUpdate)
+        }
+    }
+
+    @Test
+    fun unavailableOrThrowingUpdateCheckReportsFailure() {
+        runBlocking {
+            val unavailable = model(
+                checkLatestRelease = { AppUpdateChecker.Result.Unavailable },
+            )
+            unavailable.checkForUpdate()
+            assertIs<UpdateCheckState.Failed>(unavailable.state.value.updateCheck)
+
+            val throwing = model(
+                checkLatestRelease = { error("network") },
+            )
+            throwing.checkForUpdate()
+            assertIs<UpdateCheckState.Failed>(throwing.state.value.updateCheck)
+        }
+    }
+
+    @Test
+    fun silentAutoCheckStaysIdleWithoutUpdateButStillSurfacesNewerRelease() {
+        runBlocking {
+            // 自动检测（silentOnMiss=true）：无更新 → 回 Idle，不打扰用户。
+            val upToDate = model(
+                checkLatestRelease = {
+                    AppUpdateChecker.Result.Success(
+                        AppUpdateChecker.Release(
+                            tagName = AppUpdateChecker.CURRENT_VERSION,
+                            htmlUrl = "https://github.com/${AppUpdateChecker.REPO}/releases",
+                        ),
+                    )
+                },
+            )
+            upToDate.checkForUpdate(silentOnMiss = true)
+            assertIs<UpdateCheckState.Idle>(upToDate.state.value.updateCheck)
+
+            // 失败同样静默。
+            val failed = model(
+                checkLatestRelease = { AppUpdateChecker.Result.Unavailable },
+            )
+            failed.checkForUpdate(silentOnMiss = true)
+            assertIs<UpdateCheckState.Idle>(failed.state.value.updateCheck)
+
+            // 但有新版本时仍然弹。
+            val newer = model(
+                checkLatestRelease = {
+                    AppUpdateChecker.Result.Success(
+                        AppUpdateChecker.Release(
+                            tagName = "v9.9.9-KMP",
+                            htmlUrl = "https://github.com/${AppUpdateChecker.REPO}/releases/tag/v9.9.9-KMP",
+                        ),
+                    )
+                },
+            )
+            newer.checkForUpdate(silentOnMiss = true)
+            val done = assertIs<UpdateCheckState.Done>(newer.state.value.updateCheck)
+            assertTrue(done.hasUpdate)
         }
     }
 }
