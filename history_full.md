@@ -350,3 +350,12 @@
 - **产物**（本地上传 GitHub Release，Pre-release）：`BJTUSelfService-KMP-1.7.2-KMP-debug.apk`（350M）、`BJTUSelfService-KMP-1.7.2-KMP-iOS-unsigned.ipa`（45M，未签名需侧载自签）、`BJTUselfServiceKMP-1.7.2-KMP.dmg`（114M，中文名「交大自由行 KMP」）。
 - **release notes**：由用户在 `Desktop/172.md` 微调定稿，正文含 M12 课程表升级 / 应用内更新检测 / 教室占用页 UI 三块；发布时去掉末尾给 AI 的草稿注释段。
 - **同会话操作**：应用户要求用 gh 关闭 fork 上 PR #1（Windows desktop support / codex 分支）并删除远端分支 `codex/-1.7.1-kmp-windows`；M12 两个补充提交（`fca7010` 选课学期当前周、`50739ec` 今天按钮）应用户要求 squash 为单个 `8482a63`。
+
+## 热修发布：1.7.2-KMP-A 三端 pre-release（2026-08-15）
+
+- **范围**：在 `1.7.2-KMP` 上修课表培养方案冷启动、成绩变动弹窗、排序文案和限选配色。git tag `v1.7.2-KMP-A` 指向 `b85747f`（main 已推送 `mine`）。
+- **提交**：`d12d54c` fix 四项体验；`b85747f` chore 版本标识 1.7.2-KMP-A。
+- **版本**：`AppUpdateChecker.CURRENT_VERSION` / Android `versionName` / iOS `CFBundleShortVersionString` = `1.7.2-KMP-A`；`versionCode` / `CFBundleVersion` 10→11。desktop `packageVersion` 仍为 `1.7.2`（jpackage 只允许三段数字），`packageBuildVersion` = 11。未用 `1.7.2-A`：现有比较器后缀字典序下 `A` < `KMP`，会被当成更旧。
+- **验证**：`:shared:desktopTest --tests '*AppUpdateChecker*' --tests '*SettingsScreenModel*'` 通过；Android `assembleDebug`、`desktopApp:packageDmg`、iOS `xcodebuild` Release `generic/platform=iOS` `CODE_SIGNING_ALLOWED=NO` 均成功。平板已确认成绩变动弹窗、新装分类色块与限选配色。
+- **产物**（本地上传 GitHub Release，Pre-release）：`BJTUSelfService-KMP-1.7.2-KMP-A-debug.apk`（350M）、`BJTUSelfService-KMP-1.7.2-KMP-A-iOS-unsigned.ipa`（38M）、`BJTUselfServiceKMP-1.7.2-KMP-A.dmg`（114M）。
+- **发布页**：https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.2-KMP-A
