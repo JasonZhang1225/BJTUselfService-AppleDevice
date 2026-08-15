@@ -356,7 +356,7 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg)
             modules("java.sql")
             packageName = "BJTUselfServiceKMP"
-            // Compose Desktop 的 packageVersion 仅允许数字点号；展示名/Release 用 1.7.2-KMP。
+            // Compose Desktop 的 packageVersion 仅允许 MAJOR.MINOR.PATCH；展示名/Release 用 1.7.2-KMP-A。
             packageVersion = "1.7.2"
             description = "交大自由行 Kotlin Multiplatform macOS 应用"
             vendor = "BJTUselfService Contributors"
@@ -367,7 +367,7 @@ compose.desktop {
                 dockName = "交大自由行 KMP"
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
-                packageBuildVersion = "1"
+                packageBuildVersion = "11"
             }
         }
     }
