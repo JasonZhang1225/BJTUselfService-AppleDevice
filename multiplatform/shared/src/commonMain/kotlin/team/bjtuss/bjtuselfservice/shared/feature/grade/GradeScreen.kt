@@ -47,6 +47,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -157,7 +158,9 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.GradeSortOrder
 import team.bjtuss.bjtuselfservice.shared.domain.grade.displayCourseName
 import team.bjtuss.bjtuselfservice.shared.domain.grade.displayName
 import team.bjtuss.bjtuselfservice.shared.domain.grade.scoreForSorting
+import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeKind
 import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeDomain
+import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeRecord
 
 /**
  * 教室页顶栏空闲态文案。
@@ -357,9 +360,19 @@ fun AuthenticatedAppShell(
                     launch { homeworkModel.refresh() }
                     launch { examScheduleModel.refresh() }
                     launch { courseScheduleModel.refresh() }
+                    launch {
+                        if (gradeModel.state.value.courseTypesByCode == null) {
+                            gradeModel.ensureProgramCourseTypes()
+                        }
+                    }
                 }
                 AppSection.GRADES -> gradeModel.refresh()
-                AppSection.SCHEDULE -> courseScheduleModel.refresh()
+                AppSection.SCHEDULE -> {
+                    courseScheduleModel.refresh()
+                    if (gradeModel.state.value.courseTypesByCode == null) {
+                        gradeModel.ensureProgramCourseTypes()
+                    }
+                }
                 AppSection.EXAMS -> examScheduleModel.refresh()
                 AppSection.HOMEWORK -> homeworkModel.refresh()
                 AppSection.COURSEWARE -> coursewareModel.refresh()
@@ -402,6 +415,9 @@ fun AuthenticatedAppShell(
             delay(LOGIN_SYNC_RETRY_DELAY_MILLIS)
             gradeModel.refresh()
         }
+        if (gradeModel.state.value.courseTypesByCode == null) {
+            gradeModel.ensureProgramCourseTypes()
+        }
     }
     LaunchedEffect(homeworkModel, examScheduleModel, courseScheduleModel, entryLoggingIn) {
         if (entryLoggingIn) return@LaunchedEffect
@@ -440,6 +456,16 @@ fun AuthenticatedAppShell(
     // 检查结果弹窗放在整个壳内容之后渲染：发现新版本时无论当前在哪个页面都能看到
     // 「前往下载」，不依赖用户停留在设置页（设置页内按钮触发的结果也走同一弹窗）。
     AppUpdateResultDialog(settingsState.updateCheck, settingsModel::dismissUpdateCheck)
+    gradeState.pendingChangeNotice?.let { notice ->
+        GradeChangeNoticeDialog(
+            changes = notice,
+            onDismiss = gradeModel::dismissChangeNotice,
+            onOpenGrades = {
+                gradeModel.dismissChangeNotice()
+                navigateToSection(AppSection.GRADES)
+            },
+        )
+    }
 
     // 页面骨架（顶栏 + 下拉刷新）包在各目的地内部而非 NavHost 外层：
     // 1) 外层容器若随当前页面切换（如“更多”页不可刷新、考试安排页可刷新），NavHost 会在
@@ -2082,7 +2108,7 @@ private fun GradeFilterSheet(
                     selected = !byScore,
                     onClick = { model.selectSortCategory(byScore = false) },
                     shape = RoundedCornerShape(10.dp),
-                    label = { Text("默认顺序（成绩更新顺序）") },
+                    label = { Text("默认顺序") },
                 )
                 FilterChip(
                     selected = byScore,
@@ -2110,18 +2136,17 @@ private fun GradeFilterSheet(
                         label = { Text("从低到高") },
                     )
                 } else {
-                    // 左「从新到旧」= 原序倒排；右「从旧到新」= 教务原序。
                     FilterChip(
                         selected = state.sortOrder == GradeSortOrder.ORIGINAL_REVERSED,
                         onClick = { model.setSortOrder(GradeSortOrder.ORIGINAL_REVERSED) },
                         shape = RoundedCornerShape(percent = 50),
-                        label = { Text("从新到旧") },
+                        label = { Text("逆序") },
                     )
                     FilterChip(
                         selected = state.sortOrder == GradeSortOrder.ORIGINAL,
                         onClick = { model.setSortOrder(GradeSortOrder.ORIGINAL) },
                         shape = RoundedCornerShape(percent = 50),
-                        label = { Text("从旧到新") },
+                        label = { Text("正序") },
                     )
                 }
             }
@@ -2622,4 +2647,74 @@ private fun gradeScoreColor(score: String): Color = when (val numeric = scoreFor
     in 60..100 -> MaterialTheme.colorScheme.primary
     in 0..59 -> MaterialTheme.colorScheme.error
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+@Composable
+private fun GradeChangeNoticeDialog(
+    changes: List<HomeChangeRecord>,
+    onDismiss: () -> Unit,
+    onOpenGrades: () -> Unit,
+) {
+    val visible = changes.filterNot {
+        it.kind == DataChangeKind.MODIFIED && it.beforeDetail == it.afterDetail
+    }
+    if (visible.isEmpty()) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("成绩变动") },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                visible.forEach { change ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                when (change.kind) {
+                                    DataChangeKind.ADDED -> "新增"
+                                    DataChangeKind.MODIFIED -> "修改"
+                                    DataChangeKind.DELETED -> "删除"
+                                },
+                                color = when (change.kind) {
+                                    DataChangeKind.ADDED -> MaterialTheme.colorScheme.primary
+                                    DataChangeKind.MODIFIED -> MaterialTheme.colorScheme.tertiary
+                                    DataChangeKind.DELETED -> MaterialTheme.colorScheme.error
+                                },
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                change.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            if (change.beforeDetail.isNotBlank()) {
+                                Text(
+                                    "原：${change.beforeDetail}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (change.afterDetail.isNotBlank()) {
+                                Text(
+                                    "现：${change.afterDetail}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onOpenGrades) { Text("前往成绩") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
+    )
 }

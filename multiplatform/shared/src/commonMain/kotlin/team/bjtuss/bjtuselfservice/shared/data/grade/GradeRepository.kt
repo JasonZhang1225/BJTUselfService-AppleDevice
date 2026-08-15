@@ -43,6 +43,7 @@ interface GradeLocalDataSource {
         courseTypes: Map<String, CourseType>? = null,
     )
     fun replaceSelections(accountScope: String, records: List<GradeSelectionRecord>)
+    fun replaceCourseTypes(accountScope: String, courseTypes: Map<String, CourseType>)
 }
 
 class CacheStoreGradeLocalDataSource(
@@ -84,11 +85,22 @@ class CacheStoreGradeLocalDataSource(
     override fun replaceSelections(accountScope: String, records: List<GradeSelectionRecord>) {
         cacheStore.replaceGradeSelections(accountScope, records)
     }
+
+    override fun replaceCourseTypes(accountScope: String, courseTypes: Map<String, CourseType>) {
+        cacheStore.replaceProgramCourseTypes(
+            accountScope,
+            courseTypes.mapNotNull { (courseId, courseType) ->
+                courseType.storedText()?.let { courseId to it }
+            }.toMap(),
+        )
+    }
 }
 
 interface GradeRepository {
     fun load(): GradeSnapshot
     suspend fun refresh(): GradeRefreshResult
+    /** 只拉培养方案。成功写入并返回映射；失败返回 null，不改成绩缓存。 */
+    suspend fun refreshProgramCourseTypes(): Map<String, CourseType>?
     fun persistSelected(grades: List<Grade>, selectedGradeIds: Set<Int>): GradeSnapshot
     fun clearSelectedSemesters(semesters: Set<String>): GradeSnapshot
     fun clearSelectedCourseTypes(courseTypes: Set<CourseType>): GradeSnapshot
@@ -123,13 +135,7 @@ class DefaultGradeRepository(
         }
 
         // 培养方案抓取失败仅降级：成绩照常替换，性质映射保留上一次成功的旧数据。
-        val remoteCourseTypes = try {
-            programRemote.fetchCourseTypes()
-        } catch (error: CancellationException) {
-            throw error
-        } catch (_: Exception) {
-            null
-        }
+        val remoteCourseTypes = fetchRemoteCourseTypes()
 
         return try {
             val storedRecords = local.selections(accountScope)
@@ -153,6 +159,18 @@ class DefaultGradeRepository(
                 snapshot = runCatching(::load).getOrElse { fallback },
                 reason = GradeSyncFailure.CACHE,
             )
+        }
+    }
+
+    override suspend fun refreshProgramCourseTypes(): Map<String, CourseType>? {
+        val remoteCourseTypes = fetchRemoteCourseTypes() ?: return null
+        return try {
+            local.replaceCourseTypes(accountScope, remoteCourseTypes)
+            local.courseTypes(accountScope)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -196,6 +214,14 @@ class DefaultGradeRepository(
     override fun clearAllSelections(): GradeSnapshot {
         local.replaceSelections(accountScope, emptyList())
         return GradeSnapshot(local.grades(accountScope), emptySet(), local.courseTypes(accountScope))
+    }
+
+    private suspend fun fetchRemoteCourseTypes(): Map<String, CourseType>? = try {
+        programRemote.fetchCourseTypes()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
     }
 
     private fun snapshot(

@@ -1,11 +1,14 @@
 package team.bjtuss.bjtuselfservice.shared.feature.grade
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeRefreshResult
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeRepository
 import team.bjtuss.bjtuselfservice.shared.data.grade.GradeSyncFailure
+import team.bjtuss.bjtuselfservice.shared.data.home.gradeChangeRecords
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
 import team.bjtuss.bjtuselfservice.shared.domain.change.recordSafely
 import team.bjtuss.bjtuselfservice.shared.domain.grade.CourseType
@@ -18,6 +21,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.grade.filterGradesBySemester
 import team.bjtuss.bjtuselfservice.shared.domain.grade.filterGradesByType
 import team.bjtuss.bjtuselfservice.shared.domain.grade.gradesForCalculation
 import team.bjtuss.bjtuselfservice.shared.domain.grade.sortGrades
+import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeRecord
 
 enum class GradeContentSource {
     CACHE,
@@ -39,7 +43,7 @@ data class GradeUiState(
     val excludedCourseTypes: Set<CourseType> = emptySet(),
     /** null = 性质映射未加载（从未同步成功），此时不应把全部课程当“其他类别”。 */
     val courseTypesByCode: Map<String, CourseType>? = null,
-    /** 默认「从新到旧」：教务原序倒排。 */
+    /** 默认逆序：教务 ln+lr 原序倒排。 */
     val sortOrder: GradeSortOrder = GradeSortOrder.ORIGINAL_REVERSED,
     val selectionMode: Boolean = false,
     val selectedGradeId: Int? = null,
@@ -47,6 +51,8 @@ data class GradeUiState(
     val isRefreshing: Boolean = false,
     val source: GradeContentSource? = null,
     val failure: GradeSyncFailure? = null,
+    /** 本次刷新相对缓存新发现的变动；关闭弹窗后清空，不影响首页信息流。 */
+    val pendingChangeNotice: List<HomeChangeRecord>? = null,
 ) {
     val semesterOptions: List<String>
         get() = grades.map(Grade::semester).filter(String::isNotBlank).distinct()
@@ -137,6 +143,9 @@ enum class CourseTypeSelectionState {
     NONE,
 }
 
+internal const val PROGRAM_ENSURE_MAX_ATTEMPTS = 3
+internal const val PROGRAM_ENSURE_RETRY_DELAY_MILLIS = 700L
+
 class GradeScreenModel(
     private val repository: GradeRepository,
     private val changeRecorder: DataChangeRecorder<Grade>? = null,
@@ -147,6 +156,7 @@ class GradeScreenModel(
     private var cacheLoaded = false
     private var networkAutoSyncStarted = false
     private var refreshInFlight = false
+    private var programEnsureInFlight = false
 
     /**
      * @param refreshFromNetwork false 只读缓存；true 在登录成功后由 shell 触发自动同步。
@@ -195,12 +205,18 @@ class GradeScreenModel(
             when (val result = repository.refresh()) {
                 is GradeRefreshResult.Success -> {
                     changeRecorder.recordSafely(before.grades, result.snapshot.grades)
+                    val notice = if (before.grades.isEmpty()) {
+                        null
+                    } else {
+                        gradeChangeRecords(before.grades, result.snapshot.grades).ifEmpty { null }
+                    }
                     applySnapshot(
                         grades = result.snapshot.grades,
                         selectedIds = result.snapshot.selectedGradeIds,
                         courseTypesByCode = result.snapshot.courseTypesByCode,
                         source = GradeContentSource.NETWORK,
                         failure = null,
+                        pendingChangeNotice = notice,
                     )
                 }
                 is GradeRefreshResult.Failure -> applySnapshot(
@@ -218,6 +234,43 @@ class GradeScreenModel(
                 mutableState.value = current.copy(isRefreshing = false, isLoading = false)
             }
         }
+    }
+
+    /**
+     * 映射缺失时单独补拉培养方案，不改成绩、不记变动。
+     * 已有映射或正在拉取时直接返回。
+     */
+    suspend fun ensureProgramCourseTypes(
+        maxAttempts: Int = PROGRAM_ENSURE_MAX_ATTEMPTS,
+        delayMillis: Long = PROGRAM_ENSURE_RETRY_DELAY_MILLIS,
+    ) {
+        require(maxAttempts >= 1)
+        if (mutableState.value.courseTypesByCode != null || programEnsureInFlight) return
+        programEnsureInFlight = true
+        try {
+            repeat(maxAttempts) { index ->
+                if (mutableState.value.courseTypesByCode != null) return
+                val mapping = try {
+                    repository.refreshProgramCourseTypes()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    null
+                }
+                if (mapping != null) {
+                    mutableState.value = mutableState.value.copy(courseTypesByCode = mapping)
+                    return
+                }
+                if (index < maxAttempts - 1) delay(delayMillis)
+            }
+        } finally {
+            programEnsureInFlight = false
+        }
+    }
+
+    fun dismissChangeNotice() {
+        if (mutableState.value.pendingChangeNotice == null) return
+        mutableState.value = mutableState.value.copy(pendingChangeNotice = null)
     }
 
     fun toggleSemester(semester: String) {
@@ -270,7 +323,7 @@ class GradeScreenModel(
 
     /**
      * 筛选面板：点左侧维度胶囊。已在该维度则不动方向；切维度时落到该维默认方向
-     * （更新顺序→从新到旧 / 分数→从高到低）。
+     * （教务原序→逆序 / 分数→从高到低）。
      */
     fun selectSortCategory(byScore: Boolean) {
         val current = mutableState.value.sortOrder
@@ -425,6 +478,7 @@ class GradeScreenModel(
         courseTypesByCode: Map<String, CourseType>?,
         source: GradeContentSource?,
         failure: GradeSyncFailure?,
+        pendingChangeNotice: List<HomeChangeRecord>? = mutableState.value.pendingChangeNotice,
     ) {
         val current = mutableState.value
         val semesterOptions = grades.map(Grade::semester).filter(String::isNotBlank).toSet()
@@ -441,6 +495,7 @@ class GradeScreenModel(
             isRefreshing = false,
             source = source,
             failure = failure,
+            pendingChangeNotice = pendingChangeNotice,
         )
     }
 }

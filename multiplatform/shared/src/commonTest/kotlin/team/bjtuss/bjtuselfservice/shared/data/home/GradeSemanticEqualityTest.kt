@@ -5,6 +5,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.change.detectDataChanges
 import team.bjtuss.bjtuselfservice.shared.domain.grade.Grade
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class GradeSemanticEqualityTest {
@@ -53,5 +54,44 @@ class GradeSemanticEqualityTest {
             equivalent = ::gradesSemanticallyEqual,
         )
         assertEquals(listOf(DataChangeKind.MODIFIED), changes.map { it.kind })
+    }
+
+    @Test
+    fun detectsExperimentComponentChangeWhenFinalScoreUnchanged() {
+        val old = Grade(
+            id = 1,
+            courseName = "物理实验Ⅰ",
+            courseTeacher = "教师",
+            courseScore = "A,95",
+            courseCredits = "1.0",
+            courseYear = "2025-2026-2",
+            semester = "2025-2026-2",
+            detail = "平时成绩 90 最终成绩 95",
+        )
+        val new = old.copy(
+            id = 2,
+            detail = "平时成绩：90\n实验成绩：88\n最终成绩：95",
+        )
+        assertFalse(gradesSemanticallyEqual(old, new))
+        val records = gradeChangeRecords(listOf(old), listOf(new))
+        assertEquals(listOf(DataChangeKind.MODIFIED), records.map { it.kind })
+        assertTrue(records.single().afterDetail.contains("实验成绩88"))
+    }
+
+    @Test
+    fun componentWhitespaceOnlyIsNotAChange() {
+        val old = Grade(
+            id = 1,
+            courseName = "高等数学",
+            courseTeacher = "张老师",
+            courseScore = "A,95",
+            courseCredits = "3.0",
+            courseYear = "2025-2026-1",
+            semester = "2025-2026-1",
+            detail = "平时成绩 40 期末成绩 60",
+        )
+        val new = old.copy(detail = "平时成绩：40\n期末成绩：60")
+        assertTrue(gradesSemanticallyEqual(old, new))
+        assertEquals(emptyList(), gradeChangeRecords(listOf(old), listOf(new)))
     }
 }

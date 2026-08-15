@@ -199,7 +199,7 @@ fun CourseScheduleWorkspace(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        CourseTypeLegend()
+                                        CourseTypeLegend(mappingLoaded = courseTypesByCode != null)
                                         Spacer(Modifier.weight(1f))
                                         CourseWeekNavigationControls(
                                             selectedWeek = state.selectedWeek,
@@ -1082,7 +1082,7 @@ private fun CompactWeekPager(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CourseTypeLegend()
+            CourseTypeLegend(mappingLoaded = courseTypesByCode != null)
             Spacer(Modifier.weight(1f))
             Text(
                 "滑动切换周数",
@@ -1111,7 +1111,10 @@ private fun CompactWeekPager(
 }
 
 @Composable
-private fun CourseTypeLegend(modifier: Modifier = Modifier) {
+private fun CourseTypeLegend(
+    mappingLoaded: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val types = listOf(
         CourseType.REQUIRED,
         CourseType.LIMITED,
@@ -1119,9 +1122,10 @@ private fun CourseTypeLegend(modifier: Modifier = Modifier) {
         CourseType.PHYSICAL_EDUCATION,
         CourseType.UNKNOWN,
     )
+    val unknownLabel = if (mappingLoaded) "未知" else "未同步"
     Row(
         modifier = modifier.semantics {
-            contentDescription = "课程性质图例：必修、限选、任选、体育、未知"
+            contentDescription = "课程性质图例：必修、限选、任选、体育、$unknownLabel"
         },
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1134,7 +1138,7 @@ private fun CourseTypeLegend(modifier: Modifier = Modifier) {
                 border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.border),
             ) {
                 Text(
-                    type.displayName(),
+                    if (type == CourseType.UNKNOWN) unknownLabel else type.displayName(),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                     color = colors.onContainer,

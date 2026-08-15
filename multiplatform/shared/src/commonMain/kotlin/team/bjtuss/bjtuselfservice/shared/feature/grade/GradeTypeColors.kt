@@ -27,10 +27,11 @@ internal fun courseTypeColors(type: CourseType): GradeTypeColors {
             GradeTypeColors(container = Color(0xFFF6D2D0), onContainer = Color(0xFF7D1F1A))
         }
 
+        // 限选用琥珀，避免和必修的红粉糊在一起。
         CourseType.LIMITED -> if (dark) {
-            GradeTypeColors(container = Color(0xFF44201F), onContainer = Color(0xFFF4C4BE))
+            GradeTypeColors(container = Color(0xFF3D2A12), onContainer = Color(0xFFF3C98A))
         } else {
-            GradeTypeColors(container = Color(0xFFFDDCDC), onContainer = Color(0xFFB23B33))
+            GradeTypeColors(container = Color(0xFFF8E4C4), onContainer = Color(0xFF8A4B12))
         }
 
         CourseType.ELECTIVE -> if (dark) {

@@ -1,39 +1,31 @@
 # BJTUselfService KMP 迁移工作记忆
 
-> 最后更新：2026-08-11
+> 最后更新：2026-08-15
 > 当前分支：`main`（跟踪 `mine/main` → `JasonZhang1225/BJTUselfService-KMP-Refreshed`）
-> 阶段状态：**M12 已完成并发布 `1.7.2-KMP` pre-release，下一阶段为 M13 物理在线接入调研**。当前发布基线 `1.7.2-KMP`（tag `v1.7.2-KMP@fff061f`）。
+> 阶段状态：**M12 已发布 `1.7.2-KMP`。课表培养方案冷启动 / 成绩变动弹窗 / 排序文案 / 限选配色待提交后升版发布。** 当前发布基线 `1.7.2-KMP`（tag `v1.7.2-KMP@fff061f`）。
 > 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.2-KMP`（git tag，`fff061f`）**
-> 远端历史：2026-08-03 曾强制改写，根提交为 `46f6ef9`；此后本地/远端已新增 16 个提交并带 `v1.7.1-KMP` 标签。旧 SHA 仍可被 GitHub 缓存直接解析；Support 要求先轮换泄露凭据，用户决定不再提交清缓存工单并自行更换密码。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
 > 本文件是实时工作记忆，不是只追加日志：任务开始读、结束改，只保留当前接续工作需要的状态。
 
 ## 1. 本阶段已做到（≤10 行）
 
-- **第一阶段收口（M0–M11 + M5.5 + M5.6）**：登录、首页、成绩、课程表、考试、作业、课件、校历成绩单、教室（人数估计+占用查询）、设置、平台能力、原生导航全链路完成；登录页 UI/验证码与全部 UI 手动确认/真实数据验证已于 2026-08-09 由用户确认完成；细节全部见 `history_full.md`。
-- **pre-release `1.7.1-KMP` 三端已发布**（2026-08-09）：本地构建上传 GitHub Release，git tag `v1.7.1-KMP` 指向 `8498f32`；M11 教室占用查询、壳层桌面/平板对齐、版本标识统一为最后三个里程碑提交。
-- **M12 已完成（本次提交）**：日期映射/缓存跟随、跨本学期与选课学期“前往日期”、默认概览表格、五色图例、最左“全部教学周”与交替半格已完成；紧凑标题/日历确认文案已精简，课程地点按层级倒序并用 `-` 展示与导出。宽屏网格有性质配色、按钮及方向性无回弹动画；触摸板主路径使用 AppKit 原生 `phase/momentumPhase`，一次手势最多一周且无冷却，用户已验收。选课导出使用下一学期 `2026-2027-1`（第 1 周 `2026-09-07`），课程为 weekly recurrence，考试只允许单场加入；四端编译/测试通过。详见 M12 文档。
-- **Apple 构建环境**：2026-08-11 经用户授权，全局 `xcode-select` 已切换到 `/Applications/Xcode-beta.app/Contents/Developer`；`xcrun xcodebuild -version` 为 Xcode 27.0（`27A5228h`），`simctl` 同样来自该路径。
-- **M5.5 验证码/登录链路已实现**：Android TorchScript、Apple Core ML，冒烟 21/24；自动识别默认开；主登录页隐藏验证码、失败最多 3 次后弹手动框。
-- **等外部条件**：真实数据变化样本、真实作业上传、退出账号往返（会话不再需要时）。
-- **缺权限/签名**：iOS Keychain 合法签名往返、Apple Developer 正式签名/公证/隐私问卷。
-- **本地分发包**：根目录 `builtapps/`（gitignore）含 1.7.0 原版与 KMP 三端 debug/开发签名包，非正式发布。
-- **pre-release `1.7.2-KMP` 三端已发布**（2026-08-11）：本地构建上传 GitHub Release，git tag `v1.7.2-KMP` 指向 `fff061f`（main 已推送 `mine`）。内容 = M12 课程表体验升级 + 应用内更新检测 + 教室占用页 UI 优化。产物：debug APK（versionName `1.7.2-KMP`/versionCode 10）、iOS unsigned IPA（`1.7.2-KMP`/build 10）、macOS DMG（`1.7.2`，中文名「交大自由行 KMP」）。
-- **更新检测 + 教室占用重组（worktree 已并 main）**：worktree `claude/frosty-williams-5d71d3` 三提交（教室占用重组 `0f234b3`、更新检测 `cebcdb1`、版本 bump `38b1ca8`）经 merge `8d22931` 并入；另有 M12 补充 `8482a63`、jpackage JDK 修复 `fff061f`。细节见 `history_full.md`。
+- **第一阶段收口 + `1.7.1-KMP`/`1.7.2-KMP` + M12**：细节见 `history_full.md`。
+- **2026-08-15 体验修复**：培养方案独立补拉并重试；分项成绩变动弹窗；排序文案默认顺序/正序/逆序；限选琥珀配色。用户平板已确认弹窗、新装分类色块与配色。
+- **验证**：`./gradlew :shared:desktopTest --tests '*Grade*' --tests '*HomeChange*' --tests '*CourseSchedule*' --tests '*GradeSemantic*'` 通过；`:shared:compileKotlinIosSimulatorArm64` 通过。实机登录后课表上色与弹窗尚未目视。
+- **本地 Android debug 包**（2026-08-15）：`~/Downloads/BJTUSelfService-KMP-1.7.2-KMP-debug-20260815.apk`（350M，debug 签名，含未提交三项修复）。命令：`multiplatform` 下 JBR 21 `:androidApp:assembleDebug --rerun-tasks`。
 
 ## 2. 当前痛点（≤8 条）
 
-- **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1；`android.experimental.disableCompileSdkChecks=true` 已绕过。升 AGP 或装 android-37 后复查。
-- **紧凑端 UI**：明文授权 banner 只显示一条待确认；课表课程详情弹窗仍 `skipPartiallyExpanded=false`（全项目唯一），若反馈卡半高再对齐 true。
-- **CMP 下拉刷新与系统过滚不兼容（已放弃）**：用户决定日后 SwiftUI 重写再做 `.refreshable`。
-- **验证码发布级准确率仍待扩样**：24 张冒烟集 87.5%；公版前需 ≥300 张独立留出集。
-- **课件深层按需请求仍缺真实文件夹样本**；信息流增删改仍无服务器自然变化样本。
-- 官方 1.7.0 / KMP PyTorch 2.1 在 API 37.1 有 16 KB page-size 提示；正式 Android 发布前需处理原生库对齐。
+- **实机未看**：新装/清方案缓存后课表是否自动上色；有缓存改分项是否弹窗。
+- **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1 已实验绕过。
+- **验证码发布级准确率仍待扩样**；课件深层文件夹/信息流变化仍缺自然样本。
+- 官方 1.7.0 / KMP PyTorch 2.1 在 API 37.1 有 16 KB page-size 提示。
 
 ## 3. 接下来 1～3 个阶段
 
-1. **M13 物理在线接入**（需内网调研，外网 443 不通）。规划见 `docs/migration/m13-phyvlab-integration-plan.md`；M12 完整证据见 `m12-course-schedule-plan.md`。
-2. **自然样本补证与公版门禁**：课件文件夹、作业上传、信息流变化、验证码扩样；UI 逐页按用户指定推进。
+1. **实机确认这三项**，需要时再提交。
+2. **M13 物理在线接入**（需内网调研）。规划见 `docs/migration/m13-phyvlab-integration-plan.md`。
+3. **自然样本补证与公版门禁**：课件文件夹、作业上传、信息流变化、验证码扩样。
 
 ## 维护规则
 

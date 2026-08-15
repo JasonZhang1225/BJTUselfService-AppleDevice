@@ -77,25 +77,77 @@ class CacheStoreHomeChangeFeedRepository(
 }
 
 fun gradeChangeRecorder(feed: HomeChangeFeedRepository): DataChangeRecorder<Grade> =
-    changeRecorder(
-        feed = feed,
-        domain = HomeChangeDomain.GRADES,
-        identity = { listOf(it.courseName, it.courseTeacher, it.courseYear, it.semester) },
-        // 只比分数/学分/学期等业务字段。detail（组成与说明）会因解析 <br>/空白变化而抖动，
-        // 不应冒充「成绩变动」；id 是本地库生成的，也必须忽略。
-        equivalent = { old, new -> gradesSemanticallyEqual(old, new) },
-        title = Grade::courseName,
-        detail = { "${it.courseScore} · ${it.courseCredits} 学分 · ${it.semester}" },
-    )
+    DataChangeRecorder { before, after ->
+        feed.acceptRefresh(
+            domain = HomeChangeDomain.GRADES,
+            hadPreviousItems = before.isNotEmpty(),
+            changes = gradeChangeRecords(before, after),
+        )
+    }
 
-/** 成绩信息流等价：忽略本地 id 与详情 HTML 文本差异。 */
+fun gradeChangeRecords(before: List<Grade>, after: List<Grade>): List<HomeChangeRecord> =
+    detectDataChanges(
+        before = before,
+        after = after,
+        identity = { listOf(it.courseName, it.courseTeacher, it.courseYear, it.semester) },
+        equivalent = ::gradesSemanticallyEqual,
+    ).map { change ->
+        val displayItem = change.after ?: change.before ?: error("change has no item")
+        HomeChangeRecord(
+            domain = HomeChangeDomain.GRADES,
+            kind = change.kind,
+            title = displayItem.courseName.ifBlank { HomeChangeDomain.GRADES.title },
+            beforeDetail = change.before?.let(::gradeChangeDetail).orEmpty(),
+            afterDetail = change.after?.let(::gradeChangeDetail).orEmpty(),
+        )
+    }.filterNot { record ->
+        record.kind == DataChangeKind.MODIFIED && record.beforeDetail == record.afterDetail
+    }
+
+internal fun gradeChangeDetail(grade: Grade): String {
+    val base = "${grade.courseScore} · ${grade.courseCredits} 学分 · ${grade.semester}"
+    val components = gradeComponentScores(grade.detail)
+    if (components.isEmpty()) return base
+    return base + " · " + components.entries.joinToString(" ") { "${it.key}${it.value}" }
+}
+
+private val gradeComponentLabels = listOf(
+    "平时成绩",
+    "期中成绩",
+    "期末成绩",
+    "实验成绩",
+    "最终成绩",
+    "总评成绩",
+)
+
+/** 从详情抽出分项数字/等级；空白、冒号、换行压掉后再比，避免 HTML 抖动。 */
+internal fun gradeComponentScores(detail: String): Map<String, String> {
+    if (detail.isBlank()) return emptyMap()
+    val compact = detail.replace(Regex("[\\s:：]+"), "")
+    val valuePattern = Regex("^(?:[0-9]+(?:\\.[0-9]+)?|[A-F][+-]?)")
+    return buildMap {
+        for (label in gradeComponentLabels) {
+            val index = compact.indexOf(label)
+            if (index < 0) continue
+            val after = compact.substring(index + label.length)
+            val value = valuePattern.find(after)?.value ?: continue
+            put(label, value)
+        }
+    }
+}
+
+/**
+ * 成绩信息流等价：忽略本地 id 与备注原文。
+ * 总分/学分之外还比规范化后的平时/期中/期末/实验/最终/总评。
+ */
 internal fun gradesSemanticallyEqual(old: Grade, new: Grade): Boolean =
     old.courseName == new.courseName &&
         old.courseTeacher == new.courseTeacher &&
         old.courseScore == new.courseScore &&
         old.courseCredits == new.courseCredits &&
         old.courseYear == new.courseYear &&
-        old.semester == new.semester
+        old.semester == new.semester &&
+        gradeComponentScores(old.detail) == gradeComponentScores(new.detail)
 
 fun courseChangeRecorder(feed: HomeChangeFeedRepository): DataChangeRecorder<Course> =
     changeRecorder(

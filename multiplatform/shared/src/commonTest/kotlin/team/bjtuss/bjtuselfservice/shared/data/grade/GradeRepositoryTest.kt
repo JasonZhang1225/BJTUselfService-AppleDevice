@@ -114,6 +114,40 @@ class GradeRepositoryTest {
     }
 
     @Test
+    fun refreshProgramCourseTypesWritesMappingWithoutTouchingGrades() = runBlocking {
+        val cached = grade(id = 1, name = "缓存课")
+        val local = FakeLocal(storedGrades = listOf(cached))
+        val repository = DefaultGradeRepository(
+            accountScope = "student-a",
+            local = local,
+            remote = FakeRemote(error = GradeRemoteException(GradeRemoteFailure.NETWORK)),
+            programRemote = FakeProgramRemote(mapOf("C312009B" to CourseType.REQUIRED)),
+        )
+
+        val mapping = repository.refreshProgramCourseTypes()
+
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), mapping)
+        assertEquals(listOf(cached), local.storedGrades)
+        assertTrue(local.replacedSnapshotAccounts.isEmpty())
+    }
+
+    @Test
+    fun refreshProgramCourseTypesFailureLeavesMappingUntouched() = runBlocking {
+        val local = FakeLocal(storedCourseTypes = mapOf("C312009B" to CourseType.REQUIRED))
+        val repository = DefaultGradeRepository(
+            accountScope = "student-a",
+            local = local,
+            remote = FakeRemote(emptyList()),
+            programRemote = FakeProgramRemote(
+                error = GradeRemoteException(GradeRemoteFailure.NETWORK),
+            ),
+        )
+
+        assertEquals(null, repository.refreshProgramCourseTypes())
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), local.storedCourseTypes)
+    }
+
+    @Test
     fun unsyncedProgramMappingLoadsAsNull() = runBlocking {
         val repository = DefaultGradeRepository(
             accountScope = "student-a",
@@ -241,6 +275,13 @@ class GradeRepositoryTest {
             records: List<GradeSelectionRecord>,
         ) {
             storedSelections = records
+        }
+
+        override fun replaceCourseTypes(
+            accountScope: String,
+            courseTypes: Map<String, CourseType>,
+        ) {
+            storedCourseTypes = courseTypes
         }
     }
 

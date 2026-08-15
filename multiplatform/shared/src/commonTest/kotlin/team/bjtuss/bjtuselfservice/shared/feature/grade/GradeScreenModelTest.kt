@@ -301,11 +301,90 @@ class GradeScreenModelTest {
         assertEquals(CourseTypeSelectionState.NONE, model.state.value.selectionStateForType(CourseType.UNKNOWN))
     }
 
+    @Test
+    fun ensureProgramCourseTypesRetriesThenUpdatesMappingOnly() = runBlocking {
+        val cached = GradeSnapshot(listOf(grade(1)), emptySet(), courseTypesByCode = null)
+        val repository = FakeRepository(
+            loaded = cached,
+            refreshed = GradeRefreshResult.Success(cached),
+            programTypes = mapOf("C312009B" to CourseType.REQUIRED),
+            programFailuresBeforeSuccess = 2,
+        )
+        val model = GradeScreenModel(repository)
+        model.initialize(refreshFromNetwork = false)
+
+        model.ensureProgramCourseTypes(delayMillis = 0)
+
+        assertEquals(3, repository.programAttempts)
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), model.state.value.courseTypesByCode)
+        assertEquals(listOf(1), model.state.value.grades.map(Grade::id))
+    }
+
+    @Test
+    fun ensureProgramCourseTypesSkipsWhenMappingAlreadyLoaded() = runBlocking {
+        val cached = GradeSnapshot(
+            listOf(grade(1)),
+            emptySet(),
+            courseTypesByCode = mapOf("C312009B" to CourseType.REQUIRED),
+        )
+        val repository = FakeRepository(
+            loaded = cached,
+            refreshed = GradeRefreshResult.Success(cached),
+            programTypes = mapOf("X" to CourseType.ELECTIVE),
+        )
+        val model = GradeScreenModel(repository)
+        model.initialize(refreshFromNetwork = false)
+
+        model.ensureProgramCourseTypes()
+
+        assertEquals(0, repository.programAttempts)
+        assertEquals(mapOf("C312009B" to CourseType.REQUIRED), model.state.value.courseTypesByCode)
+    }
+
+    @Test
+    fun refreshWithCachedGradesSetsChangeNoticeOnScoreUpdate() = runBlocking {
+        val old = grade(1, score = "B,79")
+        val updated = old.copy(id = 2, courseScore = "A,95")
+        val model = GradeScreenModel(
+            FakeRepository(
+                loaded = GradeSnapshot(listOf(old), emptySet()),
+                refreshed = GradeRefreshResult.Success(GradeSnapshot(listOf(updated), emptySet())),
+            ),
+        )
+        model.initialize(refreshFromNetwork = false)
+        model.refresh()
+
+        val notice = model.state.value.pendingChangeNotice
+        assertEquals(1, notice?.size)
+        assertEquals(old.courseName, notice?.single()?.title)
+        model.dismissChangeNotice()
+        assertEquals(null, model.state.value.pendingChangeNotice)
+    }
+
+    @Test
+    fun firstNetworkRefreshFromEmptyCacheDoesNotPopup() = runBlocking {
+        val incoming = grade(1, score = "A,95")
+        val model = GradeScreenModel(
+            FakeRepository(
+                loaded = GradeSnapshot(emptyList(), emptySet()),
+                refreshed = GradeRefreshResult.Success(GradeSnapshot(listOf(incoming), emptySet())),
+            ),
+        )
+        model.initialize()
+
+        assertEquals(null, model.state.value.pendingChangeNotice)
+        assertEquals(listOf(1), model.state.value.grades.map(Grade::id))
+    }
+
     private class FakeRepository(
         private val loaded: GradeSnapshot,
         private val refreshed: GradeRefreshResult,
+        private val programTypes: Map<String, CourseType>? = null,
+        private val programFailuresBeforeSuccess: Int = 0,
     ) : GradeRepository {
         private var snapshot = loaded
+        var programAttempts = 0
+            private set
 
         override fun load(): GradeSnapshot = loaded
 
@@ -344,6 +423,14 @@ class GradeScreenModelTest {
 
         override fun clearAllSelections(): GradeSnapshot = snapshot.copy(selectedGradeIds = emptySet())
             .also { snapshot = it }
+
+        override suspend fun refreshProgramCourseTypes(): Map<String, CourseType>? {
+            programAttempts += 1
+            if (programAttempts <= programFailuresBeforeSuccess) return null
+            val types = programTypes ?: return null
+            snapshot = snapshot.copy(courseTypesByCode = types)
+            return types
+        }
     }
 
     private fun grade(
