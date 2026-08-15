@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,14 +27,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 import team.bjtuss.bjtuselfservice.shared.platformSupportsDynamicColor
 import team.bjtuss.bjtuselfservice.shared.update.AppUpdateChecker
+import team.bjtuss.bjtuselfservice.shared.update.ReleaseNoteBlock
+import team.bjtuss.bjtuselfservice.shared.update.annotatedInlineMarkdown
+import team.bjtuss.bjtuselfservice.shared.update.parseReleaseNotes
 
 @Composable
 fun SettingsWorkspace(
@@ -251,9 +260,16 @@ fun AppUpdateResultDialog(check: UpdateCheckState, onDismiss: () -> Unit) {
             if (check.hasUpdate) {
                 AlertDialog(
                     onDismissRequest = onDismiss,
-                    title = { Text("发现新版本 ${check.release.tagName}") },
+                    title = {
+                        AutoSizeDialogTitle("发现新版本 ${check.release.tagName}")
+                    },
                     text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             check.release.publishedAt?.let { publishedAt ->
                                 Text(
                                     "发布时间：${formatPublishedAt(publishedAt)}",
@@ -261,11 +277,7 @@ fun AppUpdateResultDialog(check: UpdateCheckState, onDismiss: () -> Unit) {
                                 )
                             }
                             check.release.body?.takeIf { it.isNotBlank() }?.let { body ->
-                                Text(
-                                    body,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                ReleaseNotesBody(body)
                             }
                         }
                     },
@@ -302,6 +314,120 @@ fun AppUpdateResultDialog(check: UpdateCheckState, onDismiss: () -> Unit) {
         }
         UpdateCheckState.Idle, UpdateCheckState.Checking -> Unit
     }
+}
+
+@Composable
+private fun AutoSizeDialogTitle(text: String) {
+    val baseStyle = MaterialTheme.typography.headlineSmall
+    val startSize = baseStyle.fontSize.takeIf { it != TextUnit.Unspecified } ?: 22.sp
+    val minSize = 14.sp
+    var fontSize by remember(text, startSize) { mutableStateOf(startSize) }
+    Text(
+        text = text,
+        style = baseStyle.copy(fontSize = fontSize),
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && fontSize > minSize) {
+                val next = (fontSize.value - 1f).coerceAtLeast(minSize.value).sp
+                if (next != fontSize) fontSize = next
+            }
+        },
+    )
+}
+
+@Composable
+private fun ReleaseNotesBody(markdown: String) {
+    val blocks = remember(markdown) { parseReleaseNotes(markdown) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        blocks.forEach { block ->
+            when (block) {
+                is ReleaseNoteBlock.Heading -> InlineMarkdownText(
+                    text = block.text,
+                    style = when {
+                        block.level <= 2 -> MaterialTheme.typography.titleMedium
+                        else -> MaterialTheme.typography.titleSmall
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                )
+                is ReleaseNoteBlock.Paragraph -> InlineMarkdownText(
+                    text = block.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                is ReleaseNoteBlock.ListItems -> Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    block.items.forEach { item ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("•", style = MaterialTheme.typography.bodySmall)
+                            InlineMarkdownText(
+                                text = item,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+                is ReleaseNoteBlock.Table -> ReleaseNotesTable(block)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReleaseNotesTable(table: ReleaseNoteBlock.Table) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        table.rows.forEach { row ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    if (table.headers.size >= 2 && row.size >= 2) {
+                        InlineMarkdownText(
+                            text = row[0],
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        InlineMarkdownText(
+                            text = row[1],
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        table.headers.zip(row).forEach { (header, cell) ->
+                            InlineMarkdownText(
+                                text = "$header：$cell",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlineMarkdownText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontWeight: FontWeight? = null,
+) {
+    Text(
+        text = remember(text) { annotatedInlineMarkdown(text) },
+        modifier = modifier,
+        style = style.merge(fontWeight = fontWeight),
+        color = color,
+    )
 }
 
 @Composable
