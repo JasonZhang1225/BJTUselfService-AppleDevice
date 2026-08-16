@@ -327,12 +327,12 @@ Apple 端曾出现模型可以生成或加载、但实际验证码识别很差�
 
 ### M14：Windows 桌面端移植
 
-状态：**实施中（windows-dev 分支）**。目标：KMP Windows 桌面应用，UI 复用 commonMain 共享 Compose，功能对齐 `1.7.2-KMP-A` 之后 1 个提交（`93b3d0a`），验证码自动识别复用原版 Android torch 模型（`BJTUCaptcha.pt`）。
+状态：**已完成（已并入 main 并随 1.7.3-KMP 发布）**。KMP Windows 桌面应用，UI 复用 commonMain 共享 Compose，功能对齐 `1.7.2-KMP-A` 之后 1 个提交（`93b3d0a`），验证码自动识别复用原版 Android torch 模型（`BJTUCaptcha.pt`）。
 
 - 模块：`multiplatform/windowsApp`（`jvm("windows")` target + `implementation(project(":shared"))`），不修改冻结 Android 工程与 macOS desktopApp。
 - 平台实现：DPAPI 凭据保险库、`%LOCALAPPDATA%` 缓存、AWT 文件网关、系统浏览器网页、Ktor CIO。
-- 验证码：DJL PyTorch 引擎加载同一 `.pt`；已与 Python torch 参考 logits 逐值对齐（max abs diff 0.000006，argmax 一致）。
-- 打包：jpackage EXE（需完整 JDK）。
+- 验证码：DJL PyTorch 引擎加载同一 `.pt`；已与 Python torch 参考 logits 逐值对齐（max abs diff 0.000012，argmax 一致）。
+- 打包：jpackage EXE（需完整 JDK）；按用户安装（`perUserInstall`）免 UAC 提权弹窗。
 - 规划与验收：`docs/migration/windows-port-plan.md`。真实登录会话复测与 24 张冒烟集正确率评测待样本/账号条件。
 
 - Android、iOS、macOS 分别进行 release 构建验证。

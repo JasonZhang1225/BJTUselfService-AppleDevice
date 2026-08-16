@@ -64,6 +64,9 @@ compose.desktop {
             description = "交大自由行 Kotlin Multiplatform Windows 应用"
             vendor = "BJTUselfService Contributors"
             windows {
+                // 按用户安装：装到 %LOCALAPPDATA%\Programs，免 UAC 弹窗（未签名安装器提权弹窗会在后台闪烁，
+                // 容易被误认为安装卡死）。桌面快捷方式、开始菜单项仍照常生成（用户级）。
+                perUserInstall = true
                 menu = true
                 shortcut = true
                 menuGroup = "交大自由行 KMP"
