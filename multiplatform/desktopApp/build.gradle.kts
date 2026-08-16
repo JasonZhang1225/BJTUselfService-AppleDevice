@@ -586,7 +586,7 @@ compose.desktop {
                 dockName = macDisplayName
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
-                packageBuildVersion = "12"
+                packageBuildVersion = "13"
             }
         }
     }

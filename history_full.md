@@ -406,4 +406,11 @@
 - **现行做法**：`perUserInstall = false`，产出 EXE 与 MSI；推荐双击 MSI，由 msiexec 在启动时前台提权。不要改 jpackage Burn EXE 的嵌入清单（会毁掉安装包数据）。
 - **卸载清数据**：账号密码在 `HKCU\Software\JavaSoft\Prefs\team\bjtuss\bjtuselfservice`，缓存在 `%LOCALAPPDATA%\BJTUselfServiceKMP`，都不在 `Program Files`。首次卸载 CustomAction 用 immediate `WixQuietExec`，实机日志 `0x80070057 Failed to get command line data`，动作被忽略。已改为 deferred + CustomActionData（`SetProperty` 与 CA 同名），命令在卸之前展开 `[LocalAppDataFolder]`。
 - **作业/首页**：登录后作业自动同步最多 3 次；首页仅邮件/校园卡失败写「同步失败」，作业等切片失败写「部分同步失败」。
-- **验证**：`:shared:desktopTest` 中 `HomeworkScreenModelTest`、`HomeIdleStatusTest` 通过；`:windowsApp:packageMsi` 成功；MSI 表含 `CleanupUserData` type 1089（deferred）。用户已实测旧 MSI 卸载后凭据仍在；新包待装完再卸复测。
+- **验证**：`:shared:desktopTest` 中 `HomeworkScreenModelTest`、`HomeIdleStatusTest` 通过；`:windowsApp:packageMsi` 成功；MSI 表含 `CleanupUserData` type 1089（deferred）。用户已实测旧 MSI 卸载后凭据仍在。
+
+## 热修发布：1.7.3-KMP-A（2026-08-16）
+
+- **版本号**：不用 `1.7.3-A-KMP`。比较器按后缀字典序，`A-KMP` < `KMP`，会被当成比 `1.7.3-KMP` 更旧；与 `1.7.2-KMP-A` 同一规则，采用 `1.7.3-KMP-A`。
+- **范围**：撤回 `perUserInstall`；系统级 `Program Files`；推荐 MSI 前台 UAC；卸载 deferred 清 AppData 缓存与 Java Preferences；作业自动同步最多 3 次；首页切片失败改为「部分同步失败」。含 `1eb9939` 中文显示名。
+- **版本字段**：`CURRENT_VERSION` / Android `versionName` / iOS `CFBundleShortVersionString` = `1.7.3-KMP-A`；`versionCode` / `CFBundleVersion` / `packageBuildVersion` = 13。jpackage `packageVersion` 仍为 `1.7.3`。
+- **构建边界**：本机 Windows 只打 Windows MSI/EXE。Android / iOS / macOS 需 Mac 环境，本发布不上传旧三端包冒充新构建。
