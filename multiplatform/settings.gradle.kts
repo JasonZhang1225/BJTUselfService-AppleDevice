@@ -19,3 +19,4 @@ rootProject.name = "BJTUselfServiceMultiplatform"
 include(":shared")
 include(":androidApp")
 include(":desktopApp")
+include(":windowsApp")

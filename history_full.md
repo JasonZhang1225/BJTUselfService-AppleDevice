@@ -359,3 +359,27 @@
 - **验证**：`:shared:desktopTest --tests '*AppUpdateChecker*' --tests '*SettingsScreenModel*'` 通过；Android `assembleDebug`、`desktopApp:packageDmg`、iOS `xcodebuild` Release `generic/platform=iOS` `CODE_SIGNING_ALLOWED=NO` 均成功。平板已确认成绩变动弹窗、新装分类色块与限选配色。
 - **产物**（本地上传 GitHub Release，Pre-release）：`BJTUSelfService-KMP-1.7.2-KMP-A-debug.apk`（350M）、`BJTUSelfService-KMP-1.7.2-KMP-A-iOS-unsigned.ipa`（38M）、`BJTUselfServiceKMP-1.7.2-KMP-A.dmg`（114M）。
 - **发布页**：https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.2-KMP-A
+
+## M14：Windows 桌面端移植（2026-08-16，windows-dev 分支）
+
+- **目标与基线**：KMP Windows 桌面应用，UI 复用 commonMain 共享 Compose，功能对齐 `1.7.2-KMP-A` 之后 1 个提交（`93b3d0a`）；验证码自动识别复用原版 Android torch 模型。规划：`docs/migration/windows-port-plan.md`。
+- **模块架构**：KMP 不允许同一模块声明多个 jvm target（`jvm() Kotlin Target Already Declared`），故 `shared` 不加 windows target；新增独立 `multiplatform/windowsApp`（`jvm("windows")` target）`implementation(project(":shared"))` 复用 shared desktop 产物（全部 commonMain 业务/UI + desktopMain 平台实现）。唯一 shared 改动：`Platform.desktop.kt` 按 `os.name` 返回 Windows/macOS displayName；`PlatformFamily` 枚举不修改，Windows 复用 `MacOS` 桌面 UI 分支。
+- **平台实现**（windowsApp windowsMain）：
+  - DPAPI 凭据保险库（JNA 绑 `Crypt32.CryptProtectData/CryptUnprotectData`，DATA_BLOB 16 字节结构，`WString` 描述参数；密文 base64 存 `java.util.prefs`）。实现中修复两处：结构字段顺序（先 cbData 后 pbData）与 `Memory(2*POINTER_SIZE)` 分配（初版 12 字节越界 `IndexOutOfBoundsException`）。
+  - 缓存 `%LOCALAPPDATA%/BJTUselfServiceKMP/bjtuselfservice_cache.db`（SQLDelight JDBC，同套 `openCacheStoreWithRecovery`）。
+  - `WindowsHomeworkFileGateway`：AWT FileDialog + 临时文件原子写（`ATOMIC_MOVE` 回退），实现作业上传/附件保存/课件目录导出。
+  - 网页引导卡片 + 系统默认浏览器；Ktor CIO；GB18030 解码。
+- **验证码（DJL 复用原版 torch 模型）**：`WindowsTorchCaptchaRecognizer` 用 `ai.djl.pytorch:pytorch-engine:0.33.0` + `pytorch-native-cpu:2.5.1:win-x86_64`（libtorch 2.5.1）加载 `multiplatform/androidApp/src/main/assets/BJTUCaptcha.pt`（23.6MB，23,599,429 字节）。预处理与 Android 完全一致：ImageIO → 130×42 双线性缩放 → RGB → CHW → `[0,1]`；输出 `8×1×15` logits 走共享 `decodeCaptchaLogits`（15 类字符表/8 时间步/CTC 折叠/0.55 置信度）。模型复制到 `windowsApp/src/windowsMain/resources/`，运行时解出到 `%TEMP%/bjtu-kmp-captcha/`。实现中修复：DJL 输出 NDArray 依附于 predictor 的 manager，须在 `manager.use{}` 内先 `toFloatArray()` 再关闭（否则 `Native resource has been released already`）。
+- **logits 对齐验证**（验证码策略第 4/5/6 层）：Python torch 2.13.0+cpu（venv `bjtu-captcha-venv`）加载同一 `.pt` 作参考，与 Windows DJL 输出逐值比较：
+  - 单图（seed 20260816）：max abs diff 0.000006、mean 0.00000139、argmax 逐时间步一致。
+  - 三图（seeds 20260816/20260817/20260818）：max diff 0.000007/0.000012/0.000005，argmax 全部一致。
+  - 诊断参数：`--verify-captcha-model=<图>`（表达式/答案）、`--dump-captcha-logits=<图>`（原始 120 个 logits）。
+- **测试**：`windowsApp:windowsTest` 4 个测试通过（DPAPI 往返/清除/篡改防护/Preferences）；`shared:desktopTest` 385 个测试中 384 通过，唯一失败 `MacOsKeychainCredentialVaultTest.syntheticCredentialRoundTripUsesSystemKeychain` 为平台边界（Windows 无 `/System/Library/Frameworks/Security.framework`，`UnsatisfiedLinkError`，macOS 上不受影响）。关键业务屏模型测试（课程表 28、成绩、设置）全部通过。
+- **打包与运行**：`createDistributable` app-image `BJTUselfServiceKMP.exe`（552KB launcher + runtime，免安装直接运行）；`packageExe` jpackage 安装器 `BJTUselfServiceKMP-1.7.2.exe`（113,475,584 字节，需完整 JDK——JBR 无 jlink/jpackage，本机用 Microsoft JDK 21.0.8 `C:/Users/zjg/jdk21/jdk-21.0.8+9`，`WINDOWS_PACKAGE_JAVA_HOME` 可覆盖）。打包后 EXE 启动窗口「交大自由行 KMP」，截图验证深色主题配色精确匹配共享 token（`0xFF101216` background / `0xFF17191D` surface）。
+- **版本**：windowsApp `packageVersion=1.7.2`（jpackage 三段数字限制），窗口标题/应用名「交大自由行 KMP」，vendor `BJTUselfService Contributors`。
+- **边界与待办**：24 张真实冒烟集样本不在本机（logits 已与 Python torch 逐值对齐证明同模型同语义，真实正确率评测待样本）；真实登录会话逐页复测待账号条件；Android/iOS 编译验证在 Mac/装有 SDK 环境补做（本机无 Android SDK）。未提交、未打标签、未推送。
+- **图标与深色标题栏（2026-08-16 补充）**：
+  - 图标：从 `branding/AppIconMaster-v2.png`（白色底主 logo）生成 Windows 图标——`BJTUselfServiceKMP.ico`（16/24/32/48/64/128/256 多尺寸圆角 RGBA）嵌入 EXE（`windows { iconFile }`），`app-icon.png`（64px 圆角 30% RGBA）作窗口标题栏图标（Compose `Window(icon)` + AWT `iconImages` 16/32/48 多尺寸让系统按 DPI 选最佳，避免缩放模糊）。圆角角落透明（alpha=0 露出标题栏/桌面），主体不透明白底。其他平台图标（branding xcassets、androidApp mipmap、desktopApp icns）零改动。
+  - 深色标题栏：Windows 用 JNA 调 DWM `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE=20)`（`applyWindowsDarkTitleBar`，Compose `window.windowHandle`），标题栏跟随系统深色，不再白底；macOS desktopApp 加 `-Dapple.awt.application.appearance=system`（标题栏跟随系统外观，JDK 17+ 属性）。
+  - 修复：窗口图标渲染尺寸从 32px 逻辑降到标准 16px 逻辑（250% DPI 下 40px 物理），logo 清晰度从 10px 提升到 14px 高。
+- **Review 修复（2026-08-16）**：`WindowsTorchCaptchaRecognizer` 每次识别 `manager.use{}` 会关闭 base manager 导致第二次起全部失败——改为每次推理用 `holder.manager.newSubManager()`（predictor 输出依附于输入 NDArray 的 manager，关闭子 manager 不影响 holder）；模型懒加载加 `synchronized(modelLock)` 防并发重复加载；`DataBlob.free()` 同时释放结构与数据两段原生内存（原只清结构体）。新增 `WindowsTorchCaptchaRecognizerTest`（同进程连续 4 次 + 并发 4 路推理全过）。调试用 `System.err` 诊断输出已删除，保留 `--verify-captcha-model`/`--dump-captcha-logits` 诊断参数（与 macOS verify 参数同级）。
