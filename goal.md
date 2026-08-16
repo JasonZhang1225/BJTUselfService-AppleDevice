@@ -332,7 +332,7 @@ Apple 端曾出现模型可以生成或加载、但实际验证码识别很差�
 - 模块：`multiplatform/windowsApp`（`jvm("windows")` target + `implementation(project(":shared"))`），不修改冻结 Android 工程与 macOS desktopApp。
 - 平台实现：DPAPI 凭据保险库、`%LOCALAPPDATA%` 缓存、AWT 文件网关、系统浏览器网页、Ktor CIO。
 - 验证码：DJL PyTorch 引擎加载同一 `.pt`；已与 Python torch 参考 logits 逐值对齐（max abs diff 0.000012，argmax 一致）。
-- 打包：jpackage EXE（需完整 JDK）；按用户安装（`perUserInstall`）免 UAC 提权弹窗。
+- 打包：jpackage EXE/MSI（需完整 JDK）；系统级安装到 `Program Files`，推荐 MSI 以便启动时前台弹出 UAC；卸载清除用户缓存与记住的登录。
 - 规划与验收：`docs/migration/windows-port-plan.md`。真实登录会话复测与 24 张冒烟集正确率评测待样本/账号条件。
 
 - Android、iOS、macOS 分别进行 release 构建验证。

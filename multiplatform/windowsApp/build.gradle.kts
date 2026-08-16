@@ -1,4 +1,6 @@
+import java.io.File
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -55,7 +57,7 @@ compose.desktop {
             "--enable-native-access=ALL-UNNAMED",
         )
         nativeDistributions {
-            targetFormats(TargetFormat.Exe)
+            targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             modules("java.sql")
             // Windows 桌面快捷方式、开始菜单项、「应用和功能」名称都走 packageName。
             // 与 macOS 不同：这边不必为了可执行文件名锁 ASCII，可以直接用中文显示名。
@@ -64,13 +66,72 @@ compose.desktop {
             description = "交大自由行 Kotlin Multiplatform Windows 应用"
             vendor = "BJTUselfService Contributors"
             windows {
-                // 按用户安装：装到 %LOCALAPPDATA%\Programs，免 UAC 弹窗（未签名安装器提权弹窗会在后台闪烁，
-                // 容易被误认为安装卡死）。桌面快捷方式、开始菜单项仍照常生成（用户级）。
-                perUserInstall = true
+                // 系统级标准位置：C:\Program Files\交大自由行 KMP。
+                // 双击 MSI 由 msiexec 在启动时前台弹出 UAC（不要改 Burn EXE 清单，
+                // 会毁掉 WiX 数据包）。EXE 仍可作备用，但推荐用 MSI。
+                perUserInstall = false
+                dirChooser = true
                 menu = true
                 shortcut = true
                 menuGroup = "交大自由行 KMP"
+                // 固定升级码，后续同范围安装才能覆盖升级。
+                upgradeUuid = "8f3a1c2e-7b64-4d91-a5e0-2c9b6f4d8a17"
                 iconFile.set(project.file("src/windowsMain/resources/BJTUselfServiceKMP.ico"))
+            }
+        }
+    }
+}
+
+val realJavaHomePath = providers.environmentVariable("WINDOWS_PACKAGE_JAVA_HOME")
+    .orElse("C:/Users/zjg/jdk21/jdk-21.0.8+9")
+    .get()
+    .trimEnd('/', '\\')
+val jpackageOverridePath = file("packaging/jpackage").absolutePath
+val shimCsPath = file("packaging/JpackageShim.cs").absolutePath
+val cscPath = "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+val shimHomePath = file("${layout.buildDirectory.get().asFile}/jpackage-shim").absolutePath
+val jpackageResourcesPath = file("${layout.buildDirectory.get().asFile}/compose/tmp/resources").absolutePath
+
+val compileJpackageShim by tasks.registering {
+    inputs.file(shimCsPath)
+    inputs.dir(jpackageOverridePath)
+    outputs.dir(shimHomePath)
+    val realJdk = realJavaHomePath
+    val overrideDir = jpackageOverridePath
+    val shimSource = shimCsPath
+    val compiler = cscPath
+    val outHome = shimHomePath
+    doLast {
+        val bin = File(outHome, "bin")
+        bin.mkdirs()
+        check(File(compiler).isFile) { "找不到 csc.exe：$compiler" }
+        val compile = ProcessBuilder(
+            compiler,
+            "/nologo",
+            "/target:exe",
+            "/out:${File(bin, "jpackage.exe").absolutePath}",
+            shimSource,
+        ).inheritIO().start()
+        check(compile.waitFor() == 0) { "编译 jpackage shim 失败" }
+        File(bin, "shim.config").writeText(
+            "real=$realJdk/bin/jpackage.exe\noverride=$overrideDir\n",
+            Charsets.UTF_8,
+        )
+    }
+}
+
+afterEvaluate {
+    listOf("packageExe", "packageMsi").forEach { taskName ->
+        tasks.named<AbstractJPackageTask>(taskName) {
+            dependsOn(compileJpackageShim)
+            // compose.desktop 也会写 javaHome，必须在 afterEvaluate 再盖回去。
+            javaHome.set(shimHomePath)
+            val overrideWxs = File(jpackageOverridePath, "main.wxs")
+            val resourcesDir = jpackageResourcesPath
+            doFirst {
+                val dest = File(resourcesDir)
+                dest.mkdirs()
+                overrideWxs.copyTo(File(dest, "main.wxs"), overwrite = true)
             }
         }
     }

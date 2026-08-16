@@ -147,6 +147,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxUiState
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.home.homeIdleStatusText
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommand
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommandBus
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
@@ -423,11 +424,8 @@ fun AuthenticatedAppShell(
         if (entryLoggingIn) return@LaunchedEffect
         coroutineScope {
             launch {
+                // 作业自动同步的失败重试在 ScreenModel 内（最多 3 次），与课表一致。
                 homeworkModel.initialize(loginSyncPreferences.autoSyncHomework)
-                if (loginSyncPreferences.autoSyncHomework && homeworkModel.state.value.failure != null) {
-                    delay(LOGIN_SYNC_RETRY_DELAY_MILLIS)
-                    homeworkModel.refresh()
-                }
             }
             launch {
                 examScheduleModel.initialize(loginSyncPreferences.autoSyncExams)
@@ -541,14 +539,18 @@ fun AuthenticatedAppShell(
                 showBack = false,
                 modifier = modifier,
                 // 与成绩/课表一致：同步态并入顶栏右上胶囊，勿只留孤图标。
-                // 首页是聚合页，任一业务切片失败即显示「同步失败」。
-                idleStatusText = when {
-                    homeState.failure != null || homeworkState.failure != null ||
-                        examState.failure != null || courseState.failure != null -> "同步失败"
-                    homeworkState.source != null || examState.source != null ||
-                        courseState.source != null -> "已同步"
-                    else -> "未同步"
-                },
+                // 首页聚合邮件/校园卡自身失败才写「同步失败」；作业等切片失败写「部分同步失败」，
+                // 避免作业红条把整个首页说成全挂。
+                idleStatusText = homeIdleStatusText(
+                    homeFailed = homeState.failure != null,
+                    homeworkFailed = homeworkState.failure != null,
+                    examFailed = examState.failure != null,
+                    courseFailed = courseState.failure != null,
+                    hasAnySource = homeworkState.source != null ||
+                        examState.source != null ||
+                        courseState.source != null ||
+                        homeState.status != null,
+                ),
             ) {
                 HomeWorkspace(
                     model = homeModel,

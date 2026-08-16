@@ -13,6 +13,7 @@ import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkRefreshResult
 import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkRepository
 import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkOperationResult
 import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkSnapshot
+import team.bjtuss.bjtuselfservice.shared.data.homework.HomeworkSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
 import team.bjtuss.bjtuselfservice.shared.domain.homework.HomeworkAttachment
 import team.bjtuss.bjtuselfservice.shared.domain.homework.HomeworkDetail
@@ -126,6 +127,34 @@ class HomeworkScreenModelTest {
         assertEquals(listOf(updated), captured?.second)
     }
 
+    @Test
+    fun autoSyncInitializeRetriesTransientNetworkFailure() = runBlocking {
+        val cached = HomeworkSnapshot(listOf(homework(1, "程序设计", "2026-08-01 08:00")))
+        val fresh = HomeworkSnapshot(listOf(homework(9, "程序设计", "2026-08-02 08:00")))
+        val repository = FakeRepository(cached, fresh, failFirstN = 2)
+        val model = model(repository)
+
+        model.initialize()
+
+        assertEquals(3, repository.refreshCount)
+        assertEquals(HomeworkContentSource.NETWORK, model.state.value.source)
+        assertEquals(null, model.state.value.failure)
+        assertEquals(listOf(9), model.state.value.homework.map(Homework::id))
+    }
+
+    @Test
+    fun autoSyncInitializeStopsAfterMaxFailedAttempts() = runBlocking {
+        val cached = HomeworkSnapshot(listOf(homework(1, "程序设计", "2026-08-01 08:00")))
+        val repository = FakeRepository(cached, cached, failFirstN = 10)
+        val model = model(repository)
+
+        model.initialize()
+
+        assertEquals(HOMEWORK_AUTO_SYNC_MAX_ATTEMPTS, repository.refreshCount)
+        assertEquals(HomeworkSyncFailure.NETWORK, model.state.value.failure)
+        assertEquals(HomeworkContentSource.CACHE, model.state.value.source)
+    }
+
     private fun model(repository: HomeworkRepository) = HomeworkScreenModel(
         repository = repository,
         timeZone = TimeZone.UTC,
@@ -138,6 +167,7 @@ class HomeworkScreenModelTest {
         private val detail: HomeworkDetail = HomeworkDetail("要求", emptyList()),
         private val submitted: List<SubmittedHomeworkAttachment> = emptyList(),
         private val file: HomeworkFileContent = HomeworkFileContent("file.bin", "application/octet-stream", byteArrayOf(1)),
+        private val failFirstN: Int = 0,
     ) : HomeworkRepository {
         var refreshCount = 0
         var submitCount = 0
@@ -146,6 +176,9 @@ class HomeworkScreenModelTest {
 
         override suspend fun refresh(): HomeworkRefreshResult {
             refreshCount++
+            if (refreshCount <= failFirstN) {
+                return HomeworkRefreshResult.Failure(loaded, HomeworkSyncFailure.NETWORK)
+            }
             return HomeworkRefreshResult.Success(refreshed)
         }
 

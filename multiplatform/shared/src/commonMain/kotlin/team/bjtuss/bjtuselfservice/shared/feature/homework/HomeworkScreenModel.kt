@@ -1,5 +1,6 @@
 package team.bjtuss.bjtuselfservice.shared.feature.homework
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +31,10 @@ enum class HomeworkContentSource {
     CACHE,
     NETWORK,
 }
+
+/** 登录后自动同步：首轮 + 失败后再试，避免静默入场后握手抖动就亮红条。 */
+internal const val HOMEWORK_AUTO_SYNC_MAX_ATTEMPTS = 3
+internal const val HOMEWORK_AUTO_SYNC_RETRY_DELAY_MILLIS = 700L
 
 data class HomeworkUiState(
     val homework: List<Homework> = emptyList(),
@@ -113,7 +118,7 @@ class HomeworkScreenModel(
         }
         if (refreshFromNetwork && !networkAutoSyncStarted) {
             networkAutoSyncStarted = true
-            refresh()
+            refreshWithRetry()
         }
     }
 
@@ -152,6 +157,22 @@ class HomeworkScreenModel(
             if (current.isRefreshing || current.isLoading) {
                 mutableState.value = current.copy(isRefreshing = false, isLoading = false)
             }
+        }
+    }
+
+    /**
+     * 连续刷新最多 [maxAttempts] 次；任一次成功即停。
+     * 用于登录后自动同步：中间失败不长期停留，最后一次失败才保留 failure 横幅。
+     */
+    suspend fun refreshWithRetry(
+        maxAttempts: Int = HOMEWORK_AUTO_SYNC_MAX_ATTEMPTS,
+        delayMillis: Long = HOMEWORK_AUTO_SYNC_RETRY_DELAY_MILLIS,
+    ) {
+        require(maxAttempts >= 1)
+        repeat(maxAttempts) { index ->
+            refresh()
+            if (mutableState.value.failure == null) return
+            if (index < maxAttempts - 1) delay(delayMillis)
         }
     }
 

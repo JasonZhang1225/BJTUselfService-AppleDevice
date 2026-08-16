@@ -400,10 +400,10 @@
 - **未做**：本机未实机安装复测 1.7.3 三端；未提交文档更新；未改 Release 正文。
 - **macOS 显示名与 DMG 图标（同日补打）**：用户反馈 DMG 里应用名仍是 `BJTUselfServiceKMP`、桌面卷图标是 Java Duke。成品检查确认 Info.plist 已有中文 `CFBundleName`/`CFBundleDisplayName`，但 `.app` 文件名和卷名仍走 jpackage `packageName`，`.VolumeIcon.icns` 是 370KB Duke 而不是 69KB 吉祥物。不是 Applications 缓存。新增 `FinalizeMacDmg`：把包内应用改名为「交大自由行 KMP.app」、卷名改成「交大自由行 KMP」、卷图标换成 `BJTUselfServiceKMP-v2.icns`，并给 `.dmg` 文件写 Finder 图标。`packageDmg` 后自动跑。覆盖上传 `BJTUselfServiceKMP-1.7.3-KMP.dmg`。安装前请删掉旧的英文名副本，避免 Launch Services 继续显示旧名。
 
-## Windows 安装器 per-user 修复（2026-08-16，main 直接提交）
+## Windows 安装器系统级路径、前台 UAC 与卸载清凭据（2026-08-16）
 
-- **背景与原因**：用户实测发现 1.7.3-KMP Windows 安装器（系统级安装）在安装时会在**后台**调取 UAC 提权弹窗，用户无法察觉、误以为安装卡死。根因是 jpackage 默认生成系统级 MSI（安装到 `Program Files`），需要管理员权限；未签名安装器触发 UAC 时没有前台提示。
-- **修复**：`multiplatform/windowsApp/build.gradle.kts` 在 `windows {}` 块加 `perUserInstall = true`（映射 jpackage `--win-per-user-install`），改为按用户安装到 `%LOCALAPPDATA%\Programs\交大自由行 KMP`，**不再触发 UAC 提权弹窗**；桌面快捷方式、开始菜单项仍照常生成（用户级）。已通过反编译确认 Compose 1.12.0-beta03 `WindowsPlatformSettings` 支持 `perUserInstall` 属性，并通过 `packageExe.args.txt` 确认生成的 jpackage 参数含 `--win-per-user-install`。
-- **安装器品牌化边界（已核查）**：JDK 21 jpackage 的 Windows 安装器向导 UI 无 banner/dialog 图标等外观参数，右上角默认图标与横幅无法替换；UAC 弹窗（系统盾牌+「未知发布者」）是系统对话框，任何安装器都无法改。安装完成后的 EXE/快捷方式/开始菜单/窗口标题栏/任务栏图标均为品牌 logo（`BJTUselfServiceKMP.ico`）。如需完全品牌化安装向导，须引入 Inno Setup 等替代管线（未授权、未规划）。
-- **验证**：`JAVA_HOME=C:/Users/zjg/jdk21/jdk-21.0.8+9 ./gradlew.bat :windowsApp:packageExe`（multiplatform 目录）`BUILD SUCCESSFUL`；`packageExe.args.txt` 含 `--win-per-user-install`；新 EXE `交大自由行 KMP-1.7.3.exe` 109,415,424 字节（21:52）。用户**未实测**安装（提示先卸载旧版 `BJTUselfServiceKMP-1.7.3` 再装新版）。
-- **提交与发布**：提交随 main 推送（未单独打 tag，版本号不变仍 1.7.3）；新版 EXE 已用 `gh release upload --clobber` 覆盖 Release `v1.7.3-KMP` 的 `BJTUselfServiceKMP-1.7.3-KMP.exe` 资产（旧资产 113,579,520 字节被替换）。`memory.md`/`goal.md` 同步更新。
+- **被撤回的方向**：曾把安装器改成 `perUserInstall` 以免 UAC。用户明确要求标准安装位置（`Program Files`），UAC 必须前台弹出；问题是后台闪烁，不是 UAC 本身。
+- **现行做法**：`perUserInstall = false`，产出 EXE 与 MSI；推荐双击 MSI，由 msiexec 在启动时前台提权。不要改 jpackage Burn EXE 的嵌入清单（会毁掉安装包数据）。
+- **卸载清数据**：账号密码在 `HKCU\Software\JavaSoft\Prefs\team\bjtuss\bjtuselfservice`，缓存在 `%LOCALAPPDATA%\BJTUselfServiceKMP`，都不在 `Program Files`。首次卸载 CustomAction 用 immediate `WixQuietExec`，实机日志 `0x80070057 Failed to get command line data`，动作被忽略。已改为 deferred + CustomActionData（`SetProperty` 与 CA 同名），命令在卸之前展开 `[LocalAppDataFolder]`。
+- **作业/首页**：登录后作业自动同步最多 3 次；首页仅邮件/校园卡失败写「同步失败」，作业等切片失败写「部分同步失败」。
+- **验证**：`:shared:desktopTest` 中 `HomeworkScreenModelTest`、`HomeIdleStatusTest` 通过；`:windowsApp:packageMsi` 成功；MSI 表含 `CleanupUserData` type 1089（deferred）。用户已实测旧 MSI 卸载后凭据仍在；新包待装完再卸复测。
