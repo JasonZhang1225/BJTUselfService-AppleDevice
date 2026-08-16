@@ -414,3 +414,6 @@
 - **范围**：撤回 `perUserInstall`；系统级 `Program Files`；推荐 MSI 前台 UAC；卸载 deferred 清 AppData 缓存与 Java Preferences；作业自动同步最多 3 次；首页切片失败改为「部分同步失败」。含 `1eb9939` 中文显示名。
 - **版本字段**：`CURRENT_VERSION` / Android `versionName` / iOS `CFBundleShortVersionString` = `1.7.3-KMP-A`；`versionCode` / `CFBundleVersion` / `packageBuildVersion` = 13。jpackage `packageVersion` 仍为 `1.7.3`。
 - **构建边界**：本机 Windows 只打 Windows MSI/EXE。Android / iOS / macOS 需 Mac 环境，本发布不上传旧三端包冒充新构建。
+- **提交与 tag**：`6c69c85` chore 版本标识；tag `v1.7.3-KMP-A`。未能 squash 已推送的 `32955ad`（perUserInstall），该提交仍留在历史上，功能已被 `e7dda78` 撤回。
+- **产物**（Pre-release）：`BJTUselfServiceKMP-1.7.3-KMP-A.msi`（112,914,242）、`BJTUselfServiceKMP-1.7.3-KMP-A.exe`（113,575,936）。
+- **发布页**：https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.3-KMP-A
