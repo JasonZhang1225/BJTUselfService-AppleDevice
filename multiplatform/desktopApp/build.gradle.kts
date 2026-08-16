@@ -17,6 +17,11 @@ import org.gradle.work.DisableCachingByDefault
 import java.io.File
 import javax.inject.Inject
 
+/** jpackage 的 --name / .app 文件名必须是 ASCII；用户看见的名字用这个中文。 */
+val desktopPackageName = "BJTUselfServiceKMP"
+val desktopPackageVersion = "1.7.3"
+val macDisplayName = "交大自由行 KMP"
+
 @DisableCachingByDefault(because = "Invokes Apple's Core ML compiler")
 abstract class CompileMacCaptchaModel : DefaultTask() {
     @get:InputDirectory
@@ -202,6 +207,9 @@ abstract class FinalizeMacDistributable : DefaultTask() {
     @get:InputFile
     abstract val calendarHelper: RegularFileProperty
 
+    @get:Input
+    abstract val displayName: Property<String>
+
     @get:Inject
     abstract val execOperations: ExecOperations
 
@@ -283,9 +291,21 @@ abstract class FinalizeMacDistributable : DefaultTask() {
                 }.assertNormalExitValue()
             }
         }
-        // 菜单栏应用名 / Launchpad / 某些系统对话框用这两个键；packageName 保持英文文件名。
-        setOrAddPlistString("CFBundleName", "交大自由行 KMP")
-        setOrAddPlistString("CFBundleDisplayName", "交大自由行 KMP")
+        // 菜单栏 / Dock / Launchpad 用这两个键。jpackage 的 packageName 仍走 ASCII，
+        // 避免可执行文件名和非 ASCII --name 把打包打坏；用户看见的名字在收尾阶段改成中文。
+        val visibleName = displayName.get()
+        setOrAddPlistString("CFBundleName", visibleName)
+        setOrAddPlistString("CFBundleDisplayName", visibleName)
+        setOrAddPlistBool("LSHasLocalizedDisplayName", true)
+        val localizedNames = """
+            |"CFBundleName" = "$visibleName";
+            |"CFBundleDisplayName" = "$visibleName";
+            |""".trimMargin()
+        listOf("zh-Hans.lproj", "zh_CN.lproj").forEach { locale ->
+            val localeDirectory = resourcesDirectory.resolve(locale)
+            localeDirectory.mkdirs()
+            localeDirectory.resolve("InfoPlist.strings").writeText(localizedNames)
+        }
         setOrAddPlistString(
             "NSCalendarsFullAccessUsageDescription",
             "用于创建本学期课表、选课课表和单场考试日历，并更新同一日程。",
@@ -305,6 +325,203 @@ abstract class FinalizeMacDistributable : DefaultTask() {
                 "-",
                 bundle.absolutePath,
             )
+        }.assertNormalExitValue()
+    }
+}
+
+@DisableCachingByDefault(because = "Rewrites the packaged DMG volume name, app filename, and icons")
+abstract class FinalizeMacDmg : DefaultTask() {
+    @get:Internal
+    abstract val dmgFile: RegularFileProperty
+
+    @get:InputFile
+    abstract val volumeIcon: RegularFileProperty
+
+    @get:Input
+    abstract val volumeName: Property<String>
+
+    @get:Input
+    abstract val sourceAppFileName: Property<String>
+
+    @get:Input
+    abstract val displayAppFileName: Property<String>
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun finalizeDmg() {
+        val sourceDmg = dmgFile.get().asFile
+        check(sourceDmg.isFile) { "DMG not found: $sourceDmg" }
+        val work = temporaryDir
+        work.deleteRecursively()
+        work.mkdirs()
+        val rwDmg = File(work, "rw.dmg")
+        val mountPoint = File(work, "mnt")
+        val convertedDmg = File(work, "final.dmg")
+        mountPoint.mkdirs()
+
+        execOperations.exec {
+            commandLine(
+                "hdiutil",
+                "convert",
+                sourceDmg.absolutePath,
+                "-format",
+                "UDRW",
+                "-o",
+                rwDmg.absolutePath,
+            )
+        }.assertNormalExitValue()
+
+        execOperations.exec {
+            commandLine(
+                "hdiutil",
+                "attach",
+                rwDmg.absolutePath,
+                "-readwrite",
+                "-nobrowse",
+                "-mountpoint",
+                mountPoint.absolutePath,
+            )
+        }.assertNormalExitValue()
+
+        try {
+            val oldApp = mountPoint.resolve(sourceAppFileName.get())
+            val newApp = mountPoint.resolve(displayAppFileName.get())
+            when {
+                oldApp.exists() -> {
+                    if (newApp.exists()) newApp.deleteRecursively()
+                    check(oldApp.renameTo(newApp)) { "failed to rename $oldApp to $newApp" }
+                }
+                newApp.exists() -> logger.lifecycle("DMG app already named ${newApp.name}")
+                else -> error("neither $oldApp nor $newApp exists in the DMG")
+            }
+
+            val volumeIconFile = mountPoint.resolve(".VolumeIcon.icns")
+            if (volumeIconFile.exists()) {
+                volumeIconFile.setWritable(true)
+            }
+            volumeIcon.get().asFile.copyTo(volumeIconFile, overwrite = true)
+            execOperations.exec {
+                commandLine("xcrun", "SetFile", "-a", "C", mountPoint.absolutePath)
+            }.assertNormalExitValue()
+
+            val visibleName = volumeName.get()
+            val infoPlist = newApp.resolve("Contents/Info.plist")
+            execOperations.exec {
+                commandLine(
+                    "/usr/libexec/PlistBuddy",
+                    "-c",
+                    "Set :CFBundleName $visibleName",
+                    infoPlist.absolutePath,
+                )
+                isIgnoreExitValue = true
+            }
+            execOperations.exec {
+                commandLine(
+                    "/usr/libexec/PlistBuddy",
+                    "-c",
+                    "Set :CFBundleDisplayName $visibleName",
+                    infoPlist.absolutePath,
+                )
+                isIgnoreExitValue = true
+            }
+            val localizedNames = """
+                |"CFBundleName" = "$visibleName";
+                |"CFBundleDisplayName" = "$visibleName";
+                |""".trimMargin()
+            val resourcesDirectory = newApp.resolve("Contents/Resources")
+            listOf("zh-Hans.lproj", "zh_CN.lproj").forEach { locale ->
+                val localeDirectory = resourcesDirectory.resolve(locale)
+                localeDirectory.mkdirs()
+                localeDirectory.resolve("InfoPlist.strings").writeText(localizedNames)
+            }
+
+            execOperations.exec {
+                commandLine(
+                    "codesign",
+                    "--force",
+                    "--deep",
+                    "--sign",
+                    "-",
+                    newApp.absolutePath,
+                )
+            }.assertNormalExitValue()
+
+            mountPoint.resolve(".DS_Store").delete()
+            val layoutScript = File(work, "layout.applescript")
+            layoutScript.writeText(
+                """
+                tell application "Finder"
+                  try
+                    set targetFolder to (POSIX file "${mountPoint.absolutePath}" as alias)
+                    open targetFolder
+                    delay 0.4
+                    set theWin to container window of targetFolder
+                    set current view of theWin to icon view
+                    set toolbar visible of theWin to false
+                    set statusbar visible of theWin to false
+                    set bounds of theWin to {400, 140, 1000, 520}
+                    set opts to icon view options of theWin
+                    set arrangement of opts to not arranged
+                    set icon size of opts to 128
+                    try
+                      set background picture of opts to file ".background:background.tiff" of targetFolder
+                    end try
+                    set position of item "${displayAppFileName.get()}" of targetFolder to {160, 200}
+                    set position of item "Applications" of targetFolder to {480, 200}
+                    close theWin
+                  end try
+                end tell
+                """.trimIndent(),
+            )
+            execOperations.exec {
+                commandLine("osascript", layoutScript.absolutePath)
+                isIgnoreExitValue = true
+            }
+
+            execOperations.exec {
+                commandLine("diskutil", "rename", mountPoint.absolutePath, volumeName.get())
+            }.assertNormalExitValue()
+        } finally {
+            execOperations.exec {
+                commandLine("hdiutil", "detach", mountPoint.absolutePath, "-force")
+                isIgnoreExitValue = true
+            }
+        }
+
+        execOperations.exec {
+            commandLine(
+                "hdiutil",
+                "convert",
+                rwDmg.absolutePath,
+                "-format",
+                "UDZO",
+                "-imagekey",
+                "zlib-level=9",
+                "-o",
+                convertedDmg.absolutePath,
+            )
+        }.assertNormalExitValue()
+
+        convertedDmg.copyTo(sourceDmg, overwrite = true)
+        applyFinderIcon(sourceDmg, volumeIcon.get().asFile)
+    }
+
+    private fun applyFinderIcon(target: File, icon: File) {
+        val script = File(temporaryDir, "set-icon.applescript")
+        script.writeText(
+            """
+            use framework "Foundation"
+            use framework "AppKit"
+            set img to current application's NSImage's alloc()'s initWithContentsOfFile:"${icon.absolutePath}"
+            if img is missing value then error "failed to load icon ${icon.absolutePath}"
+            set ok to current application's NSWorkspace's sharedWorkspace()'s setIcon:img forFile:"${target.absolutePath}" options:0
+            if (ok as boolean) is false then error "NSWorkspace setIcon failed"
+            """.trimIndent(),
+        )
+        execOperations.exec {
+            commandLine("osascript", script.absolutePath)
         }.assertNormalExitValue()
     }
 }
@@ -357,16 +574,16 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg)
             modules("java.sql")
-            packageName = "BJTUselfServiceKMP"
-            // Compose Desktop 的 packageVersion 仅允许 MAJOR.MINOR.PATCH；展示名/Release 用 1.7.2-KMP-A。
-            packageVersion = "1.7.3"
+            packageName = desktopPackageName
+            // Compose Desktop 的 packageVersion 仅允许 MAJOR.MINOR.PATCH。
+            packageVersion = desktopPackageVersion
             description = "交大自由行 Kotlin Multiplatform macOS 应用"
             vendor = "BJTUselfService Contributors"
             macOS {
                 iconFile.set(project.file("src/main/resources/BJTUselfServiceKMP-v2.icns"))
                 bundleID = "team.bjtuss.bjtuselfservice.kmp.macos"
-                // 菜单栏 / Dock / About·Hide·Quit 显示名；packageName 仍用英文，保证 .app/.dmg 文件名稳定。
-                dockName = "交大自由行 KMP"
+                // 菜单栏 / Dock / About·Hide·Quit；DMG 里的 .app 文件名由 FinalizeMacDmg 改成同一中文。
+                dockName = macDisplayName
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
                 packageBuildVersion = "12"
@@ -432,9 +649,23 @@ val finalizeMacDistributable by tasks.registering(FinalizeMacDistributable::clas
     captchaModel.set(captchaModelDirectory)
     inputSourceHelper.set(inputSourceHelperFile)
     calendarHelper.set(calendarHelperFile)
+    displayName.set(macDisplayName)
     appBundle.set(
-        layout.buildDirectory.dir("compose/binaries/main/app/BJTUselfServiceKMP.app"),
+        layout.buildDirectory.dir("compose/binaries/main/app/$desktopPackageName.app"),
     )
+}
+
+val finalizeMacDmg by tasks.registering(FinalizeMacDmg::class) {
+    dependsOn(tasks.named("packageDmg"))
+    dmgFile.set(
+        layout.buildDirectory.file(
+            "compose/binaries/main/dmg/$desktopPackageName-$desktopPackageVersion.dmg",
+        ),
+    )
+    volumeIcon.set(project.file("src/main/resources/BJTUselfServiceKMP-v2.icns"))
+    volumeName.set(macDisplayName)
+    sourceAppFileName.set("$desktopPackageName.app")
+    displayAppFileName.set("$macDisplayName.app")
 }
 
 tasks.matching { it.name == "createDistributable" }.configureEach {
@@ -444,6 +675,7 @@ tasks.matching { it.name == "createDistributable" }.configureEach {
 // packageDmg 只 dependsOn createDistributable，不保证等 finalizedBy 跑完；显式挂上，避免 Info.plist 中文名还没写进就打 DMG。
 tasks.matching { it.name == "packageDmg" }.configureEach {
     dependsOn(finalizeMacDistributable)
+    finalizedBy(finalizeMacDmg)
 }
 
 tasks.matching { it.name == "run" }.configureEach {

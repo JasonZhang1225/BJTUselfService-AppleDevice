@@ -57,11 +57,15 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe)
             modules("java.sql")
-            packageName = "BJTUselfServiceKMP"
+            // Windows 桌面快捷方式、开始菜单项、「应用和功能」名称都走 packageName。
+            // 与 macOS 不同：这边不必为了可执行文件名锁 ASCII，可以直接用中文显示名。
+            packageName = "交大自由行 KMP"
             packageVersion = "1.7.3"
             description = "交大自由行 Kotlin Multiplatform Windows 应用"
             vendor = "BJTUselfService Contributors"
             windows {
+                menu = true
+                shortcut = true
                 menuGroup = "交大自由行 KMP"
                 iconFile.set(project.file("src/windowsMain/resources/BJTUselfServiceKMP.ico"))
             }

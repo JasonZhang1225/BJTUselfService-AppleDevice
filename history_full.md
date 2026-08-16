@@ -383,3 +383,19 @@
   - 深色标题栏：Windows 用 JNA 调 DWM `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE=20)`（`applyWindowsDarkTitleBar`，Compose `window.windowHandle`），标题栏跟随系统深色，不再白底；macOS desktopApp 加 `-Dapple.awt.application.appearance=system`（标题栏跟随系统外观，JDK 17+ 属性）。
   - 修复：窗口图标渲染尺寸从 32px 逻辑降到标准 16px 逻辑（250% DPI 下 40px 物理），logo 清晰度从 10px 提升到 14px 高。
 - **Review 修复（2026-08-16）**：`WindowsTorchCaptchaRecognizer` 每次识别 `manager.use{}` 会关闭 base manager 导致第二次起全部失败——改为每次推理用 `holder.manager.newSubManager()`（predictor 输出依附于输入 NDArray 的 manager，关闭子 manager 不影响 holder）；模型懒加载加 `synchronized(modelLock)` 防并发重复加载；`DataBlob.free()` 同时释放结构与数据两段原生内存（原只清结构体）。新增 `WindowsTorchCaptchaRecognizerTest`（同进程连续 4 次 + 并发 4 路推理全过）。调试用 `System.err` 诊断输出已删除，保留 `--verify-captcha-model`/`--dump-captcha-logits` 诊断参数（与 macOS verify 参数同级）。
+
+## 发布：1.7.3-KMP 四端 pre-release（2026-08-16）
+
+- **范围**：M14 Windows 桌面端并入 main 后发布 `1.7.3-KMP`。git tag `v1.7.3-KMP` 指向 `84bf479`（`docs: 记录 Windows 移植 PR #2 合并与验收状态`）。用户在 Windows 创建 pre-release 并上传安装器；本机补打并上传其余三端。
+- **版本**：`AppUpdateChecker.CURRENT_VERSION` / Android `versionName` / iOS `CFBundleShortVersionString` = `1.7.3-KMP`；`versionCode` / `CFBundleVersion` / desktop `packageBuildVersion` = 12。desktop/windows `packageVersion` = `1.7.3`（jpackage 只允许三段数字）。
+- **本机构建**（JBR 21 编译，jpackage 走 Temurin 25；Xcode-beta 27.0 / `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`）：
+  - `./gradlew :androidApp:assembleDebug :desktopApp:packageDmg`：`BUILD SUCCESSFUL in 2m 16s`。APK `versionName=1.7.3-KMP` `versionCode=12`；macOS `.app` 显示名「交大自由行 KMP」、`CFBundleShortVersionString=1.7.3` / `CFBundleVersion=12`，`codesign --verify --deep --strict` 通过。
+  - `xcodebuild` Release `generic/platform=iOS` `CODE_SIGNING_ALLOWED=NO`：`** BUILD SUCCEEDED **`（~12m）。IPA 来自 `交大自由行 KMP.app`，`CFBundleShortVersionString=1.7.3-KMP` / `CFBundleVersion=12`，无 `PlugIns`。
+- **产物**（上传到既有 GitHub Release，Pre-release）：
+  - `BJTUSelfService-KMP-1.7.3-KMP-debug.apk`（350M，367,313,770）
+  - `BJTUSelfService-KMP-1.7.3-KMP-iOS-unsigned.ipa`（39M，40,918,470，未签名需侧载自签）
+  - `BJTUselfServiceKMP-1.7.3-KMP.dmg`（114M，119,478,737）
+  - `BJTUselfServiceKMP-1.7.3-KMP.exe`（108M，113,579,520，远端 Windows 上传）
+- **发布页**：https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.3-KMP
+- **未做**：本机未实机安装复测 1.7.3 三端；未提交文档更新；未改 Release 正文。
+- **macOS 显示名与 DMG 图标（同日补打）**：用户反馈 DMG 里应用名仍是 `BJTUselfServiceKMP`、桌面卷图标是 Java Duke。成品检查确认 Info.plist 已有中文 `CFBundleName`/`CFBundleDisplayName`，但 `.app` 文件名和卷名仍走 jpackage `packageName`，`.VolumeIcon.icns` 是 370KB Duke 而不是 69KB 吉祥物。不是 Applications 缓存。新增 `FinalizeMacDmg`：把包内应用改名为「交大自由行 KMP.app」、卷名改成「交大自由行 KMP」、卷图标换成 `BJTUselfServiceKMP-v2.icns`，并给 `.dmg` 文件写 Finder 图标。`packageDmg` 后自动跑。覆盖上传 `BJTUselfServiceKMP-1.7.3-KMP.dmg`。安装前请删掉旧的英文名副本，避免 Launch Services 继续显示旧名。
