@@ -346,6 +346,8 @@ compose.desktop {
         val calendarHelperFile = layout.buildDirectory.file("generated/calendar/BJTUCalendarHelper")
         jvmArgs += listOf(
             "--enable-native-access=ALL-UNNAMED",
+            // 标题栏跟随系统外观（深色模式时标题栏不再保持白色）。
+            "-Dapple.awt.application.appearance=system",
             "-Dbjtu.captcha.helper=${captchaBuildDirectory.get().file("BJTUCaptchaHelper").asFile.absolutePath}",
             "-Dbjtu.captcha.model=${captchaBuildDirectory.get().dir("model/BJTUCaptcha.mlmodelc").asFile.absolutePath}",
             "-Dbjtu.input-source.helper=${inputSourceHelperFile.get().asFile.absolutePath}",
@@ -357,7 +359,7 @@ compose.desktop {
             modules("java.sql")
             packageName = "BJTUselfServiceKMP"
             // Compose Desktop 的 packageVersion 仅允许 MAJOR.MINOR.PATCH；展示名/Release 用 1.7.2-KMP-A。
-            packageVersion = "1.7.2"
+            packageVersion = "1.7.3"
             description = "交大自由行 Kotlin Multiplatform macOS 应用"
             vendor = "BJTUselfService Contributors"
             macOS {
@@ -367,7 +369,7 @@ compose.desktop {
                 dockName = "交大自由行 KMP"
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
-                packageBuildVersion = "11"
+                packageBuildVersion = "12"
             }
         }
     }
