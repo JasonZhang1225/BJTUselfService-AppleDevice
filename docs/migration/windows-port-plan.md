@@ -104,3 +104,10 @@
 - [x] 功能入口清点：全部 14 个共享页面（首页/成绩/课程表/考试/作业/课件/教室占用/教室人数/邮箱/校历下载/成绩单下载/设置/更多）走同一 `AppSection` 路由，Windows 与 macOS 共享代码路径；关键屏模型测试（课程表 28/成绩/设置）通过；`shared:desktopTest` 384/385 通过（唯一失败为 macOS Keychain 平台边界）。
 - [x] macOS `desktopApp` 构建配置未被改动（git diff 不含 desktopApp；shared desktop 编译通过）。
 - [x] 文档三件套更新完成（memory.md 已更新；history_full.md 已归档 M14 节；goal.md 已加 M14 节；本文件为规划与验收）。
+
+### 验收补充记录（2026-08-16，合并后）
+
+- [x] **合并**：`windows-dev` 推送远端，PR #2（windows-dev → main）经 gh 合并，merge commit `47fb5e6`；本地 main 已同步。
+- [x] **用户人工确认**：用户明确「人工测试基本通过了」，决定不再做真实登录逐页复测（原「全入口可达」项由用户人工确认替代，不再要求账号会话证据）。
+- [ ] **验证码真实正确率**：24 张固定冒烟集样本不在本机，未评测；logits 已与 Python torch 逐值对齐（max abs diff ≤0.000012、argmax 一致）证明同模型同语义。用户已人工确认登录基本通过，此项作为已知边界记录，待样本集到位后补评。
+- [ ] **发布**：按用户要求**暂不发布**——未创建 tag、未发布 Release、未上传安装器。Windows 安装器已生成本地：`windowsApp/build/compose/binaries/main/exe/BJTUselfServiceKMP-1.7.3.exe`。
