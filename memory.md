@@ -2,8 +2,8 @@
 
 > 最后更新：2026-08-17
 > 当前分支：`main`（跟踪 `origin` → `JasonZhang1225/BJTUselfService-KMP-Refreshed`，已推送）
-> 阶段状态：**`v1.7.3-KMP-B` 已重打，等 Actions。** tag 现指向 `5eacaca`（含 CI 修复）。
-> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B`（git tag，`5eacaca`）**；上一发布 `v1.7.3-KMP-A@6c69c85` 保留。
+> 阶段状态：**`v1.7.3-KMP-B` 三跑排队中。** tag 指向 `a432dd8`（Windows ASCII 包名 + iOS macos-26）。
+> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B`（git tag，`a432dd8`）**；上一发布 `v1.7.3-KMP-A@6c69c85` 保留。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
 > 本文件是实时工作记忆，不是只追加日志：任务开始读、结束改，只保留当前接续工作需要的状态。
 
