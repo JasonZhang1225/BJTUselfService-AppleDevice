@@ -426,4 +426,4 @@
 - **CI**：`.github/workflows/kmp-package.yml` 在 `v*-KMP*` 标签与 `workflow_dispatch` 上构建 Android debug APK、Windows MSI、macOS DMG、未签名 iOS IPA，并在 tag 上创建 pre-release。冻结根工程 `.github/workflows/release.yml` 增加 `!contains(ref, 'KMP')`，避免把 `:app` 1.7.0 打进 KMP Release。
 - **提交与 tag**：`6e61e61` 教学周/作业修复；`7d85055` 版本标识与 Actions；`6f40abb` 修 macOS JDK 路径并拆 iOS job。首跑无 GitHub Release（release job 被跳过）。旧 tag 已删除，`v1.7.3-KMP-B` 改指含 CI 修复的提交后重推。
 - **二跑（失败）**：Android、macOS DMG 成功。Windows WiX `light.exe` 311，中文 `packageName` 在英文 runner 变成 `????? KMP`。iOS 链接 `UIViewLayoutRegion`，Xcode 16.4 / iPhoneOS 18.5 没有该符号（Compose 1.12 需要 iOS 26 SDK）。
-- **未在本节填写的**：三跑产物大小与实机教学周/作业结果。
+- **三跑**：Android、macOS DMG、iOS IPA 成功（Xcode 26.6 / iPhoneOS 26.5）。Windows 仍 light 311（中文 description）。随后一次 tag 重打补上 ASCII description。
