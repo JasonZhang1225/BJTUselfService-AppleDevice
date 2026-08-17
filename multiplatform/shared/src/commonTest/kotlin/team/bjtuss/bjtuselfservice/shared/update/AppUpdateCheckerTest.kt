@@ -11,6 +11,8 @@ class AppUpdateCheckerTest {
         assertTrue(AppUpdateChecker.compareVersions("v1.7.2-KMP-A", "1.7.2-KMP-A") == 0)
         assertTrue(AppUpdateChecker.compareVersions("v1.7.3-KMP-A", "1.7.3-KMP") > 0)
         assertTrue(AppUpdateChecker.compareVersions("1.7.3-A-KMP", "1.7.3-KMP") < 0)
+        assertTrue(AppUpdateChecker.compareVersions("v1.7.3-KMP-B", "1.7.3-KMP-A") > 0)
+        assertTrue(AppUpdateChecker.compareVersions("1.7.3-B", "1.7.3-KMP-A") < 0)
     }
 
     @Test

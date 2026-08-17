@@ -1,0 +1,230 @@
+name: KMP package
+
+on:
+  push:
+    tags:
+      - "v*-KMP*"
+  workflow_dispatch:
+
+concurrency:
+  group: kmp-package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+jobs:
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: multiplatform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :androidApp:assembleDebug --stacktrace
+
+      - name: Rename APK
+        id: artifact
+        run: |
+          VERSION="$(sed -n 's/.*CURRENT_VERSION = "\([^"]*\)".*/\1/p' shared/src/commonMain/kotlin/team/bjtuss/bjtuselfservice/shared/update/AppUpdateChecker.kt | head -n 1)"
+          APK="$(find androidApp/build/outputs/apk/debug -name '*.apk' | head -n 1)"
+          test -n "$VERSION"
+          test -f "$APK"
+          NAME="BJTUSelfService-KMP-${VERSION}-debug.apk"
+          cp "$APK" "$NAME"
+          echo "file=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ls -lh "$NAME"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmp-android-apk
+          path: multiplatform/${{ steps.artifact.outputs.file }}
+          if-no-files-found: error
+
+  windows:
+    name: Windows MSI
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: multiplatform
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Build MSI
+        env:
+          WINDOWS_PACKAGE_JAVA_HOME: ${{ env.JAVA_HOME }}
+        run: .\gradlew.bat :windowsApp:packageMsi --stacktrace
+
+      - name: Rename MSI
+        id: artifact
+        run: |
+          $version = (Select-String -Path "shared\src\commonMain\kotlin\team\bjtuss\bjtuselfservice\shared\update\AppUpdateChecker.kt" -Pattern 'CURRENT_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          $msi = Get-ChildItem "windowsApp\build\compose\binaries\main\msi\*.msi" | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found" }
+          $name = "BJTUselfServiceKMP-$version.msi"
+          Copy-Item $msi.FullName $name
+          "file=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Get-Item $name | Format-List Name, Length, LastWriteTime
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmp-windows-msi
+          path: multiplatform/${{ steps.artifact.outputs.file }}
+          if-no-files-found: error
+
+  apple:
+    name: macOS DMG and iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: multiplatform
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build macOS DMG
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :desktopApp:packageDmg --stacktrace
+
+      - name: Build unsigned iOS app
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+        run: |
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath iosApp/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package Apple artifacts
+        id: artifact
+        run: |
+          VERSION="$(sed -n 's/.*CURRENT_VERSION = "\([^"]*\)".*/\1/p' shared/src/commonMain/kotlin/team/bjtuss/bjtuselfservice/shared/update/AppUpdateChecker.kt | head -n 1)"
+          test -n "$VERSION"
+          DMG="$(find desktopApp/build/compose/binaries/main/dmg -name '*.dmg' | head -n 1)"
+          APP="$(find iosApp/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
+          test -f "$DMG"
+          test -d "$APP"
+          DMG_NAME="BJTUselfServiceKMP-${VERSION}.dmg"
+          IPA_NAME="BJTUSelfService-KMP-${VERSION}-iOS-unsigned.ipa"
+          cp "$DMG" "$DMG_NAME"
+          rm -rf ipa-stage
+          mkdir -p ipa-stage/Payload
+          cp -R "$APP" ipa-stage/Payload/
+          (cd ipa-stage && zip -qry "../$IPA_NAME" Payload)
+          echo "dmg=$DMG_NAME" >> "$GITHUB_OUTPUT"
+          echo "ipa=$IPA_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ls -lh "$DMG_NAME" "$IPA_NAME"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmp-macos-dmg
+          path: multiplatform/${{ steps.artifact.outputs.dmg }}
+          if-no-files-found: error
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmp-ios-ipa
+          path: multiplatform/${{ steps.artifact.outputs.ipa }}
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [android, windows, apple]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kmp-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}：KMP 四端构建
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: dist/*
+          body: |
+            ### 本版修复
+
+            - 教学周优先使用智慧教学 `getTimeList.weekCode`（与原版 1.7.0 一致），失败再回退教务 `room_view?zc=`
+            - 作业解析对齐 1.7.0 容错：空学期、单课/单类型 JSON 异常不再整批报「响应结构已变化」
+
+            ### 安装说明
+
+            | 文件 | 说明 |
+            | --- | --- |
+            | `BJTUSelfService-KMP-*-debug.apk` | Android debug，包名 `team.bjtuss.bjtuselfservice.kmp` |
+            | `BJTUSelfService-KMP-*-iOS-unsigned.ipa` | iOS 未签名，需侧载自签 |
+            | `BJTUselfServiceKMP-*.dmg` | macOS Apple Silicon |
+            | `BJTUselfServiceKMP-*.msi` | Windows x64 系统级安装 |
+
+            Windows 覆盖安装：先完全退出应用，不要先卸载（卸载会清登录）。若安装器只出现「修复/卸载」，请用：
+
+            `msiexec /i 文件名.msi REINSTALL=ALL REINSTALLMODE=vomus`
+
+            ### 已知限制
+
+            - 非正式商店签名 / 未公证；iOS 需自行签名侧载；Mac 版可能需执行 `sudo xattr -r -d com.apple.quarantine /Applications/交大自由行 KMP.app`
+            - 小组件、系统通知等仍延后
+            - Windows MSI 产品版本仍为 `1.7.3`，与上一版 ProductCode 相同，须按上面的覆盖方式换文件
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

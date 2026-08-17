@@ -417,3 +417,11 @@
 - **提交与 tag**：`6c69c85` chore 版本标识；tag `v1.7.3-KMP-A`。未能 squash 已推送的 `32955ad`（perUserInstall），该提交仍留在历史上，功能已被 `e7dda78` 撤回。
 - **产物**（Pre-release）：`BJTUselfServiceKMP-1.7.3-KMP-A.msi`（112,914,242）、`BJTUselfServiceKMP-1.7.3-KMP-A.exe`（113,575,936）。
 - **发布页**：https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.3-KMP-A
+
+## 热修发布：1.7.3-KMP-B（2026-08-17）
+
+- **版本号**：用户口中的「1.7.3-B」落盘为 **`1.7.3-KMP-B`**。`AppUpdateChecker` 后缀字典序下 `1.7.3-B` < `1.7.3-KMP-A`，会被当成更旧。
+- **范围**：课表当前周优先智慧教学 `getTimeList.weekCode`，失败回退教务 `room_view?zc=`；作业/课件学期空、单课 JSON 坏、`STATUS≠0` 不再整批 `MALFORMED`。新增 KMP GitHub Actions 打包。
+- **版本字段**：`CURRENT_VERSION` / Android `versionName` / iOS `CFBundleShortVersionString` = `1.7.3-KMP-B`；`versionCode` / `CFBundleVersion` / `packageBuildVersion` = 14。jpackage `packageVersion` 仍为 `1.7.3`。
+- **CI**：`.github/workflows/kmp-package.yml` 在 `v*-KMP*` 标签与 `workflow_dispatch` 上构建 Android debug APK、Windows MSI、macOS DMG、未签名 iOS IPA，并在 tag 上创建 pre-release。冻结根工程 `.github/workflows/release.yml` 增加 `!contains(ref, 'KMP')`，避免把 `:app` 1.7.0 打进 KMP Release。
+- **未在本节填写的**：Actions 实际产物大小与实机教学周/作业结果，等工作流结束后再补。

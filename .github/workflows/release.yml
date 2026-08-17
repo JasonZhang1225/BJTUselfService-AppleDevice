@@ -9,6 +9,8 @@ on:
 jobs:
   build-and-release:
     name: Build & Release APK
+    # 冻结根 Android 的正式包。KMP 标签走 kmp-package.yml，避免把 v1.7.0 工程打进 KMP Release。
+    if: ${{ !contains(github.ref_name, 'KMP') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
