@@ -2,8 +2,8 @@
 
 > 最后更新：2026-08-17
 > 当前分支：`main`（跟踪 `origin` → `JasonZhang1225/BJTUselfService-KMP-Refreshed`，已推送）
-> 阶段状态：**`1.7.3-KMP-B` 已推送，等 Actions 出包。** git tag `v1.7.3-KMP-B`（`7d85055`）。
-> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B`（git tag，`7d85055`）**；上一发布 `v1.7.3-KMP-A@6c69c85` 保留。
+> 阶段状态：**重打 `v1.7.3-KMP-B`。** 首跑失败无 Release；已删旧 tag，tag 改指含 CI 修复的提交。
+> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B`**；上一发布 `v1.7.3-KMP-A@6c69c85` 保留。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
 > 本文件是实时工作记忆，不是只追加日志：任务开始读、结束改，只保留当前接续工作需要的状态。
 
@@ -19,7 +19,7 @@
 - **Windows 安装器品牌化受限**：jpackage 安装向导 UI（横幅、右上角图标、进度框）无参数可定制；安装完成后的 EXE/快捷方式/窗口/任务栏图标已是品牌 logo。若用户要完全品牌化安装向导，需引入 Inno Setup 等替代打包管线（未授权、未规划）。
 - **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1 已实验绕过；本机无 Android SDK（Android/iOS 目标无法在本机编译）。
 - **打包 JDK**：JBR 无 jlink/jpackage，需完整 JDK（本机 Microsoft JDK 21 `C:/Users/zjg/jdk21/jdk-21.0.8+9`，`WINDOWS_PACKAGE_JAVA_HOME` 可覆盖）。
-- **KMP Actions 首跑失败（已改，待重跑）**：Android APK 成功。macOS `checkRuntime` 写死本机 `temurin-25.jdk`。Windows `packageMsi` 0.4s 退出，jpackage 正文未进日志；已加失败时打印 compose/logs。
+- **KMP Actions 待重跑出包**：首跑 Android 成功，Windows/macOS 失败。已修 macOS JDK 探测、拆 IPA、Windows 失败打 jpackage 日志。
 - **Windows 卸载清凭据待复测**：请装带卸载清理的 MSI 后再卸，确认 AppData 缓存和注册表凭据被删。
 - **iOS 包未签名**：需侧载自签；合法签名 / Keychain 往返仍缺 Developer Team。
 - **验证码发布级准确率仍待扩样**；课件深层文件夹/信息流变化仍缺自然样本。
