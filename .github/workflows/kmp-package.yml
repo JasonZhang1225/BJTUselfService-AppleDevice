@@ -94,6 +94,7 @@ jobs:
         env:
           WINDOWS_PACKAGE_JAVA_HOME: ${{ env.JAVA_HOME }}
           WINDOWS_PACKAGE_NAME: BJTUselfServiceKMP
+          WINDOWS_PACKAGE_DESCRIPTION: BJTU Self Service KMP
           JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8
         run: .\gradlew.bat :windowsApp:packageMsi --stacktrace
 

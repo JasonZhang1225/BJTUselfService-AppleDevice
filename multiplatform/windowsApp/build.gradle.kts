@@ -16,6 +16,10 @@ val windowsPackageDisplayName = System.getenv("WINDOWS_PACKAGE_NAME")
     ?.trim()
     ?.takeIf(String::isNotEmpty)
     ?: "交大自由行 KMP"
+val windowsPackageDescription = System.getenv("WINDOWS_PACKAGE_DESCRIPTION")
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+    ?: "交大自由行 Kotlin Multiplatform Windows 应用"
 
 kotlin {
     jvm("windows") {
@@ -68,7 +72,8 @@ compose.desktop {
             // `?????` 并报 311，因此 CI 用 WINDOWS_PACKAGE_NAME=BJTUselfServiceKMP。
             packageName = windowsPackageDisplayName
             packageVersion = "1.7.3"
-            description = "交大自由行 Kotlin Multiplatform Windows 应用"
+            // 英文代码页下 WiX light 311：中文 description 进不了 MSI 字符串表。
+            description = windowsPackageDescription
             vendor = "BJTUselfService Contributors"
             windows {
                 // 系统级标准位置：C:\Program Files\<packageName>。
