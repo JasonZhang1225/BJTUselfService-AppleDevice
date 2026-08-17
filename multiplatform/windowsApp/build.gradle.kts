@@ -12,6 +12,11 @@ plugins {
 group = "team.bjtuss.bjtuselfservice"
 version = "0.1.0"
 
+val windowsPackageDisplayName = System.getenv("WINDOWS_PACKAGE_NAME")
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+    ?: "交大自由行 KMP"
+
 kotlin {
     jvm("windows") {
         compilerOptions {
@@ -59,21 +64,21 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             modules("java.sql")
-            // Windows 桌面快捷方式、开始菜单项、「应用和功能」名称都走 packageName。
-            // 与 macOS 不同：这边不必为了可执行文件名锁 ASCII，可以直接用中文显示名。
-            packageName = "交大自由行 KMP"
+            // 本机中文显示名。GitHub Actions 英文代码页下 WiX light 会把中文打成
+            // `?????` 并报 311，因此 CI 用 WINDOWS_PACKAGE_NAME=BJTUselfServiceKMP。
+            packageName = windowsPackageDisplayName
             packageVersion = "1.7.3"
             description = "交大自由行 Kotlin Multiplatform Windows 应用"
             vendor = "BJTUselfService Contributors"
             windows {
-                // 系统级标准位置：C:\Program Files\交大自由行 KMP。
+                // 系统级标准位置：C:\Program Files\<packageName>。
                 // 双击 MSI 由 msiexec 在启动时前台弹出 UAC（不要改 Burn EXE 清单，
                 // 会毁掉 WiX 数据包）。EXE 仍可作备用，但推荐用 MSI。
                 perUserInstall = false
                 dirChooser = true
                 menu = true
                 shortcut = true
-                menuGroup = "交大自由行 KMP"
+                menuGroup = windowsPackageDisplayName
                 // 固定升级码，后续同范围安装才能覆盖升级。
                 upgradeUuid = "8f3a1c2e-7b64-4d91-a5e0-2c9b6f4d8a17"
                 iconFile.set(project.file("src/windowsMain/resources/BJTUselfServiceKMP.ico"))

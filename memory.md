@@ -19,7 +19,7 @@
 - **Windows 安装器品牌化受限**：jpackage 安装向导 UI（横幅、右上角图标、进度框）无参数可定制；安装完成后的 EXE/快捷方式/窗口/任务栏图标已是品牌 logo。若用户要完全品牌化安装向导，需引入 Inno Setup 等替代打包管线（未授权、未规划）。
 - **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1 已实验绕过；本机无 Android SDK（Android/iOS 目标无法在本机编译）。
 - **打包 JDK**：JBR 无 jlink/jpackage，需完整 JDK（本机 Microsoft JDK 21 `C:/Users/zjg/jdk21/jdk-21.0.8+9`，`WINDOWS_PACKAGE_JAVA_HOME` 可覆盖）。
-- **KMP Actions 待重跑出包**：首跑 Android 成功，Windows/macOS 失败。已修 macOS JDK 探测、拆 IPA、Windows 失败打 jpackage 日志。
+- **KMP Actions 二跑**：Android、macOS DMG 成功。Windows `light.exe 311`（中文包名在英文 runner 变成 `?????`）；iOS 链 `UIViewLayoutRegion`（Xcode 16.4 / iOS 18.5 没有）。已改 CI 用 ASCII 包名、iOS 改 `macos-26`。
 - **Windows 卸载清凭据待复测**：请装带卸载清理的 MSI 后再卸，确认 AppData 缓存和注册表凭据被删。
 - **iOS 包未签名**：需侧载自签；合法签名 / Keychain 往返仍缺 Developer Team。
 - **验证码发布级准确率仍待扩样**；课件深层文件夹/信息流变化仍缺自然样本。
@@ -27,7 +27,7 @@
 
 ## 3. 接下来 1～3 个阶段
 
-1. **重跑 `KMP package` 并上传 `v1.7.3-KMP-B`**：确认四端产物后实机验证教学周与作业。
+1. **重跑 `KMP package`**：Windows ASCII 包名 + iOS Xcode 26；出包后实机验证教学周与作业。
 2. **M13 物理在线接入**（需内网调研）。规划见 `docs/migration/m13-phyvlab-integration-plan.md`。
 3. **Windows 卸载清凭据**：装含 CleanupUserData 的 MSI 后再卸，确认不再记住密码。
 
