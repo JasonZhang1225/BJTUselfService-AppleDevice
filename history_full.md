@@ -424,4 +424,6 @@
 - **范围**：课表当前周优先智慧教学 `getTimeList.weekCode`，失败回退教务 `room_view?zc=`；作业/课件学期空、单课 JSON 坏、`STATUS≠0` 不再整批 `MALFORMED`。新增 KMP GitHub Actions 打包。
 - **版本字段**：`CURRENT_VERSION` / Android `versionName` / iOS `CFBundleShortVersionString` = `1.7.3-KMP-B`；`versionCode` / `CFBundleVersion` / `packageBuildVersion` = 14。jpackage `packageVersion` 仍为 `1.7.3`。
 - **CI**：`.github/workflows/kmp-package.yml` 在 `v*-KMP*` 标签与 `workflow_dispatch` 上构建 Android debug APK、Windows MSI、macOS DMG、未签名 iOS IPA，并在 tag 上创建 pre-release。冻结根工程 `.github/workflows/release.yml` 增加 `!contains(ref, 'KMP')`，避免把 `:app` 1.7.0 打进 KMP Release。
+- **提交与 tag**：`6e61e61` 教学周/作业修复；`7d85055` 版本标识与 Actions。git tag `v1.7.3-KMP-B` 指向 `7d85055`，已推送。
 - **未在本节填写的**：Actions 实际产物大小与实机教学周/作业结果，等工作流结束后再补。
+- **发布页**：https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.3-KMP-B
