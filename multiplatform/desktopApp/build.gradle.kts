@@ -22,6 +22,16 @@ val desktopPackageName = "BJTUselfServiceKMP"
 val desktopPackageVersion = "1.7.3"
 val macDisplayName = "交大自由行 KMP"
 
+fun resolveDesktopPackageJavaHome(): String {
+    val candidates = listOfNotNull(
+        System.getenv("DESKTOP_PACKAGE_JAVA_HOME")?.trim()?.takeIf(String::isNotEmpty),
+        System.getenv("JAVA_HOME")?.trim()?.takeIf(String::isNotEmpty),
+        "/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home",
+    )
+    return candidates.firstOrNull { File(it).isDirectory }
+        ?: error("Set DESKTOP_PACKAGE_JAVA_HOME or JAVA_HOME to a full JDK that contains jpackage")
+}
+
 @DisableCachingByDefault(because = "Invokes Apple's Core ML compiler")
 abstract class CompileMacCaptchaModel : DefaultTask() {
     @get:InputDirectory
@@ -554,9 +564,8 @@ compose.desktop {
         mainClass = "team.bjtuss.bjtuselfservice.desktop.MainKt"
         // jpackage 只在完整 JDK 有，Android Studio JBR 没有；运行时检测/打包单独指向系统完整 JDK，
         // 与守护进程 JDK 解耦（Kotlin 编译仍在 JBR 下跑，避免 KGP 在 JDK 25 下崩溃）。
-        javaHome = providers.environmentVariable("DESKTOP_PACKAGE_JAVA_HOME")
-            .orElse("/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home")
-            .get()
+        // 本机默认 Temurin 25；CI / 其他机器走 DESKTOP_PACKAGE_JAVA_HOME 或 JAVA_HOME。
+        javaHome = resolveDesktopPackageJavaHome()
         val captchaBuildDirectory = layout.buildDirectory.dir("generated/captcha")
         val inputSourceHelperFile =
             layout.buildDirectory.file("generated/input-source/libBJTUInputSourceHelper.dylib")

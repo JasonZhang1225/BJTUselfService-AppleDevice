@@ -80,10 +80,29 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      - name: Check jpackage
+        env:
+          WINDOWS_PACKAGE_JAVA_HOME: ${{ env.JAVA_HOME }}
+        run: |
+          $jp = Join-Path $env:JAVA_HOME "bin\jpackage.exe"
+          if (-not (Test-Path $jp)) { throw "jpackage missing: $jp" }
+          Write-Host "jpackage=$jp"
+          & $jp --version
+          chcp 65001 | Out-Null
+
       - name: Build MSI
         env:
           WINDOWS_PACKAGE_JAVA_HOME: ${{ env.JAVA_HOME }}
+          JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8
         run: .\gradlew.bat :windowsApp:packageMsi --stacktrace
+
+      - name: Print jpackage logs
+        if: failure()
+        run: |
+          Get-ChildItem -Recurse "windowsApp\build\compose\logs","windowsApp\build\jpackage-shim" -Include *.txt,*.log -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "===== $($_.FullName) ====="
+            Get-Content -LiteralPath $_.FullName -ErrorAction SilentlyContinue
+          }
 
       - name: Rename MSI
         id: artifact
@@ -104,8 +123,56 @@ jobs:
           path: multiplatform/${{ steps.artifact.outputs.file }}
           if-no-files-found: error
 
-  apple:
-    name: macOS DMG and iOS IPA
+  macos:
+    name: macOS DMG
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: multiplatform
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build macOS DMG
+        env:
+          DESKTOP_PACKAGE_JAVA_HOME: ${{ env.JAVA_HOME }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :desktopApp:packageDmg --stacktrace
+
+      - name: Rename DMG
+        id: artifact
+        run: |
+          VERSION="$(sed -n 's/.*CURRENT_VERSION = "\([^"]*\)".*/\1/p' shared/src/commonMain/kotlin/team/bjtuss/bjtuselfservice/shared/update/AppUpdateChecker.kt | head -n 1)"
+          DMG="$(find desktopApp/build/compose/binaries/main/dmg -name '*.dmg' | head -n 1)"
+          test -n "$VERSION"
+          test -f "$DMG"
+          NAME="BJTUselfServiceKMP-${VERSION}.dmg"
+          cp "$DMG" "$NAME"
+          echo "file=$NAME" >> "$GITHUB_OUTPUT"
+          ls -lh "$NAME"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmp-macos-dmg
+          path: multiplatform/${{ steps.artifact.outputs.file }}
+          if-no-files-found: error
+
+  ios:
+    name: iOS unsigned IPA
     runs-on: macos-15
     timeout-minutes: 90
     defaults:
@@ -126,15 +193,11 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Build macOS DMG
-        run: |
-          chmod +x ./gradlew
-          ./gradlew :desktopApp:packageDmg --stacktrace
-
       - name: Build unsigned iOS app
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
         run: |
+          chmod +x ./gradlew
           xcodebuild \
             -project iosApp/iosApp.xcodeproj \
             -scheme iosApp \
@@ -146,44 +209,31 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Package Apple artifacts
+      - name: Package IPA
         id: artifact
         run: |
           VERSION="$(sed -n 's/.*CURRENT_VERSION = "\([^"]*\)".*/\1/p' shared/src/commonMain/kotlin/team/bjtuss/bjtuselfservice/shared/update/AppUpdateChecker.kt | head -n 1)"
-          test -n "$VERSION"
-          DMG="$(find desktopApp/build/compose/binaries/main/dmg -name '*.dmg' | head -n 1)"
           APP="$(find iosApp/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -n 1)"
-          test -f "$DMG"
+          test -n "$VERSION"
           test -d "$APP"
-          DMG_NAME="BJTUselfServiceKMP-${VERSION}.dmg"
-          IPA_NAME="BJTUSelfService-KMP-${VERSION}-iOS-unsigned.ipa"
-          cp "$DMG" "$DMG_NAME"
+          NAME="BJTUSelfService-KMP-${VERSION}-iOS-unsigned.ipa"
           rm -rf ipa-stage
           mkdir -p ipa-stage/Payload
           cp -R "$APP" ipa-stage/Payload/
-          (cd ipa-stage && zip -qry "../$IPA_NAME" Payload)
-          echo "dmg=$DMG_NAME" >> "$GITHUB_OUTPUT"
-          echo "ipa=$IPA_NAME" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          ls -lh "$DMG_NAME" "$IPA_NAME"
-
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: kmp-macos-dmg
-          path: multiplatform/${{ steps.artifact.outputs.dmg }}
-          if-no-files-found: error
+          (cd ipa-stage && zip -qry "../$NAME" Payload)
+          echo "file=$NAME" >> "$GITHUB_OUTPUT"
+          ls -lh "$NAME"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: kmp-ios-ipa
-          path: multiplatform/${{ steps.artifact.outputs.ipa }}
+          path: multiplatform/${{ steps.artifact.outputs.file }}
           if-no-files-found: error
 
   release:
     name: GitHub Release
-    needs: [android, windows, apple]
+    needs: [android, windows, macos, ios]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
