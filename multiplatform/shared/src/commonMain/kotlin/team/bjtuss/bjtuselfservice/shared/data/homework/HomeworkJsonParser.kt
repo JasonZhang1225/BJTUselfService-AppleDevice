@@ -35,33 +35,21 @@ fun parseSmartSessionId(body: String): HomeworkJsonParseResult<String> = parseOb
 }
 
 fun parseCurrentSemesterCode(body: String): HomeworkJsonParseResult<String> = parseObject(body) { root ->
-    if (!root.hasSuccessStatus()) return@parseObject HomeworkJsonParseResult.Failure("STATUS")
-    val semester = root.array("result")
-        ?.firstOrNull()
-        .asObject()
-        ?.string("xqCode")
-        .orEmpty()
-    if (semester.isBlank()) {
-        HomeworkJsonParseResult.Failure("result.xqCode")
-    } else {
-        HomeworkJsonParseResult.Success(semester)
-    }
+    // 对齐 1.7.0：Moshi 缺字段得到空学期，不把整页作业打成“结构变化”。
+    val first = root.array("result")?.firstOrNull().asObject()
+    val semester = first?.string("xqCode") ?: first?.string("xq_code").orEmpty()
+    HomeworkJsonParseResult.Success(semester)
 }
 
 fun parseSmartCourses(body: String): HomeworkJsonParseResult<List<SmartCourse>> = parseObject(body) { root ->
-    if (!root.hasSuccessStatus()) return@parseObject HomeworkJsonParseResult.Failure("STATUS")
-    val elements = root.arrayOrBlank("courseList")
-        ?: return@parseObject HomeworkJsonParseResult.Failure("courseList")
+    // STATUS≠0 或缺少 courseList 视为本学期暂无课程，跳过坏行，不中断整批。
+    val elements = root.arrayOrBlank("courseList") ?: emptyList()
     val courses = mutableListOf<SmartCourse>()
-    for ((index, element) in elements.withIndex()) {
-        val item = element.asObject()
-            ?: return@parseObject HomeworkJsonParseResult.Failure("courseList[$index]")
-        val id = item.int("id")
-            ?: return@parseObject HomeworkJsonParseResult.Failure("courseList[$index].id")
+    for (element in elements) {
+        val item = element.asObject() ?: continue
+        val id = item.int("id") ?: continue
         val name = item.string("name").orEmpty()
-        if (name.isBlank()) {
-            return@parseObject HomeworkJsonParseResult.Failure("courseList[$index].name")
-        }
+        if (name.isBlank()) continue
         courses += SmartCourse(
             id = id,
             name = name,
@@ -78,24 +66,16 @@ fun parseHomeworkList(
     body: String,
     homeworkType: Int,
 ): HomeworkJsonParseResult<List<Homework>> = parseObject(body) { root ->
-    // STATUS="2" 表示该课程当前类型没有作业，是合法空列表而非错误（对齐原 Android 默认值容错）。
-    if (root.isEmptyDataStatus()) return@parseObject HomeworkJsonParseResult.Success(emptyList())
-    if (!root.hasSuccessStatus()) return@parseObject HomeworkJsonParseResult.Failure("STATUS")
-    val elements = root.arrayOrBlank("courseNoteList")
-        ?: return@parseObject HomeworkJsonParseResult.Failure("courseNoteList")
+    // 1.7.0 对任意 STATUS 用默认空列表容错；缺 identity 的单行跳过，不整表失败。
+    val elements = root.arrayOrBlank("courseNoteList") ?: emptyList()
     val homework = mutableListOf<Homework>()
-    for ((index, element) in elements.withIndex()) {
-        val item = element.asObject()
-            ?: return@parseObject HomeworkJsonParseResult.Failure("courseNoteList[$index]")
-        val upId = item.int("id")
-            ?: return@parseObject HomeworkJsonParseResult.Failure("courseNoteList[$index].id")
-        val courseId = item.int("course_id")
-            ?: return@parseObject HomeworkJsonParseResult.Failure("courseNoteList[$index].course_id")
+    for (element in elements) {
+        val item = element.asObject() ?: continue
+        val upId = item.int("id") ?: continue
+        val courseId = item.int("course_id") ?: continue
         val courseName = item.string("course_name").orEmpty()
         val title = item.string("title").orEmpty()
-        if (courseName.isBlank() || title.isBlank()) {
-            return@parseObject HomeworkJsonParseResult.Failure("courseNoteList[$index].identity")
-        }
+        if (courseName.isBlank() || title.isBlank()) continue
         homework += Homework(
             upId = upId,
             idSnId = item.int("snId"),

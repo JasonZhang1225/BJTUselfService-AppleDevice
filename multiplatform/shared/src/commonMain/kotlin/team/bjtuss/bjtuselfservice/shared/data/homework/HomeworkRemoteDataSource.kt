@@ -101,7 +101,7 @@ class SchoolHomeworkRemoteDataSource(
                             ),
                         )
                         when (val parsed = parseHomeworkList(response.bodyText(), request.homeworkType)) {
-                            is HomeworkJsonParseResult.Failure -> malformed()
+                            is HomeworkJsonParseResult.Failure -> emptyList()
                             is HomeworkJsonParseResult.Success -> parsed.value
                         }
                     }
@@ -313,10 +313,13 @@ class SchoolHomeworkRemoteDataSource(
             query = linkedMapOf("method" to "queryCurrentXq"),
         )
         val semesterCode = when (val parsed = parseCurrentSemesterCode(semester.bodyText())) {
-            is HomeworkJsonParseResult.Failure -> {
-                malformed()
-            }
+            is HomeworkJsonParseResult.Failure -> malformed()
             is HomeworkJsonParseResult.Success -> parsed.value
+        }
+        if (semesterCode.isBlank()) {
+            courses = emptyList()
+            initialized = true
+            return
         }
 
         val courseResponse = smartGet(
@@ -329,9 +332,7 @@ class SchoolHomeworkRemoteDataSource(
             ),
         )
         courses = when (val parsed = parseSmartCourses(courseResponse.bodyText())) {
-            is HomeworkJsonParseResult.Failure -> {
-                malformed()
-            }
+            is HomeworkJsonParseResult.Failure -> malformed()
             is HomeworkJsonParseResult.Success -> parsed.value
         }
         initialized = true

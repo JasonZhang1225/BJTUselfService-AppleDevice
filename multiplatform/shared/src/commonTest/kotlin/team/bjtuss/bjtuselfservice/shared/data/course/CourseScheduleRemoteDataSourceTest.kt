@@ -4,7 +4,9 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import team.bjtuss.bjtuselfservice.shared.data.homework.SmartPlatformEndpoint
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpResponse
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpTransport
@@ -54,6 +56,80 @@ class CourseScheduleRemoteDataSourceTest {
 
         assertEquals(CourseScheduleRemoteFailure.SESSION_EXPIRED, error.reason)
         assertTrue("程序设计" !in error.toString())
+    }
+
+    @Test
+    fun prefersTimeListWeekCodeAndSkipsRoomView() = runBlocking {
+        val transport = QueueTransport(
+            mutableListOf(
+                response(teacherTable()),
+                response(scheduleTable(0, 0, currentCourseChild())),
+                response(scheduleTable(1, 1, selectionCourseChild())),
+                response("<html></html>", finalUrl = "https://mis.bjtu.edu.cn/module/module/28/"),
+                response(
+                    """{"weekCode":"25"}""",
+                    finalUrl = "http://123.121.147.7:88/ve/back/coursePlatform/course.shtml?method=getTimeList",
+                ),
+            ),
+        )
+
+        val snapshot = SchoolCourseScheduleRemoteDataSource(
+            transport = transport,
+            requestDelayMillis = 0,
+            endpoint = SmartPlatformEndpoint.LegacyHttp,
+        ).fetchSchedule()
+
+        assertEquals(25, snapshot.currentWeek)
+        assertEquals(2, snapshot.courses.size)
+        assertTrue(transport.requests.any { "getTimeList" in it.url })
+        assertFalse(transport.requests.any { it.url.contains("room_view") })
+    }
+
+    @Test
+    fun fallsBackToRoomViewWhenTimeListIsUnusable() = runBlocking {
+        val transport = QueueTransport(
+            mutableListOf(
+                response(teacherTable()),
+                response(scheduleTable(0, 0, currentCourseChild())),
+                response(scheduleTable(1, 1, selectionCourseChild())),
+                response("<html></html>", finalUrl = "https://mis.bjtu.edu.cn/module/module/28/"),
+                response(
+                    "<html>login</html>",
+                    finalUrl = "http://123.121.147.7:88/ve/back/coursePlatform/course.shtml?method=getTimeList",
+                ),
+                response("", finalUrl = "https://aa.bjtu.edu.cn/classroom/timeholdresult/room_view/?zc=8"),
+            ),
+        )
+
+        val snapshot = SchoolCourseScheduleRemoteDataSource(
+            transport = transport,
+            requestDelayMillis = 0,
+            endpoint = SmartPlatformEndpoint.LegacyHttp,
+        ).fetchSchedule()
+
+        assertEquals(8, snapshot.currentWeek)
+        assertTrue(transport.requests.any { "getTimeList" in it.url })
+        assertTrue(transport.requests.any { it.url.contains("room_view") })
+    }
+
+    @Test
+    fun timeListFailureDoesNotFailTheScheduleSnapshot() = runBlocking {
+        val transport = QueueTransport(
+            mutableListOf(
+                response(teacherTable()),
+                response(scheduleTable(0, 0, currentCourseChild())),
+                response(scheduleTable(1, 1, selectionCourseChild())),
+            ),
+        )
+
+        val snapshot = SchoolCourseScheduleRemoteDataSource(
+            transport = transport,
+            requestDelayMillis = 0,
+            endpoint = SmartPlatformEndpoint.LegacyHttp,
+        ).fetchSchedule()
+
+        assertEquals(2, snapshot.courses.size)
+        assertEquals(0, snapshot.currentWeek)
     }
 
     private class QueueTransport(

@@ -87,6 +87,17 @@ class CourseScheduleHtmlParserTest {
         assertEquals(0, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/?zc=27"))
         assertEquals(0, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/"))
     }
+
+    @Test
+    fun parsesTimeListWeekCodeAsStringOrNumber() {
+        assertEquals(25, parseCurrentWeekFromTimeList("""{"weekCode":"25"}"""))
+        assertEquals(14, parseCurrentWeekFromTimeList("""{"weekCode":14}"""))
+        assertEquals(8, parseCurrentWeekFromTimeList("""{"week_code":"8"}"""))
+        assertEquals(0, parseCurrentWeekFromTimeList("""{"weekCode":"27"}"""))
+        assertEquals(0, parseCurrentWeekFromTimeList("""{"weekCode":"0"}"""))
+        assertEquals(0, parseCurrentWeekFromTimeList("<html>login</html>"))
+        assertEquals(0, parseCurrentWeekFromTimeList("""{"STATUS":"0"}"""))
+    }
 }
 
 internal fun teacherTable(name: String = "程序设计 02", teacher: String = "李老师") = """

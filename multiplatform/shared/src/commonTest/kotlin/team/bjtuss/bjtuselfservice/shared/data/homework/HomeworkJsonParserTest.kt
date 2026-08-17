@@ -65,15 +65,21 @@ class HomeworkJsonParserTest {
     }
 
     @Test
-    fun rejectsMissingIdentityWithoutLeakingBody() {
-        val result = assertIs<HomeworkJsonParseResult.Failure>(
+    fun skipsMissingIdentityWithoutLeakingBodyOrFailingTheList() {
+        val result = assertIs<HomeworkJsonParseResult.Success<List<*>>>(
             parseHomeworkList(
-                """{"STATUS":"0","courseNoteList":[{"id":1,"course_id":2,"title":"敏感标题"}]}""",
+                """{"STATUS":"0","courseNoteList":[
+                    {"id":1,"course_id":2,"title":"敏感标题"},
+                    {"id":3,"course_id":4,"course_name":"程序设计","title":"实验一"}
+                ]}""",
                 0,
             ),
         )
 
-        assertEquals("courseNoteList[0].identity", result.field)
+        val items = result.value
+        assertEquals(1, items.size)
+        val item = items.single() as team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
+        assertEquals("实验一", item.title)
         kotlin.test.assertFalse("敏感标题" in result.toString())
     }
 
@@ -105,11 +111,41 @@ class HomeworkJsonParserTest {
     }
 
     @Test
-    fun stillRejectsOtherNonSuccessStatus() {
-        val result = assertIs<HomeworkJsonParseResult.Failure>(
+    fun treatsOtherNonSuccessStatusAsEmptyListLikeOriginalApp() {
+        val result = assertIs<HomeworkJsonParseResult.Success<List<*>>>(
             parseHomeworkList("""{"STATUS":"5","message":"系统异常"}""", 0),
         )
+        assertEquals(emptyList<Any?>(), result.value)
+    }
 
-        assertEquals("STATUS", result.field)
+    @Test
+    fun emptySemesterAndPartialCourseListAreNotMalformed() {
+        val emptySemester = assertIs<HomeworkJsonParseResult.Success<String>>(
+            parseCurrentSemesterCode("""{"STATUS":"0","result":[]}"""),
+        )
+        val snakeSemester = assertIs<HomeworkJsonParseResult.Success<String>>(
+            parseCurrentSemesterCode("""{"STATUS":"0","result":[{"xq_code":"2026-2"}]}"""),
+        )
+        val courses = assertIs<HomeworkJsonParseResult.Success<List<SmartCourse>>>(
+            parseSmartCourses(
+                """{"STATUS":"2","message":"没有数据","courseList":[
+                    {"id":1},
+                    {"id":17,"name":"程序设计"}
+                ]}""",
+            ),
+        )
+
+        assertEquals("", emptySemester.value)
+        assertEquals("2026-2", snakeSemester.value)
+        assertEquals(listOf(SmartCourse(17, "程序设计", null)), courses.value)
+    }
+
+    @Test
+    fun rejectsNonJsonHomeworkPayloadWithoutLeakingBody() {
+        val result = assertIs<HomeworkJsonParseResult.Failure>(
+            parseHomeworkList("<html>敏感登录页</html>", 0),
+        )
+        assertEquals("root", result.field)
+        kotlin.test.assertFalse("敏感登录页" in result.toString())
     }
 }

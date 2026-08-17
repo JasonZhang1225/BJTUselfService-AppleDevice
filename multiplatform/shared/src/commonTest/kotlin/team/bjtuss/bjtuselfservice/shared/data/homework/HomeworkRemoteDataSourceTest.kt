@@ -191,6 +191,38 @@ class HomeworkRemoteDataSourceTest {
         assertFalse("%E6%8F%90" in submitRequest.toString())
     }
 
+    @Test
+    fun skipsMalformedHomeworkListWithoutFailingTheBatch() = runBlocking {
+        val transport = QueueTransport(
+            smartResponse("<html></html>"),
+            smartResponse("""{"sessionId":"session-value"}"""),
+            smartResponse("""{"STATUS":"0","result":[{"xqCode":"2026-1"}]}"""),
+            smartResponse("""{"STATUS":"0","courseList":[{"id":17,"name":"程序设计","teacher_id":28}]}"""),
+            smartResponse("<html>login</html>"),
+            smartResponse(homeworkList(102, "课程设计")),
+            smartResponse("""{"STATUS":"5","message":"系统异常"}"""),
+        )
+
+        val homework = SchoolHomeworkRemoteDataSource(transport, requestDelayMillis = 0).fetchHomework()
+
+        assertEquals(listOf("课程设计"), homework.map(Homework::title))
+        assertEquals(listOf(1), homework.map(Homework::homeworkType))
+    }
+
+    @Test
+    fun emptySemesterYieldsEmptyHomeworkWithoutCourseRequests() = runBlocking {
+        val transport = QueueTransport(
+            smartResponse("<html></html>"),
+            smartResponse("""{"sessionId":"session-value"}"""),
+            smartResponse("""{"STATUS":"0","result":[]}"""),
+        )
+
+        val homework = SchoolHomeworkRemoteDataSource(transport, requestDelayMillis = 0).fetchHomework()
+
+        assertEquals(emptyList(), homework)
+        assertTrue(transport.requests.none { "getCourseList" in it.url || "getHomeWorkList" in it.url })
+    }
+
     private class QueueTransport(vararg responses: SchoolHttpResponse) : SchoolHttpTransport {
         private val queue = responses.toMutableList()
         val requests = mutableListOf<SchoolHttpRequest>()

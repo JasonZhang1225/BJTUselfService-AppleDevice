@@ -2,7 +2,12 @@ package team.bjtuss.bjtuselfservice.shared.data.course
 
 import com.fleeksoft.ksoup.Ksoup
 import com.fleeksoft.ksoup.nodes.Element
+import team.bjtuss.bjtuselfservice.shared.data.homework.parseStrictJsonObject
+import team.bjtuss.bjtuselfservice.shared.data.homework.string
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
+
+/** 与原 1.7.0 DataStore / KMP 课表缓存一致：超出此范围当作未取到当前周。 */
+internal val TEACHING_WEEK_RANGE = 1..26
 
 enum class CourseScheduleParseFailure {
     TABLE_MISSING,
@@ -84,8 +89,18 @@ fun parseCurrentWeekFromUrl(url: String): Int =
         ?.groupValues
         ?.getOrNull(1)
         ?.toIntOrNull()
-        ?.takeIf { it in 1..26 }
+        ?.takeIf { it in TEACHING_WEEK_RANGE }
         ?: 0
+
+/**
+ * 原 1.7.0 `NetworkRepository.loadCurrentWeek`：智慧教学 `getTimeList` 的 `weekCode`。
+ * 字段可能是字符串或数字；解析失败返回 0，由调用方回退到教室页 `zc`。
+ */
+fun parseCurrentWeekFromTimeList(body: String): Int {
+    val root = parseStrictJsonObject(body) ?: return 0
+    val raw = root.string("weekCode") ?: root.string("week_code")
+    return raw?.toIntOrNull()?.takeIf { it in TEACHING_WEEK_RANGE } ?: 0
+}
 
 private fun parseCourseChild(
     child: Element,

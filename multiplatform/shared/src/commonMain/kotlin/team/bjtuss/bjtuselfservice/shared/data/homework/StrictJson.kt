@@ -35,14 +35,6 @@ internal fun Map<String, StrictJsonValue>.hasSuccessStatus(): Boolean = when (va
     else -> false
 }
 
-/**
- * 智慧平台用 STATUS="2"（message 常为“没有数据”）表示“该课程当前类型没有作业”，
- * 这是合法的空列表而非错误。原 Android 以默认值容忍任意 STATUS 直接得到空列表；
- * KMP 严格解析若把 "2" 当失败，会在第一门无作业课程处中断整批同步。
- */
-internal fun Map<String, StrictJsonValue>.isEmptyDataStatus(): Boolean =
-    string("STATUS") == "2" && arrayOrBlank("courseNoteList") == null
-
 internal fun Map<String, StrictJsonValue>.string(name: String): String? = when (val value = get(name)) {
     is StrictJsonValue.StringValue -> value.value
     is StrictJsonValue.NumberValue -> value.raw

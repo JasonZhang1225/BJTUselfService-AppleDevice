@@ -520,11 +520,14 @@ fun LoginRoute(
                 remote = SchoolClassroomOccupancyRemoteDataSource(transport.value),
             )
         }
-        val courseScheduleRepository = remember(shellProfile.studentId, cacheStore) {
+        val courseScheduleRepository = remember(shellProfile.studentId, cacheStore, smartPlatformEndpoint) {
             DefaultCourseScheduleRepository(
                 accountScope = shellProfile.studentId,
                 local = CacheStoreCourseScheduleLocalDataSource(cacheStore),
-                remote = SchoolCourseScheduleRemoteDataSource(transport.value),
+                remote = SchoolCourseScheduleRemoteDataSource(
+                    transport = transport.value,
+                    endpoint = smartPlatformEndpoint,
+                ),
             )
         }
         val courseScheduleModel = remember(courseScheduleRepository, homeChangeFeed, classroomOccupancyRepository) {

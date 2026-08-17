@@ -2,6 +2,8 @@ package team.bjtuss.bjtuselfservice.shared.data.course
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import team.bjtuss.bjtuselfservice.shared.data.homework.SmartPlatformEndpoint
+import team.bjtuss.bjtuselfservice.shared.data.homework.followSmartHandshakeRedirects
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpMethod
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
@@ -16,6 +18,8 @@ private const val SELECTION_SCHEDULE_URL =
     "https://aa.bjtu.edu.cn/course_selection/courseselecttask/schedule/"
 private const val CURRENT_WEEK_URL =
     "https://aa.bjtu.edu.cn/classroom/timeholdresult/room_view/"
+private const val SMART_MODULE_URL = "https://mis.bjtu.edu.cn/module/module/28/"
+private const val TIME_LIST_PATH = "/ve/back/coursePlatform/course.shtml"
 
 data class RemoteCourseScheduleSnapshot(
     val courses: List<Course>,
@@ -39,6 +43,7 @@ interface CourseScheduleRemoteDataSource {
 class SchoolCourseScheduleRemoteDataSource(
     private val transport: SchoolHttpTransport,
     private val requestDelayMillis: Long = 100,
+    private val endpoint: SmartPlatformEndpoint? = null,
 ) : CourseScheduleRemoteDataSource {
     override suspend fun fetchSchedule(): RemoteCourseScheduleSnapshot {
         val teacherResponse = request(TEACHER_URL)
@@ -59,7 +64,6 @@ class SchoolCourseScheduleRemoteDataSource(
             isSelectionSchedule = true,
             teachers = teachers,
         )
-        val weekResponse = request(CURRENT_WEEK_URL)
 
         return RemoteCourseScheduleSnapshot(
             courses = (currentCourses + selectionCourses).distinctBy { course ->
@@ -71,8 +75,70 @@ class SchoolCourseScheduleRemoteDataSource(
                     course.isCurrentSemester.toString(),
                 ).joinToString("\u0000")
             },
-            currentWeek = parseCurrentWeekFromUrl(weekResponse.finalUrl),
+            currentWeek = resolveCurrentWeek(),
         )
+    }
+
+    /**
+     * 与 1.7.0 对齐：优先智慧教学 `getTimeList.weekCode`；失败再回退教务
+     * `room_view?zc=`。取周失败不得让整张课表快照失败。
+     */
+    private suspend fun resolveCurrentWeek(): Int {
+        val fromTimeList = fetchTimeListWeek()
+        if (fromTimeList in TEACHING_WEEK_RANGE) return fromTimeList
+        return fetchRoomViewWeek()
+    }
+
+    private suspend fun fetchTimeListWeek(): Int {
+        val smart = endpoint ?: return 0
+        return try {
+            landOnSmartPlatform(smart)
+            val response = executeSoft(
+                SchoolHttpRequest(
+                    method = SchoolHttpMethod.GET,
+                    url = smart.apiUrl(
+                        TIME_LIST_PATH,
+                        linkedMapOf("method" to "getTimeList"),
+                    ),
+                    headers = mapOf(
+                        "Accept" to "application/json, text/javascript, */*; q=0.01",
+                        "Referer" to smart.apiOrigin,
+                        "X-Requested-With" to "XMLHttpRequest",
+                    ),
+                ),
+            ) ?: return 0
+            if (response.statusCode !in 200..299) return 0
+            if (!smart.acceptsApiUrl(response.finalUrl)) return 0
+            parseCurrentWeekFromTimeList(response.bodyText())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    private suspend fun landOnSmartPlatform(smart: SmartPlatformEndpoint) {
+        val module = executeSoft(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.GET,
+                url = SMART_MODULE_URL,
+                headers = mapOf("Referer" to "https://mis.bjtu.edu.cn/home/"),
+            ),
+        ) ?: return
+        smart.followSmartHandshakeRedirects(
+            first = module,
+            referer = SMART_MODULE_URL,
+        ) { request ->
+            executeSoft(request) ?: module
+        }
+    }
+
+    private suspend fun fetchRoomViewWeek(): Int = try {
+        parseCurrentWeekFromUrl(request(CURRENT_WEEK_URL).finalUrl)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        0
     }
 
     private suspend fun request(url: String) = try {
@@ -97,6 +163,15 @@ class SchoolCourseScheduleRemoteDataSource(
         throw error
     } catch (_: Exception) {
         throw CourseScheduleRemoteException(CourseScheduleRemoteFailure.NETWORK)
+    }
+
+    private suspend fun executeSoft(request: SchoolHttpRequest) = try {
+        if (requestDelayMillis > 0) delay(requestDelayMillis)
+        transport.execute(request)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        null
     }
 
     private fun parseSchedule(

@@ -277,6 +277,11 @@ class SchoolCoursewareRemoteDataSource(
             is HomeworkJsonParseResult.Failure -> malformed()
             is HomeworkJsonParseResult.Success -> parsed.value
         }
+        if (semesterCode.isBlank()) {
+            courses = emptyList()
+            initialized = true
+            return
+        }
         val courseResponse = smartGet(
             path = COURSE_PATH,
             query = linkedMapOf(
