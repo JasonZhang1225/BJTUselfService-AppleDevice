@@ -8,6 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
 
 class HomeAgendaTest {
     @Test
@@ -66,6 +67,30 @@ class HomeAgendaTest {
         )
 
         assertEquals(listOf("sooner", "later"), agenda.dueSoonHomework.map(Homework::title))
+    }
+
+    @Test
+    fun phyVlabEventsAppearOnTheirLocalCalendarDate() {
+        val event = PhyVlabEvent(
+            id = "3115",
+            title = "chap1 已到期",
+            dateText = "03月19日",
+            dayTimestamp = 1773849600L,
+            eventUrl = "https://phyvlab.bjtu.edu.cn/mod/assign/view.php?id=3689",
+        )
+        val agenda = buildHomeAgenda(
+            homework = emptyList(),
+            exams = emptyList(),
+            today = LocalDate(2026, 3, 19),
+            now = LocalDateTime(2026, 3, 19, 10, 0),
+            // 即使首页其它数据使用 UTC，物理在线事件仍按学校的北京时间归日。
+            timeZone = TimeZone.UTC,
+            phyVlabEvents = listOf(event),
+        )
+
+        val day = agenda.days.single { it.date == LocalDate(2026, 3, 19) }
+        assertEquals(listOf(event), day.phyVlabEvents)
+        assertEquals(1, day.eventCount)
     }
 
     private fun homework(

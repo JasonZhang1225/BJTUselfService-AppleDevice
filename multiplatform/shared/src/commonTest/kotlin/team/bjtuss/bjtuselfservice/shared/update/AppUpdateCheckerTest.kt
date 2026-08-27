@@ -20,4 +20,10 @@ class AppUpdateCheckerTest {
         // 1.7.2-A 的后缀按字典序小于 KMP，不能当热修版本号。
         assertTrue(AppUpdateChecker.compareVersions("1.7.2-A", "1.7.2-KMP") < 0)
     }
+
+    @Test
+    fun developmentBuildCanUpgradeThe173Base() {
+        assertTrue(AppUpdateChecker.CURRENT_VERSION.endsWith("-DEV"))
+        assertTrue(AppUpdateChecker.compareVersions(AppUpdateChecker.CURRENT_VERSION, "1.7.3-KMP-B") > 0)
+    }
 }

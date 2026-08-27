@@ -145,9 +145,12 @@ import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxUiState
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.phyvlab.PhyVlabWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.home.homeIdleStatusText
+import team.bjtuss.bjtuselfservice.shared.webview.openExternalUrl
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommand
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommandBus
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
@@ -187,6 +190,7 @@ private enum class AppSection(val title: String) : AppRoute {
     CLASSROOM_OCCUPANCY("教室占用查询"),
     CLASSROOMS("教室人数估计"),
     MAILBOX("邮箱"),
+    PHYVLAB("物理在线"),
     CALENDAR_DOWNLOAD("校历下载"),
     REPORT_CARD_DOWNLOAD("成绩单下载"),
     SETTINGS("设置"),
@@ -209,6 +213,7 @@ private val MoreGroupSections = setOf(
     AppSection.CLASSROOMS,
     AppSection.CLASSROOM_OCCUPANCY,
     AppSection.MAILBOX,
+    AppSection.PHYVLAB,
     AppSection.CALENDAR_DOWNLOAD,
     AppSection.REPORT_CARD_DOWNLOAD,
     AppSection.SETTINGS,
@@ -240,6 +245,7 @@ fun AuthenticatedAppShell(
     appCommandBus: AppCommandBus? = null,
     nativeNavigationEnabled: Boolean = false,
     onOpenNativeRoute: (String) -> Unit = {},
+    onOpenExternalUrl: (String) -> Unit = ::openExternalUrl,
     forcedRouteId: String? = null,
     onCloseNativeRoute: () -> Unit = {},
     homeworkFileGatewayOverride: HomeworkFileGateway? = null,
@@ -258,6 +264,7 @@ fun AuthenticatedAppShell(
     val settingsModel = session.settingsModel
     val loginSyncPreferences = session.loginSyncPreferences
     val mailboxModel = session.mailboxModel
+    val phyVlabModel = session.phyVlabModel
     val homeModel = session.homeModel
     val homeChangeFeed = session.homeChangeFeed
     val homeworkFileGateway = homeworkFileGatewayOverride ?: session.homeworkFileGateway
@@ -272,6 +279,7 @@ fun AuthenticatedAppShell(
     val classroomState by classroomModel.state.collectAsState()
     val classroomOccupancyState by classroomOccupancyModel.state.collectAsState()
     val mailboxState by mailboxModel.state.collectAsState()
+    val phyVlabState by phyVlabModel.state.collectAsState()
     val homeState by homeModel.state.collectAsState()
     val settingsState by settingsModel.state.collectAsState()
     val homeChanges by homeChangeFeed.records.collectAsState()
@@ -361,6 +369,9 @@ fun AuthenticatedAppShell(
                     launch { homeworkModel.refresh() }
                     launch { examScheduleModel.refresh() }
                     launch { courseScheduleModel.refresh() }
+                    if (loginSyncPreferences.autoSyncPhyVlab) {
+                        launch { phyVlabModel.refresh() }
+                    }
                     launch {
                         if (gradeModel.state.value.courseTypesByCode == null) {
                             gradeModel.ensureProgramCourseTypes()
@@ -380,6 +391,7 @@ fun AuthenticatedAppShell(
                 AppSection.CLASSROOMS -> classroomModel.refresh()
                 AppSection.CLASSROOM_OCCUPANCY -> classroomOccupancyModel.refresh()
                 AppSection.MAILBOX -> mailboxModel.refresh()
+                AppSection.PHYVLAB -> phyVlabModel.refresh()
                 AppSection.CALENDAR_DOWNLOAD -> Unit
                 AppSection.REPORT_CARD_DOWNLOAD -> Unit
                 AppSection.SETTINGS -> Unit
@@ -420,7 +432,14 @@ fun AuthenticatedAppShell(
             gradeModel.ensureProgramCourseTypes()
         }
     }
-    LaunchedEffect(homeworkModel, examScheduleModel, courseScheduleModel, entryLoggingIn) {
+    LaunchedEffect(
+        homeworkModel,
+        examScheduleModel,
+        courseScheduleModel,
+        phyVlabModel,
+        loginSyncPreferences.autoSyncPhyVlab,
+        entryLoggingIn,
+    ) {
         if (entryLoggingIn) return@LaunchedEffect
         coroutineScope {
             launch {
@@ -439,6 +458,14 @@ fun AuthenticatedAppShell(
                 courseScheduleModel.initialize(loginSyncPreferences.autoSyncSchedule)
                 // M12 校历映射独立于“自动同步课表”偏好，但同样必须等登录完成后再取学期。
                 courseScheduleModel.ensureCalendarLoaded()
+            }
+            launch {
+                // 物理在线没有普通缓存：开启自动同步时在登录完成后建立 Moodle 会话并拉取课程、作业安排。
+                phyVlabModel.initialize(loginSyncPreferences.autoSyncPhyVlab)
+                if (loginSyncPreferences.autoSyncPhyVlab && phyVlabModel.state.value.failure != null) {
+                    delay(LOGIN_SYNC_RETRY_DELAY_MILLIS)
+                    phyVlabModel.refresh()
+                }
             }
         }
     }
@@ -535,7 +562,7 @@ fun AuthenticatedAppShell(
                 expanded = expanded,
                 refreshable = true,
                 isRefreshing = homeState.isRefreshing || homeworkState.isRefreshing ||
-                    examState.isRefreshing || courseState.isRefreshing,
+                    examState.isRefreshing || courseState.isRefreshing || phyVlabState.isLoading,
                 showBack = false,
                 modifier = modifier,
                 // 与成绩/课表一致：同步态并入顶栏右上胶囊，勿只留孤图标。
@@ -546,10 +573,13 @@ fun AuthenticatedAppShell(
                     homeworkFailed = homeworkState.failure != null,
                     examFailed = examState.failure != null,
                     courseFailed = courseState.failure != null,
+                    phyVlabFailed = phyVlabState.failure != null || phyVlabState.casLoginRequired,
                     hasAnySource = homeworkState.source != null ||
                         examState.source != null ||
                         courseState.source != null ||
-                        homeState.status != null,
+                        homeState.status != null ||
+                        phyVlabState.courses.isNotEmpty() ||
+                        phyVlabState.events.isNotEmpty(),
                 ),
             ) {
                 HomeWorkspace(
@@ -559,16 +589,19 @@ fun AuthenticatedAppShell(
                     holdNetwork = entryLoggingIn,
                     homework = homeworkState.homework,
                     exams = examState.exams,
+                    phyVlabEvents = phyVlabState.events,
                     currentWeek = courseState.currentWeek,
                     now = homeworkState.now,
                     timeZone = homeworkState.timeZone,
-                    isAgendaLoading = homeworkState.isLoading || examState.isLoading || courseState.isLoading,
+                    isAgendaLoading = homeworkState.isLoading || examState.isLoading ||
+                        courseState.isLoading || phyVlabState.isLoading,
                     isRefreshing = homeState.isRefreshing || homeworkState.isRefreshing ||
-                        examState.isRefreshing || courseState.isRefreshing,
+                        examState.isRefreshing || courseState.isRefreshing || phyVlabState.isLoading,
                     onRefresh = refresh,
                     onOpenMailbox = { navigateToSection(AppSection.MAILBOX) },
                     onOpenHomework = { navigateToSection(AppSection.HOMEWORK) },
                     onOpenExams = { navigateToSection(AppSection.EXAMS) },
+                    onOpenPhyVlab = { navigateToSection(AppSection.PHYVLAB) },
                     changes = homeChanges,
                     onClearAllChanges = { scope.launch { homeChangeFeed.clear() } },
                     onClearChangeDomain = { domain -> scope.launch { homeChangeFeed.clear(domain) } },
@@ -872,6 +905,30 @@ fun AuthenticatedAppShell(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+            AppSection.PHYVLAB -> DestinationPage(
+                title = AppSection.PHYVLAB.title,
+                expanded = expanded,
+                refreshable = true,
+                isRefreshing = phyVlabState.isLoading,
+                showBack = true,
+                modifier = modifier,
+                idleStatusText = when {
+                    phyVlabState.failure != null -> "同步失败"
+                    phyVlabState.hasLoaded -> "已同步"
+                    else -> null
+                },
+            ) {
+                PhyVlabWorkspace(
+                    model = phyVlabModel,
+                    holdNetwork = entryLoggingIn,
+                    fileGateway = homeworkFileGateway,
+                    onOpenCourse = { url -> onOpenExternalUrl(url.replace("http://", "https://")) },
+                    onOpenActivity = { url -> onOpenExternalUrl(url.replace("http://", "https://")) },
+                    onOpenEvent = { url -> onOpenExternalUrl(url.replace("http://", "https://")) },
+                    onLogout = onLogout,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             AppSection.MORE -> DestinationPage(
                 title = AppSection.MORE.title,
                 expanded = expanded,
@@ -1153,6 +1210,7 @@ private fun AppSidebar(
     onSectionSelected: (AppSection) -> Unit,
     modifier: Modifier,
 ) {
+    val sidebarScrollState = rememberScrollState()
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.62f),
@@ -1187,7 +1245,10 @@ private fun AppSidebar(
             // 与移动端底栏一致：只暴露五个一级入口，其余收进「更多」。
             // 退出登录放在设置页，侧栏不再重复。
             Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(sidebarScrollState)
+                    .desktopTouchScroll(sidebarScrollState),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 BottomNavSections.forEach { item ->
@@ -1685,7 +1746,7 @@ private fun CompactTabIcon(section: AppSection) {
 
 /**
  * 「更多」页：iOS 设置式分块列表。
- * - 学业：考试、课件
+ * - 学业：物理在线、考试、课件
  * - 校园：教室占用查询、教室人数估计、邮箱
  * - 下载：校历、成绩单
  * - 设置单独一块垫底
@@ -1695,10 +1756,11 @@ private fun MoreWorkspace(
     onOpenSection: (AppSection) -> Unit,
     modifier: Modifier,
 ) {
+    val pageScrollState = rememberScrollState()
     val sections = listOf(
         MoreListSection(
             header = "学业",
-            items = listOf(AppSection.EXAMS, AppSection.COURSEWARE),
+            items = listOf(AppSection.PHYVLAB, AppSection.EXAMS, AppSection.COURSEWARE),
         ),
         MoreListSection(
             header = "校园",
@@ -1715,7 +1777,8 @@ private fun MoreWorkspace(
     )
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(pageScrollState)
+            .desktopTouchScroll(pageScrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
@@ -1883,11 +1946,13 @@ private fun GradeWorkspace(
                             sheetGesturesEnabled = true,
                             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                         ) {
+                            val detailScrollState = rememberScrollState()
                             GradeDetailSheetBody(
                                 grade = grade,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
+                                    .verticalScroll(detailScrollState)
+                                    .desktopTouchScroll(detailScrollState)
                                     .padding(horizontal = 24.dp)
                                     .padding(bottom = 28.dp),
                             )
@@ -2042,11 +2107,13 @@ private fun GradeFilterSheet(
     val semesterOptions = state.semesterOptions
     val allSemestersSelected =
         semesterOptions.isNotEmpty() && state.selectedSemesters.containsAll(semesterOptions)
+    val filterScrollState = rememberScrollState()
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(filterScrollState)
+            .desktopTouchScroll(filterScrollState)
             .padding(horizontal = 20.dp, vertical = 8.dp)
             .padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -2326,7 +2393,7 @@ private fun GradeScrollableContent(
     }
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.desktopTouchScroll(listState),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 20.dp),
     ) {
@@ -2389,7 +2456,7 @@ private fun GradeList(
     }
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.desktopTouchScroll(listState),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 20.dp),
     ) {
@@ -2528,9 +2595,11 @@ private fun GradeDetailContent(
     modifier: Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
+    val detailScrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(detailScrollState)
+            .desktopTouchScroll(detailScrollState)
             .padding(contentPadding),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -2661,12 +2730,16 @@ private fun GradeChangeNoticeDialog(
         it.kind == DataChangeKind.MODIFIED && it.beforeDetail == it.afterDetail
     }
     if (visible.isEmpty()) return
+    val changeScrollState = rememberScrollState()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("成绩变动") },
         text = {
             Column(
-                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(changeScrollState)
+                    .desktopTouchScroll(changeScrollState),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 visible.forEach { change ->

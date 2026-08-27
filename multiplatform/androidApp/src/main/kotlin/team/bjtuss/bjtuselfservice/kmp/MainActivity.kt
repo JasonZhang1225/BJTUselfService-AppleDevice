@@ -1,5 +1,7 @@
 package team.bjtuss.bjtuselfservice.kmp
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
@@ -29,6 +31,7 @@ class MainActivity : ComponentActivity() {
                 coursewareDirectoryGateway = homeworkFileGateway,
                 captchaRecognizer = captchaRecognizer,
                 nativeNavigationEnabled = true,
+                onOpenExternalUrl = ::openExternalUrl,
                 onOpenNativeRoute = { routeId ->
                     startActivity(NativeDetailActivity.intentFor(this, routeId))
                 },
@@ -40,5 +43,10 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (isFinishing) AndroidAuthenticatedSessionRegistry.update(null)
         super.onDestroy()
+    }
+
+    private fun openExternalUrl(url: String) {
+        if (!url.startsWith("https://")) return
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 }

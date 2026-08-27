@@ -9,9 +9,10 @@ internal fun homeIdleStatusText(
     homeworkFailed: Boolean,
     examFailed: Boolean,
     courseFailed: Boolean,
+    phyVlabFailed: Boolean = false,
     hasAnySource: Boolean,
 ): String {
-    val childFailed = homeworkFailed || examFailed || courseFailed
+    val childFailed = homeworkFailed || examFailed || courseFailed || phyVlabFailed
     return when {
         homeFailed -> "同步失败"
         childFailed -> "部分同步失败"

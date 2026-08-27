@@ -43,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
@@ -104,6 +105,10 @@ import team.bjtuss.bjtuselfservice.shared.data.courseware.DefaultCoursewareRepos
 import team.bjtuss.bjtuselfservice.shared.data.courseware.SchoolCoursewareRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.otherfunction.DefaultOtherFunctionRepository
 import team.bjtuss.bjtuselfservice.shared.data.otherfunction.SchoolOtherFunctionRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.DefaultPhyVlabRepository
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabSessionProtocol
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabSessionRecovery
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.SchoolPhyVlabRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.classroom.DefaultClassroomRepository
 import team.bjtuss.bjtuselfservice.shared.data.classroom.SchoolClassroomRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.classroomoccupancy.DefaultClassroomOccupancyRepository
@@ -119,10 +124,12 @@ import team.bjtuss.bjtuselfservice.shared.data.home.homeworkChangeRecorder
 import team.bjtuss.bjtuselfservice.shared.feature.course.CourseScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.exam.ExamScheduleScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.grade.AuthenticatedAppShell
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.feature.grade.GradeScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScreenModel
+import team.bjtuss.bjtuselfservice.shared.feature.phyvlab.PhyVlabScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.classroomoccupancy.ClassroomOccupancyScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
@@ -153,6 +160,7 @@ fun LoginRoute(
     captchaRecognizer: CaptchaRecognizer,
     nativeNavigationEnabled: Boolean,
     onOpenNativeRoute: (String) -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
     onAuthenticatedSessionChanged: (AuthenticatedSession?) -> Unit,
 ) {
     val transport = remember {
@@ -611,6 +619,32 @@ fun LoginRoute(
         val mailboxModel = remember(shellProfile.studentId) {
             MailboxScreenModel(transport.value)
         }
+        // 物理在线 Moodle 会话可能比 MIS/CAS 会话更早过期。保留当前登录
+        // 凭据的内存引用，让物理在线页面可以在 App 内自动恢复一次 CAS，
+        // 不把用户推到无法回传 Cookie 的系统浏览器。
+        val latestCredentials = rememberUpdatedState(Credentials(username.trim(), password))
+        val phyVlabSessionRecovery = remember(protocol.value, captchaRecognizer) {
+            PhyVlabSessionRecovery(
+                protocol = protocol.value,
+                captchaRecognizer = captchaRecognizer,
+                credentialsProvider = {
+                    latestCredentials.value.takeIf(Credentials::isValid)
+                },
+            )
+        }
+        val phyVlabRepository = remember {
+            DefaultPhyVlabRepository(SchoolPhyVlabRemoteDataSource(transport.value))
+        }
+        val phyVlabSessionProtocol = remember {
+            PhyVlabSessionProtocol(transport.value)
+        }
+        val phyVlabModel = remember(phyVlabRepository, phyVlabSessionProtocol, phyVlabSessionRecovery) {
+            PhyVlabScreenModel(
+                repository = phyVlabRepository,
+                sessionProtocol = phyVlabSessionProtocol,
+                reauthenticate = phyVlabSessionRecovery::attempt,
+            )
+        }
         val homeStatusRepository = remember(shellProfile.studentId, cacheStore) {
             DefaultHomeStatusRepository(
                 accountScope = shellProfile.studentId,
@@ -634,6 +668,7 @@ fun LoginRoute(
             settingsModel,
             appPreferences,
             mailboxModel,
+            phyVlabModel,
             homeModel,
             homeChangeFeed,
             homeworkFileGateway,
@@ -653,12 +688,14 @@ fun LoginRoute(
                 settingsModel = settingsModel,
                 loginSyncPreferences = appPreferences,
                 mailboxModel = mailboxModel,
+                phyVlabModel = phyVlabModel,
                 homeModel = homeModel,
                 homeChangeFeed = homeChangeFeed,
                 homeworkFileGateway = homeworkFileGateway,
                 coursewareDirectoryGateway = coursewareDirectoryGateway,
                 systemCalendarGateway = systemCalendarGateway,
                 onLogout = { logout(shellProfile.studentId) },
+                reauthenticatePhyVlab = phyVlabSessionRecovery::attempt,
             )
         }
         SideEffect {
@@ -674,6 +711,7 @@ fun LoginRoute(
             appCommandBus = appCommandBus,
             nativeNavigationEnabled = nativeNavigationEnabled,
             onOpenNativeRoute = onOpenNativeRoute,
+            onOpenExternalUrl = onOpenExternalUrl,
         )
         return
     }
@@ -773,7 +811,6 @@ fun LoginRoute(
         loginContent()
     }
 }
-
 @Composable
 fun LoginScreen(
     platform: PlatformInfo,
@@ -841,7 +878,8 @@ fun LoginScreen(
                 modifier = Modifier
                     .weight(3f)
                     .heightIn(max = 760.dp)
-                    .verticalScroll(scroll, enabled = !busy),
+                    .verticalScroll(scroll, enabled = !busy)
+                    .desktopTouchScroll(scroll, enabled = !busy),
             )
         }
     } else {
@@ -851,6 +889,7 @@ fun LoginScreen(
                 .platformLoginKeyboardAvoidance(enabled = !busy)
                 .then(dismissKeyboardModifier)
                 .verticalScroll(scroll, enabled = !busy)
+                .desktopTouchScroll(scroll, enabled = !busy)
                 // iOS 宿主已全屏延伸到状态栏后方；这里补回状态栏内边距，
                 // 保持与此前“宿主位于状态栏下方”一致的居中布局。Android 维持原状。
                 .then(

@@ -59,6 +59,35 @@ class SchoolLoginProtocolTest {
     }
 
     @Test
+    fun freshChallengeStartsAtCasRefreshEntryEvenWhenMisSessionMayBeActive() = runSuspend {
+        val transport = QueueTransport(
+            listOf(
+                response(
+                    "https://cas.bjtu.edu.cn/auth/login/?next=%2Fauth%2Fsso%2F%3Fnext%3D%2F",
+                ),
+                response(
+                    "https://cas.bjtu.edu.cn/auth/login/?next=%2Fauth%2Fsso%2F%3Fnext%3D%2F",
+                    """
+                        <form id="login">
+                          <input name="csrfmiddlewaretoken" value="csrf">
+                          <input id="id_captcha_0" value="cap">
+                        </form>
+                    """.trimIndent(),
+                ),
+                response("https://cas.bjtu.edu.cn/image/cap/", body = "fake-image"),
+            ),
+        )
+
+        val challenge = assertIs<ChallengeResult.Ready>(
+            SchoolLoginProtocol(transport).requestFreshCaptchaChallenge("student"),
+        ).challenge
+
+        assertEquals("cap", challenge.captchaId)
+        assertTrue(transport.requests.first().url.contains("auth%2Fsso"))
+        assertEquals("https://cas.bjtu.edu.cn/image/cap/", transport.requests.last().url)
+    }
+
+    @Test
     fun ambiguousCasResponseRecoversEstablishedMisSession() = runSuspend {
         val transport = QueueTransport(
             listOf(

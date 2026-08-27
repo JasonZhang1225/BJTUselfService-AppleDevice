@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -91,6 +92,7 @@ import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
 import team.bjtuss.bjtuselfservice.shared.feature.calendar.CourseCalendarExportSheet
 import team.bjtuss.bjtuselfservice.shared.feature.grade.courseTypeColors
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 
 /** 详情/网格等完整日名。 */
@@ -276,10 +278,12 @@ fun CourseScheduleWorkspace(
                             sheetGesturesEnabled = true,
                             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                         ) {
+                            val detailScrollState = rememberScrollState()
                             CourseDetailContent(
                                 course = course,
                                 modifier = Modifier.fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
+                                    .verticalScroll(detailScrollState)
+                                    .desktopTouchScroll(detailScrollState)
                                     .padding(horizontal = 24.dp, vertical = 8.dp)
                                     .padding(bottom = 20.dp),
                             )
@@ -298,9 +302,11 @@ fun CourseScheduleWorkspace(
             sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
+            val pickerScrollState = rememberScrollState()
             Column(
                 modifier = Modifier.fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(pickerScrollState)
+                    .desktopTouchScroll(pickerScrollState)
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -1030,8 +1036,10 @@ private fun CompactDayPager(
         pageSpacing = 12.dp,
     ) { day ->
         val byLocation = courses.groupBy(Course::courseLocationIndex)
+        val listState = rememberLazyListState()
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            modifier = Modifier.fillMaxSize().desktopTouchScroll(listState),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 18.dp),
         ) {
@@ -1354,6 +1362,7 @@ private fun CourseListCard(course: Course, onOpen: (Int) -> Unit) {
 
 @Composable
 private fun CourseDetailPanel(course: Course?, modifier: Modifier) {
+    val detailScrollState = rememberScrollState()
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.54f),
@@ -1366,7 +1375,11 @@ private fun CourseDetailPanel(course: Course?, modifier: Modifier) {
         } else {
             CourseDetailContent(
                 course = course,
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(detailScrollState)
+                    .desktopTouchScroll(detailScrollState)
+                    .padding(22.dp),
             )
         }
     }

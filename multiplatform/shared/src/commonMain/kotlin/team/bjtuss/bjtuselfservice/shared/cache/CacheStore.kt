@@ -14,6 +14,7 @@ data class AppPreferences(
     val autoSyncHomework: Boolean = true,
     val autoSyncSchedule: Boolean = true,
     val autoSyncExams: Boolean = true,
+    val autoSyncPhyVlab: Boolean = true,
     val currentWeek: Int = 0,
     val checkUpdate: Boolean = true,
     val dynamicColor: Boolean = true,
@@ -292,6 +293,7 @@ class CacheStore(
         autoSyncHomework = booleanSetting(SettingKey.AUTO_SYNC_HOMEWORK, true),
         autoSyncSchedule = booleanSetting(SettingKey.AUTO_SYNC_SCHEDULE, true),
         autoSyncExams = booleanSetting(SettingKey.AUTO_SYNC_EXAMS, true),
+        autoSyncPhyVlab = booleanSetting(SettingKey.AUTO_SYNC_PHYVLAB, true),
         currentWeek = setting(SettingKey.CURRENT_WEEK)?.toIntOrNull()?.coerceIn(0, 56) ?: 0,
         checkUpdate = booleanSetting(SettingKey.CHECK_UPDATE, true),
         dynamicColor = booleanSetting(SettingKey.DYNAMIC_COLOR, true),
@@ -304,6 +306,7 @@ class CacheStore(
             putSetting(SettingKey.AUTO_SYNC_HOMEWORK, preferences.autoSyncHomework.toString())
             putSetting(SettingKey.AUTO_SYNC_SCHEDULE, preferences.autoSyncSchedule.toString())
             putSetting(SettingKey.AUTO_SYNC_EXAMS, preferences.autoSyncExams.toString())
+            putSetting(SettingKey.AUTO_SYNC_PHYVLAB, preferences.autoSyncPhyVlab.toString())
             putSetting(SettingKey.CURRENT_WEEK, preferences.currentWeek.coerceIn(0, 56).toString())
             putSetting(SettingKey.CHECK_UPDATE, preferences.checkUpdate.toString())
             putSetting(SettingKey.DYNAMIC_COLOR, preferences.dynamicColor.toString())
@@ -451,6 +454,7 @@ private object SettingKey {
     const val AUTO_SYNC_HOMEWORK = "auto_sync_homework"
     const val AUTO_SYNC_SCHEDULE = "auto_sync_schedule"
     const val AUTO_SYNC_EXAMS = "auto_sync_exams"
+    const val AUTO_SYNC_PHYVLAB = "auto_sync_phyvlab"
     const val CURRENT_WEEK = "current_week"
     const val CHECK_UPDATE = "check_update"
     const val DYNAMIC_COLOR = "dynamic_color"

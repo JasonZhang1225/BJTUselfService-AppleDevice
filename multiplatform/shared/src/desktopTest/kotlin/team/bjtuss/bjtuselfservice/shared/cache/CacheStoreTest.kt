@@ -37,6 +37,7 @@ class CacheStoreTest {
                 AppPreferences(
                     autoSyncGrades = true,
                     autoSyncHomework = true,
+                    autoSyncPhyVlab = false,
                     currentWeek = 14,
                     checkUpdate = false,
                     dynamicColor = false,
@@ -55,6 +56,7 @@ class CacheStoreTest {
             val preferences = store.preferences()
             assertTrue(preferences.autoSyncGrades)
             assertTrue(preferences.autoSyncHomework)
+            assertFalse(preferences.autoSyncPhyVlab)
             assertEquals(14, preferences.currentWeek)
             assertFalse(preferences.checkUpdate)
             assertFalse(preferences.dynamicColor)

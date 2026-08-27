@@ -19,7 +19,7 @@ val windowsPackageDisplayName = System.getenv("WINDOWS_PACKAGE_NAME")
 val windowsPackageDescription = System.getenv("WINDOWS_PACKAGE_DESCRIPTION")
     ?.trim()
     ?.takeIf(String::isNotEmpty)
-    ?: "交大自由行 Kotlin Multiplatform Windows 应用"
+    ?: "交大自由行 Kotlin Multiplatform Windows 应用（开发版）"
 
 kotlin {
     jvm("windows") {
@@ -71,7 +71,8 @@ compose.desktop {
             // 本机中文显示名。GitHub Actions 英文代码页下 WiX light 会把中文打成
             // `?????` 并报 311，因此 CI 用 WINDOWS_PACKAGE_NAME=BJTUselfServiceKMP。
             packageName = windowsPackageDisplayName
-            packageVersion = "1.7.3"
+            // jpackage 版本必须是三段数字；1.7.4 高于已发布的 1.7.3，可触发同 UpgradeCode 的覆盖升级。
+            packageVersion = "1.7.4"
             // 英文代码页下 WiX light 311：中文 description 进不了 MSI 字符串表。
             description = windowsPackageDescription
             vendor = "BJTUselfService Contributors"

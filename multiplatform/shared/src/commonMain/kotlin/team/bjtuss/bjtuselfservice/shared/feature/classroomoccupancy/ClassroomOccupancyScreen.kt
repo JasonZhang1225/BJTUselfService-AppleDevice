@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -70,6 +72,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.classroomoccupancy.OccupancyKin
 import team.bjtuss.bjtuselfservice.shared.domain.classroomoccupancy.OccupancyWeekDate
 import team.bjtuss.bjtuselfservice.shared.domain.classroomoccupancy.SLOT_TIME_RANGES
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 
 private val weekdayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
@@ -193,8 +196,13 @@ private fun OccupancyBuildingList(
     modifier: Modifier,
 ) {
     // 与成绩/作业/更多一致：紧凑端水平 16.dp，避免卡片贴边占满屏宽。
+    val listState = rememberLazyListState()
     LazyColumn(
-        modifier = modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
+        state = listState,
+        modifier = modifier
+            .desktopTouchScroll(listState)
+            .padding(horizontal = 16.dp)
+            .padding(top = 8.dp),
         contentPadding = PaddingValues(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -423,8 +431,10 @@ private fun OccupancyDetail(
                         }
                     }
                 } else {
+                    val listState = rememberLazyListState()
                     LazyColumn(
-                        modifier = Modifier.weight(1f, fill = true),
+                        state = listState,
+                        modifier = Modifier.weight(1f, fill = true).desktopTouchScroll(listState),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(bottom = 16.dp),
                     ) {
@@ -473,9 +483,11 @@ private fun OccupancyWeekPickerSheet(
         sheetGesturesEnabled = true,
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
     ) {
+        val pickerScrollState = rememberScrollState()
         Column(
             modifier = Modifier.fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(pickerScrollState)
+                .desktopTouchScroll(pickerScrollState)
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -556,7 +568,10 @@ private fun SemesterChipsRow(
         with(density) { scrollState.scrollTo((selectedIndex * 132).dp.roundToPx()) }
     }
     Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState)
+            .desktopTouchScroll(scrollState, orientation = Orientation.Horizontal),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

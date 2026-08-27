@@ -10,19 +10,24 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
 import team.bjtuss.bjtuselfservice.shared.domain.homework.isHomeworkDueSoon
 import team.bjtuss.bjtuselfservice.shared.domain.homework.parseSchoolLocalDateTime
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+
+private val PHYVLAB_TIME_ZONE = TimeZone.of("Asia/Shanghai")
 
 data class HomeAgendaDay(
     val date: LocalDate,
     val homeworkStarting: List<Homework>,
     val homeworkDue: List<Homework>,
     val exams: List<ExamSchedule>,
+    val phyVlabEvents: List<PhyVlabEvent> = emptyList(),
 ) {
     val eventCount: Int
-        get() = homeworkStarting.size + homeworkDue.size + exams.size
+        get() = homeworkStarting.size + homeworkDue.size + exams.size + phyVlabEvents.size
 }
 
 data class HomeAgenda(
@@ -44,6 +49,7 @@ fun buildHomeAgenda(
     today: LocalDate,
     now: LocalDateTime,
     timeZone: TimeZone,
+    phyVlabEvents: List<PhyVlabEvent> = emptyList(),
 ): HomeAgenda {
     val monday = today.minus(today.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
     val days = (0..6).map { offset ->
@@ -56,6 +62,8 @@ fun buildHomeAgenda(
                 .sortedBy(Homework::endTime),
             exams = exams.filter { examDate(it) == date }
                 .sortedBy(ExamSchedule::examTimeAndPlace),
+            phyVlabEvents = phyVlabEvents.filter { phyVlabEventDate(it, timeZone) == date }
+                .sortedWith(compareBy<PhyVlabEvent> { it.dayTimestamp }.thenBy { it.title }),
         )
     }
     val dueSoon = homework.filter { isHomeworkDueSoon(it, now, timeZone) }
@@ -79,3 +87,13 @@ fun examDate(exam: ExamSchedule): LocalDate? = try {
 } catch (_: IllegalArgumentException) {
     null
 }
+
+/**
+ * Moodle 日历以北京时间当天零点的 Unix 时间戳标记安排。
+ *
+ * [timeZone] 保留在函数签名中以兼容首页议程调用方，但物理在线事件不能按设备时区
+ * 还原，否则海外设备会把北京时间零点的截止日显示成前一天。
+ */
+@Suppress("UNUSED_PARAMETER")
+fun phyVlabEventDate(event: PhyVlabEvent, timeZone: TimeZone): LocalDate? =
+    runCatching { Instant.fromEpochSeconds(event.dayTimestamp).toLocalDateTime(PHYVLAB_TIME_ZONE).date }.getOrNull()

@@ -70,6 +70,16 @@ class WebPageModelsTest {
     }
 
     @Test
+    fun allowsPhyVlabHostWithMatchingCookieDomain() {
+        val request = WebPageRequest(
+            url = "https://phyvlab.bjtu.edu.cn/course/view.php?id=74",
+            title = "物理在线",
+            cookies = listOf(cookie("phyvlab.bjtu.edu.cn")),
+        )
+        assertEquals(WebPageValidation.Allowed, SchoolWebDomainPolicy.validate(request))
+    }
+
+    @Test
     fun schoolHostDetectionIsCaseAndPortInsensitive() {
         assertTrue(SchoolWebDomainPolicy.isSchoolHost("https://AA.BJTU.EDU.CN:443/notice/"))
         assertFalse(SchoolWebDomainPolicy.isSchoolHost("https://bjtu.edu.cn.evil.com/"))

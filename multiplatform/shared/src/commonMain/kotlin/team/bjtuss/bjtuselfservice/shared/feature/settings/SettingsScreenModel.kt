@@ -62,6 +62,10 @@ class SettingsScreenModel(
         copy(autoSyncExams = enabled)
     }
 
+    fun setAutoSyncPhyVlab(enabled: Boolean) = updatePreferences {
+        copy(autoSyncPhyVlab = enabled)
+    }
+
     /** Android Material You 动态取色；其它平台设置页不展示，即使写入也无视觉效果。 */
     fun setDynamicColor(enabled: Boolean) = updatePreferences {
         copy(dynamicColor = enabled)

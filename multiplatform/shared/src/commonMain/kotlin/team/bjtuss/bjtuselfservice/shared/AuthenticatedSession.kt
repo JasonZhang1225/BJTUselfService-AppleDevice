@@ -13,6 +13,7 @@ import team.bjtuss.bjtuselfservice.shared.feature.home.HomeScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.homework.HomeworkScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScreenModel
+import team.bjtuss.bjtuselfservice.shared.feature.phyvlab.PhyVlabScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsScreenModel
 import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
@@ -39,12 +40,15 @@ class AuthenticatedSession(
     val settingsModel: SettingsScreenModel,
     val loginSyncPreferences: AppPreferences,
     val mailboxModel: MailboxScreenModel,
+    val phyVlabModel: PhyVlabScreenModel,
     val homeModel: HomeScreenModel,
     val homeChangeFeed: HomeChangeFeedRepository,
     val homeworkFileGateway: HomeworkFileGateway,
     val coursewareDirectoryGateway: CoursewareDirectoryGateway,
     val systemCalendarGateway: SystemCalendarGateway,
     val onLogout: () -> Unit,
+    /** 物理在线 Moodle 会话失效时，在 App 内复用现有 CAS 凭据恢复一次。 */
+    val reauthenticatePhyVlab: (suspend () -> Boolean)? = null,
 ) {
     /**
      * 智慧教学明文 HTTP 风险提示是否已在本登录态关闭。
@@ -72,4 +76,5 @@ fun isNativeDetailRoute(routeId: String): Boolean =
         routeId == "MAILBOX" ||
         routeId == "CALENDAR_DOWNLOAD" ||
         routeId == "REPORT_CARD_DOWNLOAD" ||
+        routeId == "PHYVLAB" ||
         routeId == "SETTINGS"

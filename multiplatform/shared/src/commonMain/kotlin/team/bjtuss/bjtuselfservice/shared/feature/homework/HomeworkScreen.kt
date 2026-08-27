@@ -78,6 +78,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.homework.HomeworkSortOrder
 import team.bjtuss.bjtuselfservice.shared.domain.homework.SubmittedHomeworkAttachment
 import team.bjtuss.bjtuselfservice.shared.domain.homework.stableKey
 import team.bjtuss.bjtuselfservice.shared.domain.homework.typeLabel
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFilePickResult
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
@@ -424,9 +425,11 @@ fun HomeworkDetailWorkspace(
 ) {
     val state by model.state.collectAsState()
     val transfer = rememberHomeworkTransferState(model, fileGateway)
+    val detailScrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(detailScrollState)
+            .desktopTouchScroll(detailScrollState)
             .padding(horizontal = 24.dp)
             .padding(top = 12.dp, bottom = 28.dp),
     ) {
@@ -622,10 +625,12 @@ private fun HomeworkFilterSheet(
     state: HomeworkUiState,
     model: HomeworkScreenModel,
 ) {
+    val filterScrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(filterScrollState)
+            .desktopTouchScroll(filterScrollState)
             .padding(horizontal = 20.dp, vertical = 8.dp)
             .padding(bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -746,7 +751,7 @@ private fun HomeworkScrollableContent(
     }
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.desktopTouchScroll(listState),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
@@ -838,7 +843,7 @@ private fun HomeworkList(
     }
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.desktopTouchScroll(listState),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
@@ -939,6 +944,7 @@ private fun HomeworkDetailContent(
     modifier: Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
+    val scrollState = rememberScrollState()
     val markdown = remember(homework, detail, submittedAttachments) {
         homeworkDetailToMarkdown(homework, detail, submittedAttachments)
     }
@@ -947,7 +953,8 @@ private fun HomeworkDetailContent(
     }
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
+            .desktopTouchScroll(scrollState)
             .padding(contentPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1172,8 +1179,12 @@ private fun UploadHomeworkContent(
     onRemoveFile: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val uploadScrollState = rememberScrollState()
     Column(
-        modifier = modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+        modifier = modifier
+            .heightIn(max = 520.dp)
+            .verticalScroll(uploadScrollState)
+            .desktopTouchScroll(uploadScrollState),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(

@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -60,6 +61,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
 import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
 import team.bjtuss.bjtuselfservice.shared.feature.calendar.SingleExamCalendarSheet
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -153,6 +155,7 @@ fun ExamScheduleWorkspace(
                             sheetGesturesEnabled = true,
                             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
                         ) {
+                            val detailScrollState = rememberScrollState()
                             ExamDetailSheetBody(
                                 exam = exam,
                                 onAddToCalendar = {
@@ -161,7 +164,8 @@ fun ExamScheduleWorkspace(
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState())
+                                    .verticalScroll(detailScrollState)
+                                    .desktopTouchScroll(detailScrollState)
                                     .padding(horizontal = 24.dp)
                                     .padding(bottom = 28.dp),
                             )
@@ -351,8 +355,10 @@ private fun ExamScrollableContent(
     onOpen: (Int) -> Unit,
     modifier: Modifier,
 ) {
+    val listState = rememberLazyListState()
     LazyColumn(
-        modifier = modifier,
+        state = listState,
+        modifier = modifier.desktopTouchScroll(listState),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
@@ -392,8 +398,10 @@ private fun ExamList(
     onOpen: (Int) -> Unit,
     modifier: Modifier,
 ) {
+    val listState = rememberLazyListState()
     LazyColumn(
-        modifier = modifier,
+        state = listState,
+        modifier = modifier.desktopTouchScroll(listState),
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(bottom = 18.dp),
     ) {
@@ -494,9 +502,11 @@ private fun ExamDetailContent(
     modifier: Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
+    val detailScrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(detailScrollState)
+            .desktopTouchScroll(detailScrollState)
             .padding(contentPadding),
     ) {
         ExamDetailSheetBody(exam, onAddToCalendar = onAddToCalendar)

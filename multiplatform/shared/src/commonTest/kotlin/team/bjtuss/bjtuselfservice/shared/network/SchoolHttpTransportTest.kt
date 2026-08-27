@@ -21,6 +21,7 @@ class SchoolHttpTransportTest {
                 "password" to "password-secret",
                 "captcha_1" to "captcha-secret",
                 "csrfmiddlewaretoken" to "csrf-secret",
+                "sesskey" to "moodle-sesskey-secret",
             ),
         ).toString()
 
@@ -32,6 +33,7 @@ class SchoolHttpTransportTest {
         assertFalse(request.contains("password-secret"))
         assertFalse(request.contains("captcha-secret"))
         assertFalse(request.contains("csrf-secret"))
+        assertFalse(request.contains("moodle-sesskey-secret"))
     }
 
     @Test

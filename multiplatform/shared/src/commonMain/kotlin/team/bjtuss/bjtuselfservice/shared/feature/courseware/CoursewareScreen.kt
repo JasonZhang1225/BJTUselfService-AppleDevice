@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -60,6 +61,7 @@ import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
 import team.bjtuss.bjtuselfservice.shared.files.CoursewareDirectoryGateway
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppErrorBanner
 import team.bjtuss.bjtuselfservice.shared.feature.shell.LegacySmartTransportWarning
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -276,6 +278,7 @@ fun CoursewareWorkspace(
             sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
+            val pickerListState = rememberLazyListState()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -292,7 +295,8 @@ fun CoursewareWorkspace(
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
                 }
                 LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    state = pickerListState,
+                    modifier = Modifier.weight(1f).fillMaxWidth().desktopTouchScroll(pickerListState),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -324,13 +328,16 @@ private fun CoursewareExpandedWorkspace(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val courseListState = rememberLazyListState()
+    val treeListState = rememberLazyListState()
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         // 三栏随窗口比例伸缩：课程约 28% / 目录约 42% / 详情约 30%。
         ElevatedCard(modifier = Modifier.weight(0.28f).fillMaxHeight()) {
             Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("课程", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    state = courseListState,
+                    modifier = Modifier.weight(1f).fillMaxWidth().desktopTouchScroll(courseListState),
                     verticalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     items(state.courses, key = CoursewareCourse::stableKey) { course ->
@@ -388,7 +395,8 @@ private fun CoursewareExpandedWorkspace(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        state = treeListState,
+                        modifier = Modifier.weight(1f).fillMaxWidth().desktopTouchScroll(treeListState),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         contentPadding = PaddingValues(bottom = 12.dp),
                     ) {
@@ -438,6 +446,7 @@ private fun CoursewareCompactWorkspace(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val compactListState = rememberLazyListState()
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // 左：引导文案；右：选课胶囊（「点击此处选择课程」）。
         Row(
@@ -537,7 +546,8 @@ private fun CoursewareCompactWorkspace(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                state = compactListState,
+                modifier = Modifier.weight(1f).fillMaxWidth().desktopTouchScroll(compactListState),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 18.dp),
             ) {
@@ -560,6 +570,7 @@ private fun CoursewareCompactWorkspace(
             sheetGesturesEnabled = true,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         ) {
+            val detailScrollState = rememberScrollState()
             CoursewareDetailSheetBody(
                 course = state.selectedCourse,
                 node = node,
@@ -570,7 +581,8 @@ private fun CoursewareCompactWorkspace(
                 onExportDirectory = onExportDirectory,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(detailScrollState)
+                    .desktopTouchScroll(detailScrollState)
                     .padding(horizontal = 24.dp)
                     .padding(bottom = 28.dp),
             )
@@ -748,9 +760,11 @@ private fun CoursewareDetailContent(
     modifier: Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
+    val detailScrollState = rememberScrollState()
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(detailScrollState)
+            .desktopTouchScroll(detailScrollState)
             .padding(contentPadding),
     ) {
         CoursewareDetailSheetBody(

@@ -43,6 +43,7 @@ import team.bjtuss.bjtuselfservice.shared.update.AppUpdateChecker
 import team.bjtuss.bjtuselfservice.shared.update.ReleaseNoteBlock
 import team.bjtuss.bjtuselfservice.shared.update.annotatedInlineMarkdown
 import team.bjtuss.bjtuselfservice.shared.update.parseReleaseNotes
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 
 @Composable
 fun SettingsWorkspace(
@@ -57,6 +58,7 @@ fun SettingsWorkspace(
     val scope = rememberCoroutineScope()
     var confirmClear by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
+    val pageScrollState = rememberScrollState()
 
     if (confirmClear) {
         AlertDialog(
@@ -80,7 +82,10 @@ fun SettingsWorkspace(
     AppUpdateResultDialog(state.updateCheck, model::dismissUpdateCheck)
 
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(
+        modifier = modifier.fillMaxSize()
+            .verticalScroll(pageScrollState)
+            .desktopTouchScroll(pageScrollState)
+            .padding(
             horizontal = if (expanded) 8.dp else 16.dp,
             vertical = 14.dp,
         ),
@@ -134,7 +139,7 @@ fun SettingsWorkspace(
             ) {
                 Text("自动同步", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "打开后，每次登录成功会先显示离线缓存，再自动拉取最新数据；首次失败会自动重试一次。",
+                    "打开后，每次登录成功会先显示离线数据，再自动拉取最新数据；物理在线会复用当前 CAS 会话建立 Moodle 会话，首次失败会自动重试一次。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -142,6 +147,7 @@ fun SettingsWorkspace(
                 AutoSyncSettingRow("自动同步作业", state.preferences.autoSyncHomework, model::setAutoSyncHomework)
                 AutoSyncSettingRow("自动同步课表", state.preferences.autoSyncSchedule, model::setAutoSyncSchedule)
                 AutoSyncSettingRow("自动同步考试", state.preferences.autoSyncExams, model::setAutoSyncExams)
+                AutoSyncSettingRow("自动同步物理在线", state.preferences.autoSyncPhyVlab, model::setAutoSyncPhyVlab)
                 if (state.saveFailed && !platformSupportsDynamicColor()) {
                     Feedback("同步设置保存失败，请重试。", true, model::dismissFeedback)
                 }
@@ -157,6 +163,11 @@ fun SettingsWorkspace(
                 Text(
                     "${platform.displayName} · KMP 迁移构建 v${AppUpdateChecker.CURRENT_VERSION}\n功能对齐基线：原安卓 v1.7.0",
                     style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "开发版 · 物理在线功能验证中，不代表正式发布版本",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
                 )
                 OutlinedButton(
                     onClick = { scope.launch { model.checkForUpdate() } },
@@ -255,6 +266,7 @@ private fun formatPublishedAt(iso: String): String =
 @Composable
 fun AppUpdateResultDialog(check: UpdateCheckState, onDismiss: () -> Unit) {
     val uriHandler = LocalUriHandler.current
+    val releaseNotesScrollState = rememberScrollState()
     when (check) {
         is UpdateCheckState.Done -> {
             if (check.hasUpdate) {
@@ -267,7 +279,8 @@ fun AppUpdateResultDialog(check: UpdateCheckState, onDismiss: () -> Unit) {
                         Column(
                             modifier = Modifier
                                 .heightIn(max = 420.dp)
-                                .verticalScroll(rememberScrollState()),
+                                .verticalScroll(releaseNotesScrollState)
+                                .desktopTouchScroll(releaseNotesScrollState),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             check.release.publishedAt?.let { publishedAt ->

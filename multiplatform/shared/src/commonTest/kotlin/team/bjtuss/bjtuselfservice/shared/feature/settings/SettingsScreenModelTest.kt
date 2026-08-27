@@ -33,12 +33,14 @@ class SettingsScreenModelTest {
         model.setAutoSyncHomework(true)
         model.setAutoSyncSchedule(true)
         model.setAutoSyncExams(true)
+        model.setAutoSyncPhyVlab(true)
 
-        assertEquals(4, saved.size)
+        assertEquals(5, saved.size)
         assertTrue(model.state.value.preferences.autoSyncGrades)
         assertTrue(model.state.value.preferences.autoSyncHomework)
         assertTrue(model.state.value.preferences.autoSyncSchedule)
         assertTrue(model.state.value.preferences.autoSyncExams)
+        assertTrue(model.state.value.preferences.autoSyncPhyVlab)
         assertFalse(model.state.value.saveFailed)
     }
 

@@ -65,6 +65,7 @@ object SchoolWebDomainPolicy {
         "bksycenter.bjtu.edu.cn",
         "dean.bjtu.edu.cn",
         "mail.bjtu.edu.cn",
+        "phyvlab.bjtu.edu.cn",
     )
 
     private fun hostOf(url: String): String = runCatching { Url(url).host.lowercase() }.getOrDefault("")

@@ -33,6 +33,7 @@ class KtorSchoolHttpTransport(
 ) : SchoolHttpTransport {
     private var cookieStorage = AcceptAllCookiesStorage()
     private var client = newClient(cookieStorage, sessionScoped = true)
+    private var rawClient = newClient(cookieStorage, sessionScoped = true, followRedirects = false)
     /**
      * 公开页旁路：无 Cookie、不进 [requestMutex]、更短超时。
      * 仅用于 bksy 校历等不依赖登录的页面；切勿用它拉 aa/CAS。
@@ -60,14 +61,21 @@ class KtorSchoolHttpTransport(
         executeOn(client, request)
     }
 
+    override suspend fun executeWithoutRedirects(request: SchoolHttpRequest): SchoolHttpResponse =
+        requestMutex.withLock {
+            executeOn(rawClient, request)
+        }
+
     override suspend fun executePublic(request: SchoolHttpRequest): SchoolHttpResponse =
         // 故意不拿 requestMutex：公开页挂起不得堵住 aa 会话查询。
         executeOn(publicClient, request)
 
     override fun clearSession() {
         client.close()
+        rawClient.close()
         cookieStorage = AcceptAllCookiesStorage()
         client = newClient(cookieStorage, sessionScoped = true)
+        rawClient = newClient(cookieStorage, sessionScoped = true, followRedirects = false)
     }
 
     private suspend fun executeOn(
@@ -87,6 +95,9 @@ class KtorSchoolHttpTransport(
                     setBody(
                         MultiPartFormDataContent(
                             formData {
+                                request.formFields.forEach { (name, value) ->
+                                    append(name, value)
+                                }
                                 request.multipartFiles.forEach { file ->
                                     append(
                                         file.fieldName,
@@ -141,8 +152,9 @@ class KtorSchoolHttpTransport(
     private fun newClient(
         storage: AcceptAllCookiesStorage,
         sessionScoped: Boolean,
+        followRedirects: Boolean = true,
     ): HttpClient = HttpClient(engineFactory) {
-        followRedirects = true
+        this.followRedirects = followRedirects
         install(HttpCookies) {
             this.storage = storage
         }

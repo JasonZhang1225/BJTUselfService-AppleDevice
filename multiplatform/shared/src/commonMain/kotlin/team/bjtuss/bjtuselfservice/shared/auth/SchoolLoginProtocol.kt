@@ -8,6 +8,8 @@ private const val MIS_SSO_URL = "https://mis.bjtu.edu.cn/auth/sso/?next=/"
 private const val MIS_HOME_URL = "https://mis.bjtu.edu.cn/home/"
 private const val CAS_LOGIN_PREFIX = "https://cas.bjtu.edu.cn/auth/login/?next="
 private const val CAS_ORIGIN = "https://cas.bjtu.edu.cn"
+private const val CAS_REFRESH_LOGIN_URL =
+    "$CAS_ORIGIN/auth/login/?next=%2Fauth%2Fsso%2F%3Fnext%3D%2F"
 private const val AA_MODULE_URL = "https://mis.bjtu.edu.cn/module/module/10/"
 private const val AA_HOME_URL = "https://aa.bjtu.edu.cn/notice/item/"
 
@@ -56,12 +58,53 @@ class SchoolLoginProtocol(
         if (!sso.finalUrl.startsWith(CAS_LOGIN_PREFIX)) {
             return ChallengeResult.Failed(LoginFailure.MALFORMED_RESPONSE)
         }
+        return loadCaptchaChallenge(
+            loginPageUrl = sso.finalUrl,
+            referer = MIS_SSO_URL,
+        )
+    }
 
+    /**
+     * 物理在线 Moodle 会话失效时使用的 CAS 恢复入口。
+     *
+     * [requestCaptchaChallenge] 为避免打断正常登录会先探测 MIS 会话；如果 MIS
+     * 仍有效，它会直接返回 SessionActive。物理在线恢复需要真正重新拿到 CAS
+     * 登录页，因此这里从 CAS 的 SSO 回调入口重新加载 challenge。
+     */
+    suspend fun requestFreshCaptchaChallenge(studentId: String): ChallengeResult {
         val loginPage = transport.execute(
             SchoolHttpRequest(
                 method = SchoolHttpMethod.GET,
-                url = sso.finalUrl,
+                url = CAS_REFRESH_LOGIN_URL,
                 headers = mapOf("Referer" to MIS_SSO_URL),
+            ),
+        )
+        if (loginPage.finalUrl.matchesEndpoint(MIS_HOME_URL)) {
+            return when (val profile = parseMisStudentProfile(loginPage.bodyText(), studentId)) {
+                is ParseResult.Success -> ChallengeResult.SessionActive(profile.value)
+                is ParseResult.Failure -> ChallengeResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+            }
+        }
+        if (!loginPage.finalUrl.startsWith(CAS_LOGIN_PREFIX)) {
+            return ChallengeResult.Failed(LoginFailure.MALFORMED_RESPONSE)
+        }
+        return loadCaptchaChallenge(
+            loginPageUrl = loginPage.finalUrl,
+            referer = CAS_REFRESH_LOGIN_URL,
+        )
+    }
+
+    private suspend fun loadCaptchaChallenge(
+        loginPageUrl: String,
+        referer: String,
+    ): ChallengeResult {
+        // The initial SSO request may already have returned the CAS HTML. Fetching
+        // the URL again follows the existing login behavior and obtains a fresh challenge.
+        val loginPage = transport.execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.GET,
+                url = loginPageUrl,
+                headers = mapOf("Referer" to referer),
             ),
         )
         val form = when (val parsed = parseCasLoginForm(loginPage.bodyText())) {
@@ -76,7 +119,7 @@ class SchoolLoginProtocol(
         }
         return ChallengeResult.Ready(
             CaptchaChallenge(
-                loginPageUrl = sso.finalUrl,
+                loginPageUrl = loginPageUrl,
                 csrfToken = form.csrfToken,
                 captchaId = form.captchaId,
                 imageBytes = image.body,

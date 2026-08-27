@@ -57,6 +57,8 @@ import team.bjtuss.bjtuselfservice.shared.domain.home.HomeChangeRecord
 import team.bjtuss.bjtuselfservice.shared.domain.home.HomeStatus
 import team.bjtuss.bjtuselfservice.shared.domain.home.buildHomeAgenda
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 
 @Composable
 fun HomeWorkspace(
@@ -65,6 +67,7 @@ fun HomeWorkspace(
     expanded: Boolean,
     homework: List<Homework>,
     exams: List<ExamSchedule>,
+    phyVlabEvents: List<PhyVlabEvent> = emptyList(),
     currentWeek: Int,
     now: LocalDateTime,
     timeZone: TimeZone,
@@ -74,6 +77,7 @@ fun HomeWorkspace(
     onOpenMailbox: () -> Unit,
     onOpenHomework: () -> Unit,
     onOpenExams: () -> Unit,
+    onOpenPhyVlab: () -> Unit = {},
     changes: List<HomeChangeRecord>,
     onClearAllChanges: () -> Unit,
     onClearChangeDomain: (HomeChangeDomain) -> Unit,
@@ -85,6 +89,7 @@ fun HomeWorkspace(
     val state by model.state.collectAsState()
     val uriHandler = LocalUriHandler.current
     val campusDestination = campusCardDestination(platform.family)
+    val pageScrollState = rememberScrollState()
     var dialog by remember { mutableStateOf<HomeDialog?>(null) }
     var selectedChangeDomain by remember { mutableStateOf<HomeChangeDomain?>(null) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
@@ -162,7 +167,10 @@ fun HomeWorkspace(
     }
 
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(
+        modifier = modifier.fillMaxSize()
+            .verticalScroll(pageScrollState)
+            .desktopTouchScroll(pageScrollState)
+            .padding(
             horizontal = if (expanded) 8.dp else 16.dp,
             vertical = 14.dp,
         ),
@@ -202,6 +210,7 @@ fun HomeWorkspace(
             HomeAgendaSection(
                 homework = homework,
                 exams = exams,
+                phyVlabEvents = phyVlabEvents,
                 currentWeek = currentWeek,
                 now = now,
                 timeZone = timeZone,
@@ -209,6 +218,7 @@ fun HomeWorkspace(
                 expanded = expanded,
                 onOpenHomework = onOpenHomework,
                 onOpenExams = onOpenExams,
+                onOpenPhyVlab = onOpenPhyVlab,
             )
         } else {
             // 紧凑页：本周日程放第一栏，新邮件保持原尺寸，两张余额卡半宽并列，
@@ -216,6 +226,7 @@ fun HomeWorkspace(
             HomeAgendaSection(
                 homework = homework,
                 exams = exams,
+                phyVlabEvents = phyVlabEvents,
                 currentWeek = currentWeek,
                 now = now,
                 timeZone = timeZone,
@@ -223,6 +234,7 @@ fun HomeWorkspace(
                 expanded = expanded,
                 onOpenHomework = onOpenHomework,
                 onOpenExams = onOpenExams,
+                onOpenPhyVlab = onOpenPhyVlab,
             )
             MailCard(status, onOpenMailbox, Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -375,6 +387,7 @@ private fun StatusCard(
 private fun HomeAgendaSection(
     homework: List<Homework>,
     exams: List<ExamSchedule>,
+    phyVlabEvents: List<PhyVlabEvent>,
     currentWeek: Int,
     now: LocalDateTime,
     timeZone: TimeZone,
@@ -382,10 +395,11 @@ private fun HomeAgendaSection(
     expanded: Boolean,
     onOpenHomework: () -> Unit,
     onOpenExams: () -> Unit,
+    onOpenPhyVlab: () -> Unit,
 ) {
     val today = now.date
-    val agenda = remember(homework, exams, today, now, timeZone) {
-        buildHomeAgenda(homework, exams, today, now, timeZone)
+    val agenda = remember(homework, exams, phyVlabEvents, today, now, timeZone) {
+        buildHomeAgenda(homework, exams, today, now, timeZone, phyVlabEvents)
     }
     var selectedDate by remember(today) { mutableStateOf(today) }
     val selectedDay = agenda.days.firstOrNull { it.date == selectedDate } ?: agenda.days.first()
@@ -428,7 +442,11 @@ private fun HomeAgendaSection(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "作业开始、截止与考试安排",
+                        if (phyVlabEvents.isEmpty()) {
+                            "作业开始、截止与考试安排"
+                        } else {
+                            "作业开始、截止与考试安排（含物理在线）"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -456,7 +474,7 @@ private fun HomeAgendaSection(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            AgendaDayDetails(selectedDay, onOpenHomework, onOpenExams)
+            AgendaDayDetails(selectedDay, onOpenHomework, onOpenExams, onOpenPhyVlab)
         }
     }
 }
@@ -530,9 +548,10 @@ private fun AgendaDayDetails(
     day: HomeAgendaDay,
     onOpenHomework: () -> Unit,
     onOpenExams: () -> Unit,
+    onOpenPhyVlab: () -> Unit,
 ) {
     if (day.eventCount == 0) {
-        Text("当天没有作业或考试。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("当天没有作业、考试或物理在线安排。", color = MaterialTheme.colorScheme.onSurfaceVariant)
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -544,6 +563,9 @@ private fun AgendaDayDetails(
         }
         day.exams.forEach { exam ->
             AgendaEventRow("考试", exam.courseName, exam.examTimeAndPlace, onOpenExams)
+        }
+        day.phyVlabEvents.forEach { event ->
+            AgendaEventRow("物理截止", event.title, event.dateText, onOpenPhyVlab)
         }
     }
 }
@@ -627,12 +649,16 @@ private fun HomeChangeDialog(
     onMarkRead: () -> Unit,
     onOpen: () -> Unit,
 ) {
+    val changeScrollState = rememberScrollState()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("${domain.title}变动") },
         text = {
             Column(
-                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(changeScrollState)
+                    .desktopTouchScroll(changeScrollState),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // 过滤历史误报：原/现展示文案完全相同的「修改」不展示。

@@ -12,12 +12,6 @@ data class SchoolHttpRequest(
     val formFields: Map<String, String> = emptyMap(),
     val multipartFiles: List<SchoolMultipartFile> = emptyList(),
 ) {
-    init {
-        require(formFields.isEmpty() || multipartFiles.isEmpty()) {
-            "formFields and multipartFiles cannot be sent in the same school request"
-        }
-    }
-
     override fun toString(): String =
         "SchoolHttpRequest(method=$method, url=${url.redactedUrl()}, headers=${headers.redactedHeaders()}, " +
             "formFields=${formFields.redactedFormFields()}, multipartFiles=${multipartFiles.redactedMultipartFiles()})"
@@ -85,6 +79,12 @@ interface SchoolHttpTransport {
     suspend fun execute(request: SchoolHttpRequest): SchoolHttpResponse
 
     /**
+     * 不自动跟随重定向的会话请求，供需要逐跳白名单验证的握手使用。
+     * 默认实现回退到 [execute]；Ktor 实现使用共享 Cookie jar 的独立客户端。
+     */
+    suspend fun executeWithoutRedirects(request: SchoolHttpRequest): SchoolHttpResponse = execute(request)
+
+    /**
      * 不依赖登录会话的公开页请求。
      *
      * 默认回退到 [execute]。[KtorSchoolHttpTransport] 用独立客户端、不占会话请求锁，
@@ -127,6 +127,11 @@ private val sensitiveFormFieldNames = setOf(
     "loginname",
     "content",
     "filelist",
+    "sesskey",
+    "itemid",
+    "ctx_id",
+    "client_id",
+    "repo_id",
 )
 
 private fun Map<String, String>.redactedFormFields(): Map<String, String> = mapValues { (name, value) ->

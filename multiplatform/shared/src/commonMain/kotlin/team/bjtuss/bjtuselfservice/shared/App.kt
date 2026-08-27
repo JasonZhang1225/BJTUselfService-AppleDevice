@@ -32,6 +32,7 @@ import team.bjtuss.bjtuselfservice.shared.auth.CaptchaRecognizer
 import team.bjtuss.bjtuselfservice.shared.auth.UnavailableCaptchaRecognizer
 import team.bjtuss.bjtuselfservice.shared.calendar.SystemCalendarGateway
 import team.bjtuss.bjtuselfservice.shared.calendar.UnavailableSystemCalendarGateway
+import team.bjtuss.bjtuselfservice.shared.webview.openExternalUrl
 
 @Composable
 fun App(
@@ -44,6 +45,7 @@ fun App(
     captchaRecognizer: CaptchaRecognizer = UnavailableCaptchaRecognizer,
     nativeNavigationEnabled: Boolean = false,
     onOpenNativeRoute: (String) -> Unit = {},
+    onOpenExternalUrl: (String) -> Unit = ::openExternalUrl,
     onAuthenticatedSessionChanged: (AuthenticatedSession?) -> Unit = {},
 ) {
     val cacheStore = cacheStoreHandle.store
@@ -81,6 +83,7 @@ fun App(
                     captchaRecognizer = captchaRecognizer,
                     nativeNavigationEnabled = nativeNavigationEnabled,
                     onOpenNativeRoute = onOpenNativeRoute,
+                    onOpenExternalUrl = onOpenExternalUrl,
                     onAuthenticatedSessionChanged = onAuthenticatedSessionChanged,
                 )
             }
@@ -97,6 +100,7 @@ fun AuthenticatedDestinationApp(
     coursewareDirectoryGateway: CoursewareDirectoryGateway = session.coursewareDirectoryGateway,
     onOpenNativeRoute: (String) -> Unit,
     onCloseNativeRoute: () -> Unit,
+    onOpenExternalUrl: (String) -> Unit = ::openExternalUrl,
 ) {
     // 跟设置页开关同一 StateFlow，切换动态取色时原生二级页也会立刻换色。
     val settingsState by session.settingsModel.state.collectAsState()
@@ -115,6 +119,7 @@ fun AuthenticatedDestinationApp(
                     ),
                     nativeNavigationEnabled = true,
                     onOpenNativeRoute = onOpenNativeRoute,
+                    onOpenExternalUrl = onOpenExternalUrl,
                     forcedRouteId = routeId,
                     onCloseNativeRoute = onCloseNativeRoute,
                     homeworkFileGatewayOverride = homeworkFileGateway,
