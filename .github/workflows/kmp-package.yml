@@ -18,7 +18,7 @@ env:
 
 jobs:
   android:
-    name: Android debug APK
+    name: Android arm64 debug APK
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,7 +37,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build debug APK
+      - name: Build arm64 debug APK
         run: |
           chmod +x ./gradlew
           ./gradlew :androidApp:assembleDebug --stacktrace
@@ -46,10 +46,15 @@ jobs:
         id: artifact
         run: |
           VERSION="$(sed -n 's/.*CURRENT_VERSION = "\([^"]*\)".*/\1/p' shared/src/commonMain/kotlin/team/bjtuss/bjtuselfservice/shared/update/AppUpdateChecker.kt | head -n 1)"
-          APK="$(find androidApp/build/outputs/apk/debug -name '*.apk' | head -n 1)"
+          APK="$(find androidApp/build/outputs/apk/debug -type f -name '*-arm64-v8a-debug.apk' | head -n 1)"
+          if [ -z "$APK" ]; then
+            echo "arm64-v8a debug APK not found"
+            find androidApp/build/outputs/apk/debug -type f -name '*.apk' -print
+            exit 1
+          fi
           test -n "$VERSION"
           test -f "$APK"
-          NAME="BJTUSelfService-KMP-${VERSION}-debug.apk"
+          NAME="BJTUSelfService-KMP-${VERSION}-arm64-v8a-debug.apk"
           cp "$APK" "$NAME"
           echo "file=$NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -272,7 +277,7 @@ jobs:
 
             | 文件 | 说明 |
             | --- | --- |
-            | `BJTUSelfService-KMP-*-debug.apk` | Android debug，包名 `team.bjtuss.bjtuselfservice.kmp` |
+            | `BJTUSelfService-KMP-*-arm64-v8a-debug.apk` | Android arm64 debug，包名 `team.bjtuss.bjtuselfservice.kmp` |
             | `BJTUSelfService-KMP-*-iOS-unsigned.ipa` | iOS 未签名，需侧载自签 |
             | `BJTUselfServiceKMP-*.dmg` | macOS Apple Silicon |
             | `BJTUselfServiceKMP-*.msi` | Windows x64 系统级安装 |

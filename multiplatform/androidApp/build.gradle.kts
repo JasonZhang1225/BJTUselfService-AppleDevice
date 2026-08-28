@@ -26,6 +26,16 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // Align with the original author's v1.7.0 APK: do not bundle
+    // PyTorch native libraries for unrelated CPU architectures.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a")
+        }
+    }
 }
 
 kotlin {
