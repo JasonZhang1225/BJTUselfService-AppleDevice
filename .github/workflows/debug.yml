@@ -9,7 +9,6 @@ on:
       - "docs/**"
       - "**/*.md"
       - ".github/workflows/kmp-package.yml"
-      - ".github/ci/**"
   workflow_dispatch:
 
 concurrency:
@@ -39,8 +38,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      - name: Use Google/Maven Central on GitHub runners
+        run: python3 .github/ci/rewrite_ci_maven_repos.py
+
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --init-script .github/ci/github-maven-fallback.init.gradle.kts
+        run: ./gradlew assembleDebug --init-script .github/ci/github-maven-fallback.init.gradle.kts --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
