@@ -3,6 +3,8 @@
 .idea/
 **/build/
 local.properties
+*.jks
+*.keystore
 
 iosApp/DerivedData/
 *.xcuserstate
