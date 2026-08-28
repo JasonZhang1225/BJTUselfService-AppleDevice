@@ -32,7 +32,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Unsigned Release APK
-        run: ./gradlew :app:assembleRelease
+        run: ./gradlew :app:assembleRelease --init-script .github/ci/github-maven-fallback.init.gradle.kts
 
       - name: Get Build Tools Version & Rename
         shell: bash
