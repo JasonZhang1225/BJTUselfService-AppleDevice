@@ -70,6 +70,8 @@ class PhyVlabHtmlParserTest {
 
         assertEquals("2026年03月12日 00:00", activity.openText)
         assertEquals("2026年03月19日 00:00", activity.dueText)
+        assertTrue(activity.openTimestamp != null)
+        assertTrue(activity.dueTimestamp != null)
     }
 
     @Test

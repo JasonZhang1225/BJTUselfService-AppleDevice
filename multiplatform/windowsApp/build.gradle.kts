@@ -19,7 +19,7 @@ val windowsPackageDisplayName = System.getenv("WINDOWS_PACKAGE_NAME")
 val windowsPackageDescription = System.getenv("WINDOWS_PACKAGE_DESCRIPTION")
     ?.trim()
     ?.takeIf(String::isNotEmpty)
-    ?: "交大自由行 Kotlin Multiplatform Windows 应用（开发版）"
+    ?: "交大自由行 Kotlin Multiplatform Windows 应用"
 
 kotlin {
     jvm("windows") {

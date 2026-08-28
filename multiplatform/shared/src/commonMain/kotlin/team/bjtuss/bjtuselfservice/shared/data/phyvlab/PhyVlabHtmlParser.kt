@@ -200,6 +200,7 @@ fun parsePhyVlabActivities(
             activityType = "作业",
             activityUrl = activityUrl,
             openText = openText,
+            openTimestamp = openText?.let(::parsePhyVlabDateTimestamp),
             dueText = dueText,
             dueTimestamp = dueText?.let(::parsePhyVlabDateTimestamp),
             completed = completed,

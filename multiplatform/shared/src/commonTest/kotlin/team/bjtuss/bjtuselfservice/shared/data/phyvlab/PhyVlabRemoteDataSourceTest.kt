@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabActivity
@@ -215,6 +216,44 @@ class PhyVlabRemoteDataSourceTest {
         assertTrue(detail.canSubmit)
         assertEquals(2, transport.requests.size)
         assertTrue(transport.requests[1].url.contains("action=editsubmission"))
+    }
+
+    @Test
+    fun keepsPrimaryDetailWhenOptionalEditPageIsUnavailable() = runBlocking {
+        val activity = PhyVlabActivity(
+            id = 3701,
+            courseId = 72,
+            courseName = "大学物理I_(2026春)",
+            title = "Chap-2-3",
+            activityType = "作业",
+            activityUrl = "https://phyvlab.bjtu.edu.cn/mod/assign/view.php?id=3701",
+        )
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                200,
+                activity.activityUrl,
+                body = """
+                    <main>
+                      <div id="intro">完成第二章练习</div>
+                      <div class="submissionstatustable"><table>
+                        <tr><th>提交状态</th><td>已提交</td></tr>
+                      </table></div>
+                    </main>
+                """.trimIndent().encodeToByteArray(),
+            ),
+            SchoolHttpResponse(
+                404,
+                "https://phyvlab.bjtu.edu.cn/mod/assign/view.php?id=3701&action=editsubmission",
+                body = "<html>not found</html>".encodeToByteArray(),
+            ),
+        )
+
+        val detail = SchoolPhyVlabRemoteDataSource(transport).fetchAssignmentDetail(activity)
+
+        assertEquals("完成第二章练习", detail.description)
+        assertEquals("已提交", detail.submissionStatus)
+        assertFalse(detail.canSubmit)
+        assertEquals(2, transport.requests.size)
     }
 
     @Test

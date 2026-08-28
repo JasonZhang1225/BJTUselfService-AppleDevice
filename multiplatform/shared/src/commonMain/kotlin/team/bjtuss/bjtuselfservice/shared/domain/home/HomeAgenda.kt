@@ -16,6 +16,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
 import team.bjtuss.bjtuselfservice.shared.domain.homework.isHomeworkDueSoon
 import team.bjtuss.bjtuselfservice.shared.domain.homework.parseSchoolLocalDateTime
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEventKind
 
 private val PHYVLAB_TIME_ZONE = TimeZone.of("Asia/Shanghai")
 
@@ -42,6 +43,7 @@ data class HomeAgenda(
 /**
  * Builds the Monday-to-Sunday agenda used by the v1.7.0 home screen.
  * A deadline at exactly 00:00 belongs to the previous calendar day, matching the Android baseline.
+ * The same rule applies to physical-online deadlines; start events remain on their actual date.
  */
 fun buildHomeAgenda(
     homework: List<Homework>,
@@ -96,4 +98,16 @@ fun examDate(exam: ExamSchedule): LocalDate? = try {
  */
 @Suppress("UNUSED_PARAMETER")
 fun phyVlabEventDate(event: PhyVlabEvent, timeZone: TimeZone): LocalDate? =
-    runCatching { Instant.fromEpochSeconds(event.dayTimestamp).toLocalDateTime(PHYVLAB_TIME_ZONE).date }.getOrNull()
+    runCatching {
+        val instant = Instant.fromEpochSeconds(event.dayTimestamp)
+        val local = instant.toLocalDateTime(PHYVLAB_TIME_ZONE)
+        val effectiveInstant = if (
+            event.kind == PhyVlabEventKind.DEADLINE &&
+            local.hour == 0 && local.minute == 0
+        ) {
+            instant.minus(1.minutes)
+        } else {
+            instant
+        }
+        effectiveInstant.toLocalDateTime(PHYVLAB_TIME_ZONE).date
+    }.getOrNull()

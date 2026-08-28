@@ -46,6 +46,8 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.isoDayNumber
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 import team.bjtuss.bjtuselfservice.shared.data.home.HomeStatusFailure
@@ -58,6 +60,7 @@ import team.bjtuss.bjtuselfservice.shared.domain.home.HomeStatus
 import team.bjtuss.bjtuselfservice.shared.domain.home.buildHomeAgenda
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEventKind
 import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 
 @Composable
@@ -565,7 +568,12 @@ private fun AgendaDayDetails(
             AgendaEventRow("考试", exam.courseName, exam.examTimeAndPlace, onOpenExams)
         }
         day.phyVlabEvents.forEach { event ->
-            AgendaEventRow("物理截止", event.title, event.dateText, onOpenPhyVlab)
+            AgendaEventRow(
+                type = if (event.kind == PhyVlabEventKind.START) "物理开始" else "物理截止",
+                title = event.title,
+                detail = formatPhyVlabAgendaDate(event),
+                onClick = onOpenPhyVlab,
+            )
         }
     }
 }
@@ -601,6 +609,20 @@ private fun weekdayShortName(date: LocalDate): String =
     listOf("一", "二", "三", "四", "五", "六", "日")[date.dayOfWeek.isoDayNumber - 1]
 
 private fun weekdayName(date: LocalDate): String = "星期${weekdayShortName(date)}"
+
+private fun formatPhyVlabAgendaDate(event: PhyVlabEvent): String {
+    if (Regex("·\\s*周[一二三四五六日]").containsMatchIn(event.dateText)) return event.dateText
+    val weekday = runCatching {
+        Instant.fromEpochSeconds(event.dayTimestamp)
+            .toLocalDateTime(TimeZone.of("Asia/Shanghai"))
+            .date
+    }.getOrNull()?.let { date -> "周${weekdayShortName(date)}" }
+    return if (weekday == null || event.dateText.isBlank()) {
+        event.dateText
+    } else {
+        "${event.dateText} · $weekday"
+    }
+}
 
 private fun shortDate(date: LocalDate): String = "${date.month.ordinal + 1}月${date.day}日"
 

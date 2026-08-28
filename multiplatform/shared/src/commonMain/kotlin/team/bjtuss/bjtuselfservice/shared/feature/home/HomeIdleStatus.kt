@@ -2,7 +2,7 @@ package team.bjtuss.bjtuselfservice.shared.feature.home
 
 /**
  * 首页顶栏同步文案。邮件/校园卡自身失败才是「同步失败」；
- * 作业/考试/课表失败单独写成「部分同步失败」，避免一条切片拖垮整页语义。
+ * 作业/考试/课表/物理在线失败单独写成「部分同步失败」，避免一条切片拖垮整页语义。
  */
 internal fun homeIdleStatusText(
     homeFailed: Boolean,

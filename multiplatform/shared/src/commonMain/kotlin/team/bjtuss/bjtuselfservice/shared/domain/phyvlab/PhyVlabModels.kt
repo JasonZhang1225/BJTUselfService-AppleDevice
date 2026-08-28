@@ -18,6 +18,7 @@ data class PhyVlabActivity(
     val activityType: String,
     val activityUrl: String,
     val openText: String? = null,
+    val openTimestamp: Long? = null,
     val dueText: String? = null,
     val dueTimestamp: Long? = null,
     val completed: Boolean = false,
@@ -41,10 +42,20 @@ data class PhyVlabAssignmentDetail(
 )
 
 /** 平台日历中的一个事件（安排）。 */
+enum class PhyVlabEventKind {
+    /** 作业开放/启动时间。 */
+    START,
+
+    /** 作业截止时间；00:00 在首页议程中归到前一天。 */
+    DEADLINE,
+}
+
 data class PhyVlabEvent(
     val id: String,
     val title: String,
     val dateText: String,
     val dayTimestamp: Long,
     val eventUrl: String? = null,
+    // 旧缓存和旧调用方没有类型信息时，按物理在线的日历截止事件处理。
+    val kind: PhyVlabEventKind = PhyVlabEventKind.DEADLINE,
 )

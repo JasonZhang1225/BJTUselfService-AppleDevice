@@ -22,8 +22,8 @@ class AppUpdateCheckerTest {
     }
 
     @Test
-    fun developmentBuildCanUpgradeThe173Base() {
-        assertTrue(AppUpdateChecker.CURRENT_VERSION.endsWith("-DEV"))
+    fun releaseVersionCanUpgradeThe173Base() {
+        assertTrue(AppUpdateChecker.CURRENT_VERSION == "1.7.4-KMP")
         assertTrue(AppUpdateChecker.compareVersions(AppUpdateChecker.CURRENT_VERSION, "1.7.3-KMP-B") > 0)
     }
 }

@@ -24,7 +24,7 @@
 
 ### 当前最优先（按顺序执行）
 - [X] **M12 课程表体验整合**（日期跳转、缓存跟随修复、列表/概览交互、课程性质色块、独立全部页与交替课程半格、Android `.ics`、iOS/macOS EventKit、考试单条加入及四端门禁均已完成）。
-- [X] **M13 物理在线（phyvlab）初步开发**（代码层首版已完成；移动端运行、真实账号上传和触摸屏仍待实机验收）。
++ [X] **M13 物理在线（phyvlab）初步开发**（代码层首版已完成；Mac 原生详情回归与详情页自适应布局已修复；移动端登录后运行、真实账号上传和触摸屏仍待实机验收）。
 
 > M5.5 登录页 UI + 验证码、M5.6 全部 UI 手动确认与真实数据验证已于 2026-08-09 由用户确认完成。当前进度细节见 `memory.md`（实时工作记忆）与 `history_full.md`（按里程碑归档的完整历史）。本文件只描述规划与验收标准。M12–M14 详细目标文档见 `docs/migration/`。
 
@@ -325,13 +325,18 @@ Apple 端曾出现模型可以生成或加载、但实际验证码识别很差�
 
 ### M13：物理在线（phyvlab）接入
 
-状态：**初步开发完成（代码层，2026-08-27）；完整验收待继续**。物理在线独立使用 Moodle OAuth2/CAS，会话、课程、作业安排、首页截止提醒、原生详情/成绩/评语与普通文件作业提交链路已接入；移动端真机、Windows 触摸屏和真实账号上传仍需验收。当前外网 HTTPS 登录页可达，不能再沿用“必须内网/VPN”的旧调研结论。范围与实现证据见 `docs/migration/m13-phyvlab-integration-plan.md` 和 `docs/migration/m13-phyvlab-integration-result.md`；浏览器管理员策略限制见 `docs/migration/phyvlab-browser-policy-limit.md`。
+状态：**初步开发完成（代码层，2026-08-27）；完整验收待继续**。物理在线独立使用 Moodle OAuth2/CAS，会话、课程、作业安排、首页截止提醒、原生详情/成绩/评语与普通文件作业提交链路已接入；macOS 已完成真实启动和登录态课程列表交互，作业详情主链路已修复并能显示真实提交信息；iOS 模拟器已构建、安装并启动到登录页，iPhoneOS arm64 unsigned 构建通过，实体 iPhone 安装/登录后验收受设备离线和 provisioning profile 阻塞；Windows 触摸屏和真实账号上传仍需验收。当前外网 HTTPS 登录页可达，不能再沿用“必须内网/VPN”的旧调研结论。范围与实现证据见 `docs/migration/m13-phyvlab-integration-plan.md` 和 `docs/migration/m13-phyvlab-integration-result.md`；浏览器管理员策略限制见 `docs/migration/phyvlab-browser-policy-limit.md`。
+
+- 2026-08-27 续补：物理在线作业的开放/截止时间均进入首页本周安排，首页截止在次日 `00:00` 时归到前一天，普通作业沿用相同规则。物理在线课程、作业、安排和已读取详情按学号写入本地快照；网络/CAS 不可达时继续显示只读缓存，物理在线顶栏显示“未同步 · 缓存”。
+- 2026-08-28：设置页移除开发版验证提示，自动同步物理在线文案改为“仅校园网”；版本统一为 `1.7.4-KMP`。物理在线窄屏列表增加水平边距，小宽度安排控件换行；紧凑窗口点击作业改走原生二级详情页，宽屏仍保留底部弹窗。
+- 2026-08-28：首页部分同步失败状态补充失败模块弹窗并在点击时主动重试；首页主动刷新、失败重试和物理在线页初始化共用一次网络同步标记，进入作业详情再返回不重复同步且保留失败状态。物理在线失败状态显示“同步失败·正显示缓存”、 “仅校园网下同步”、 “当前显示本地缓存”和缓存创建时间，横幅不再展示原始 network 诊断。
+- 2026-08-28：基于当前工作区生成 iOS Release unsigned IPA，已复制到 `/Users/zjg/Downloads`；Bundle ID 为 `team.bjtuss.bjtuselfservice.kmp.ios`，版本 `1.7.4-KMP`，Build `15`。该包未签名，不能替代真机安装所需的开发者签名。
 
 - 入口：更多 → 学业 → 物理在线（第一项）。
 - 数据：复用 App 内 CAS/MIS 会话建立 MoodleSession；课程、作业、截止安排和首页日程采用登录态 HTML 解析，REST/Mobile token 尚未确认。
 - 交互：点击作业在 App 内显示提交状态、批改成绩、教师评语和已提交文件；课程作业按 Moodle 活动 ID 默认新的在上方并支持正/逆序切换；普通 Moodle 文件作业支持显式确认后的草稿上传与提交，Unity/WebGL/quiz/选课仍交给网页。
 - 兼容：桌面主要滚动容器加入触摸拖动兼容层；Android/iOS 复用平台文件选择器；MoodleSession 失效时先在 App 内强制 CAS challenge 恢复一次，失败才要求退出并重新登录。
-- 未完成：Android SDK、emulator、API 36 AVD 与 debug APK 已在当前 Windows 主机补齐，Android 已启动并进入 Compose 登录页，但尚未用真实账号进入物理在线页；iOS/macOS 仍需 macOS/Xcode。真实上传和 UU 远程真实触摸仍未取得运行证据。
+- 未完成：Android SDK、emulator、API 36 AVD 与 debug APK 已在当前 Windows 主机补齐，Android 已启动并进入 Compose 登录页，但尚未用真实账号进入物理在线页；Mac 已通过 macOS 分发构建并完成登录态列表与原生详情交互，可编辑提交页/真实上传仍待样本；iOS 模拟器仅到登录首屏，实体 iPhone 因 `unavailable` 与 provisioning profile 缺失尚未安装。真实上传和 UU 远程真实触摸仍未取得运行证据。
 
 ### M14：Windows 桌面端移植
 

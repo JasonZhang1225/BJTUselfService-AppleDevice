@@ -524,9 +524,18 @@ abstract class FinalizeMacDmg : DefaultTask() {
             """
             use framework "Foundation"
             use framework "AppKit"
-            set img to current application's NSImage's alloc()'s initWithContentsOfFile:"${icon.absolutePath}"
-            if img is missing value then error "failed to load icon ${icon.absolutePath}"
-            set ok to current application's NSWorkspace's sharedWorkspace()'s setIcon:img forFile:"${target.absolutePath}" options:0
+            set sourceImage to current application's NSImage's alloc()'s initWithContentsOfFile:"${icon.absolutePath}"
+            if sourceImage is missing value then error "failed to load icon ${icon.absolutePath}"
+            -- Finder 自定义文件图标不应使用满幅方形 app icon；保留透明留白并裁出圆角。
+            set canvas to current application's NSImage's alloc()'s initWithSize:(current application's NSMakeSize(512, 512))
+            canvas's lockFocus()
+            current application's NSColor's clearColor()'s |set|()
+            set iconRect to current application's NSMakeRect(64, 64, 384, 384)
+            set clipPath to current application's NSBezierPath's bezierPathWithRoundedRect_xRadius_yRadius_(iconRect, 84.0, 84.0)
+            clipPath's addClip()
+            sourceImage's drawInRect_fromRect_operation_fraction_(iconRect, current application's NSZeroRect, current application's NSCompositingOperationSourceOver, 1.0)
+            canvas's unlockFocus()
+            set ok to current application's NSWorkspace's sharedWorkspace()'s setIcon:canvas forFile:"${target.absolutePath}" options:0
             if (ok as boolean) is false then error "NSWorkspace setIcon failed"
             """.trimIndent(),
         )
@@ -572,6 +581,9 @@ compose.desktop {
         val calendarHelperFile = layout.buildDirectory.file("generated/calendar/BJTUCalendarHelper")
         jvmArgs += listOf(
             "--enable-native-access=ALL-UNNAMED",
+            // `run` 直接启动 JVM，不经过打包后的 Info.plist；显式设置后 Dock
+            // 在开发运行时也与正式 .app 使用同一个中文名称。
+            "-Xdock:name=$macDisplayName",
             // 标题栏跟随系统外观（深色模式时标题栏不再保持白色）。
             "-Dapple.awt.application.appearance=system",
             "-Dbjtu.captcha.helper=${captchaBuildDirectory.get().file("BJTUCaptchaHelper").asFile.absolutePath}",
@@ -595,7 +607,7 @@ compose.desktop {
                 dockName = macDisplayName
                 appCategory = "public.app-category.education"
                 minimumSystemVersion = "12.0"
-                packageBuildVersion = "14"
+                packageBuildVersion = "15"
             }
         }
     }

@@ -33,6 +33,21 @@ class HomeIdleStatusTest {
     }
 
     @Test
+    fun onlyPhyVlabFailureIsPartial() {
+        assertEquals(
+            "部分同步失败",
+            homeIdleStatusText(
+                homeFailed = false,
+                homeworkFailed = false,
+                examFailed = false,
+                courseFailed = false,
+                phyVlabFailed = true,
+                hasAnySource = true,
+            ),
+        )
+    }
+
+    @Test
     fun noFailureWithSourceIsSynced() {
         assertEquals(
             "已同步",

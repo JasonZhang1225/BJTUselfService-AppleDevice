@@ -105,6 +105,7 @@ import team.bjtuss.bjtuselfservice.shared.data.courseware.DefaultCoursewareRepos
 import team.bjtuss.bjtuselfservice.shared.data.courseware.SchoolCoursewareRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.otherfunction.DefaultOtherFunctionRepository
 import team.bjtuss.bjtuselfservice.shared.data.otherfunction.SchoolOtherFunctionRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.CacheStorePhyVlabLocalDataSource
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.DefaultPhyVlabRepository
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabSessionProtocol
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabSessionRecovery
@@ -638,11 +639,22 @@ fun LoginRoute(
         val phyVlabSessionProtocol = remember {
             PhyVlabSessionProtocol(transport.value)
         }
-        val phyVlabModel = remember(phyVlabRepository, phyVlabSessionProtocol, phyVlabSessionRecovery) {
+        val phyVlabLocalDataSource = remember(cacheStore) {
+            CacheStorePhyVlabLocalDataSource(cacheStore)
+        }
+        val phyVlabModel = remember(
+            phyVlabRepository,
+            phyVlabSessionProtocol,
+            phyVlabSessionRecovery,
+            phyVlabLocalDataSource,
+            shellProfile.studentId,
+        ) {
             PhyVlabScreenModel(
                 repository = phyVlabRepository,
                 sessionProtocol = phyVlabSessionProtocol,
                 reauthenticate = phyVlabSessionRecovery::attempt,
+                localDataSource = phyVlabLocalDataSource,
+                accountScope = shellProfile.studentId,
             )
         }
         val homeStatusRepository = remember(shellProfile.studentId, cacheStore) {

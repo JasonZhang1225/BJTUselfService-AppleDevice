@@ -147,7 +147,7 @@ fun SettingsWorkspace(
                 AutoSyncSettingRow("自动同步作业", state.preferences.autoSyncHomework, model::setAutoSyncHomework)
                 AutoSyncSettingRow("自动同步课表", state.preferences.autoSyncSchedule, model::setAutoSyncSchedule)
                 AutoSyncSettingRow("自动同步考试", state.preferences.autoSyncExams, model::setAutoSyncExams)
-                AutoSyncSettingRow("自动同步物理在线", state.preferences.autoSyncPhyVlab, model::setAutoSyncPhyVlab)
+                AutoSyncSettingRow("自动同步物理在线（仅校园网）", state.preferences.autoSyncPhyVlab, model::setAutoSyncPhyVlab)
                 if (state.saveFailed && !platformSupportsDynamicColor()) {
                     Feedback("同步设置保存失败，请重试。", true, model::dismissFeedback)
                 }
@@ -163,11 +163,6 @@ fun SettingsWorkspace(
                 Text(
                     "${platform.displayName} · KMP 迁移构建 v${AppUpdateChecker.CURRENT_VERSION}\n功能对齐基线：原安卓 v1.7.0",
                     style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "开发版 · 物理在线功能验证中，不代表正式发布版本",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.tertiary,
                 )
                 OutlinedButton(
                     onClick = { scope.launch { model.checkForUpdate() } },

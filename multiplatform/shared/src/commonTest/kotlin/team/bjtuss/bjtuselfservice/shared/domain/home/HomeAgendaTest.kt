@@ -3,12 +3,14 @@ package team.bjtuss.bjtuselfservice.shared.domain.home
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import team.bjtuss.bjtuselfservice.shared.domain.exam.ExamSchedule
 import team.bjtuss.bjtuselfservice.shared.domain.homework.Homework
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEventKind
 
 class HomeAgendaTest {
     @Test
@@ -70,13 +72,18 @@ class HomeAgendaTest {
     }
 
     @Test
-    fun phyVlabEventsAppearOnTheirLocalCalendarDate() {
-        val event = PhyVlabEvent(
+    fun phyVlabMidnightDeadlineMovesToThePreviousDateButStartDoesNot() {
+        val deadline = PhyVlabEvent(
             id = "3115",
             title = "chap1 已到期",
             dateText = "03月19日",
             dayTimestamp = 1773849600L,
             eventUrl = "https://phyvlab.bjtu.edu.cn/mod/assign/view.php?id=3689",
+        )
+        val start = deadline.copy(
+            id = "3115-start",
+            title = "chap1 开放",
+            kind = PhyVlabEventKind.START,
         )
         val agenda = buildHomeAgenda(
             homework = emptyList(),
@@ -85,12 +92,34 @@ class HomeAgendaTest {
             now = LocalDateTime(2026, 3, 19, 10, 0),
             // 即使首页其它数据使用 UTC，物理在线事件仍按学校的北京时间归日。
             timeZone = TimeZone.UTC,
-            phyVlabEvents = listOf(event),
+            phyVlabEvents = listOf(deadline, start),
         )
 
-        val day = agenda.days.single { it.date == LocalDate(2026, 3, 19) }
-        assertEquals(listOf(event), day.phyVlabEvents)
-        assertEquals(1, day.eventCount)
+        val previousDay = agenda.days.single { it.date == LocalDate(2026, 3, 18) }
+        val actualDay = agenda.days.single { it.date == LocalDate(2026, 3, 19) }
+        assertEquals(listOf(deadline), previousDay.phyVlabEvents)
+        assertEquals(listOf(start), actualDay.phyVlabEvents)
+        assertEquals(1, previousDay.eventCount)
+        assertEquals(1, actualDay.eventCount)
+    }
+
+    @Test
+    fun phyVlabJanuaryFirstMidnightDeadlineMovesAcrossTheYearBoundary() {
+        val midnight = LocalDateTime(2026, 1, 1, 0, 0)
+            .toInstant(TimeZone.of("Asia/Shanghai"))
+            .epochSeconds
+        val deadline = PhyVlabEvent(
+            id = "new-year-deadline",
+            title = "元旦截止",
+            dateText = "2026年01月01日 00:00",
+            dayTimestamp = midnight,
+        )
+
+        assertEquals(LocalDate(2025, 12, 31), phyVlabEventDate(deadline, TimeZone.UTC))
+        assertEquals(
+            LocalDate(2026, 1, 1),
+            phyVlabEventDate(deadline.copy(kind = PhyVlabEventKind.START), TimeZone.UTC),
+        )
     }
 
     private fun homework(

@@ -91,17 +91,30 @@ class SchoolPhyVlabRemoteDataSource(
                     // 的标准编辑入口仍是该活动 id + action=editsubmission。
                     val editUrl = page.editSubmissionUrl
                         ?: "$PHYVLAB_ORIGIN/mod/assign/view.php?id=${activity.id}&action=editsubmission"
-                    val editResponse = fetchPage(editUrl, referer = activity.activityUrl)
-                    when (val editPage = parsePhyVlabAssignmentPage(editResponse.bodyText(), activity)) {
-                        is PhyVlabParseResult.Failure -> Unit
-                        is PhyVlabParseResult.Success -> {
-                            page = editPage.value.copy(
-                                detail = mergeAssignmentDetails(page.detail, editPage.value.detail),
-                            )
-                            page.submissionContext?.let { submissionContexts[activity.id] = it }
+                    val editResponse = try {
+                        fetchPage(editUrl, referer = activity.activityUrl)
+                    } catch (error: PhyVlabRemoteException) {
+                        // 编辑页只是为了补充原生上传所需的 filemanager 上下文；
+                        // 某些 Moodle 主题/作业状态会让该入口返回 404。主详情页
+                        // 已经成功时不能把这个可选请求的失败升级成详情失败。
+                        // 会话失效则必须继续向上抛出，交给统一恢复逻辑处理。
+                        if (error.reason == PhyVlabRemoteFailure.SESSION_EXPIRED) throw error
+                        phyVlabDebug("optional edit page unavailable reason=${error.reason}")
+                        null
+                    }
+                    editResponse?.let { response ->
+                        when (val editPage = parsePhyVlabAssignmentPage(response.bodyText(), activity)) {
+                            is PhyVlabParseResult.Failure -> Unit
+                            is PhyVlabParseResult.Success -> {
+                                page = editPage.value.copy(
+                                    detail = mergeAssignmentDetails(page.detail, editPage.value.detail),
+                                )
+                                page.submissionContext?.let { submissionContexts[activity.id] = it }
+                            }
                         }
                     }
                 }
+                phyVlabDebug("assignment detail ready canSubmit=${page.detail.canSubmit}")
                 page.detail
             }
         }
@@ -217,6 +230,7 @@ class SchoolPhyVlabRemoteDataSource(
     }
 
     private suspend fun fetchPage(url: String, referer: String): SchoolHttpResponse {
+        phyVlabDebug("page GET start ${safePhyVlabEndpoint(url)}")
         val response = execute(
             SchoolHttpRequest(
                 method = SchoolHttpMethod.GET,
@@ -252,7 +266,12 @@ class SchoolPhyVlabRemoteDataSource(
         transport.execute(request)
     } catch (error: CancellationException) {
         throw error
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        val causeType = error.cause?.let { it::class.simpleName }
+        phyVlabDebug(
+            "transport failed method=${request.method} endpoint=${safePhyVlabEndpoint(request.url)} " +
+                "error=${error::class.simpleName ?: "unknown"} cause=${causeType ?: "none"}",
+        )
         network()
     }
 }

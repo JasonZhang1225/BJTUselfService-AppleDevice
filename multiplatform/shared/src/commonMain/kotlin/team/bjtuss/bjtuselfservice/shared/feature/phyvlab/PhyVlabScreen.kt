@@ -1,13 +1,18 @@
 package team.bjtuss.bjtuselfservice.shared.feature.phyvlab
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,10 +20,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -30,19 +38,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabActivity
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabCourse
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEventKind
 import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.domain.homework.HomeworkFileContent
 import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGateway
@@ -57,8 +78,11 @@ fun PhyVlabWorkspace(
     // 静默自动登录期间不能抢先用空的 Ktor Cookie jar 建立 Moodle 会话。
     holdNetwork: Boolean = false,
     fileGateway: HomeworkFileGateway = UnavailableHomeworkFileGateway,
+    /** 紧凑端详情走原生二级页时，根列表不再挂出 ModalBottomSheet。 */
+    showDetailSheet: Boolean = true,
     onOpenCourse: (String) -> Unit = {},
     onOpenActivity: (String) -> Unit = {},
+    onOpenActivityDetail: (PhyVlabActivity) -> Unit = { model.showActivityDetails(it) },
     onOpenEvent: (String) -> Unit = {},
     onLogout: () -> Unit = {},
 ) {
@@ -78,8 +102,8 @@ fun PhyVlabWorkspace(
     LaunchedEffect(state.selectedCourse) {
         state.selectedCourse?.let { model.loadSelectedActivities() }
     }
-    LaunchedEffect(state.selectedActivity) {
-        if (state.selectedActivity != null) model.loadSelectedActivityDetail()
+    LaunchedEffect(state.selectedActivity, showDetailSheet) {
+        if (showDetailSheet && state.selectedActivity != null) model.loadSelectedActivityDetail()
     }
     LaunchedEffect(state.selectedActivity) {
         showUpload = false
@@ -107,14 +131,20 @@ fun PhyVlabWorkspace(
             }
             return
         }
-        state.failure?.let {
+        val failureForBanner = state.failure ?: PhyVlabSyncFailure.SESSION_EXPIRED.takeIf {
+            state.casLoginRequired && state.contentSource == PhyVlabContentSource.CACHE
+        }
+        failureForBanner?.let { failure ->
             PhyVlabFailureBanner(
-                failure = it,
-                detail = state.failureDetail,
+                failure = failure,
+                hasCachedContent = state.contentSource == PhyVlabContentSource.CACHE,
+                cachedAtEpochMillis = state.cachedAtEpochMillis,
                 onRetry = { scope.launch { model.refresh() } },
             )
         }
-        if (state.casLoginRequired) {
+        // CAS 失效时如果仍有本地快照，继续展示只读缓存；用户可从右上角重试，
+        // 不让校园网外的离线场景退化成空白/登录阻断页。
+        if (state.casLoginRequired && state.contentSource != PhyVlabContentSource.CACHE) {
             PhyVlabCasLoginRequiredState(
                 onRetry = { scope.launch { model.refresh() } },
                 onLogout = onLogout,
@@ -128,50 +158,74 @@ fun PhyVlabWorkspace(
             )
             return
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .desktopTouchScroll(listState),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item(key = "schedule") {
-                PhyVlabScheduleCard(state = state, onPrev = { scope.launch { model.changeMonth(-1) } }, onNext = { scope.launch { model.changeMonth(1) } })
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val horizontalInset = when {
+                maxWidth < 600.dp -> 16.dp
+                maxWidth < 840.dp -> 12.dp
+                else -> 0.dp
             }
-            items(state.events, key = { "event-${it.id}" }) { event ->
-                PhyVlabEventRow(event = event, onOpen = { event.eventUrl?.let(onOpenEvent) })
-            }
-            item(key = "courses") {
-                Text("我的课程", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            }
-            items(state.courses, key = { "course-${it.id}" }) { course ->
-                PhyVlabCourseRow(course = course, selected = course.id == state.selectedCourse?.id) {
-                    model.selectCourse(course)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .desktopTouchScroll(listState),
+                contentPadding = PaddingValues(horizontal = horizontalInset, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item(key = "schedule") {
+                    PhyVlabScheduleCard(state = state, onPrev = { scope.launch { model.changeMonth(-1) } }, onNext = { scope.launch { model.changeMonth(1) } })
                 }
-            }
-            item(key = "activities") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "课程作业",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { activityOrderDescending = !activityOrderDescending }) {
-                        Text(if (activityOrderDescending) "最新在前" else "最旧在前")
+                items(state.events, key = { "event-${it.id}" }) { event ->
+                    PhyVlabEventRow(event = event, onOpen = { event.eventUrl?.let(onOpenEvent) })
+                }
+                item(key = "courses") {
+                    Text("我的课程", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+                items(state.courses, key = { "course-${it.id}" }) { course ->
+                    PhyVlabCourseRow(course = course, selected = course.id == state.selectedCourse?.id) {
+                        model.selectCourse(course)
                     }
                 }
-            }
-            items(displayedActivities, key = { "activity-${it.id}" }) { activity ->
-                PhyVlabActivityRow(activity = activity, onOpen = { model.showActivityDetails(activity) })
+                item(key = "activities") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "课程作业",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Surface(
+                            onClick = { activityOrderDescending = !activityOrderDescending },
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .semantics {
+                                    contentDescription = if (activityOrderDescending) {
+                                        "排序：最新在前，点击切换为最旧在前"
+                                    } else {
+                                        "排序：最旧在前，点击切换为最新在前"
+                                    }
+                                },
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                PhyVlabSortIcon(descending = activityOrderDescending)
+                            }
+                        }
+                    }
+                }
+                items(displayedActivities, key = { "activity-${it.id}" }) { activity ->
+                    PhyVlabActivityRow(activity = activity, onOpen = { onOpenActivityDetail(activity) })
+                }
             }
         }
     }
 
-    state.selectedActivity?.let { activity ->
+    if (showDetailSheet) state.selectedActivity?.let { activity ->
         val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = model::dismissActivityDetails,
@@ -242,24 +296,141 @@ fun PhyVlabWorkspace(
     }
 }
 
+/** 紧凑端物理在线作业详情二级页；宽屏不使用此入口，仍由根列表弹出底部详情。 */
+@Composable
+fun PhyVlabDetailWorkspace(
+    model: PhyVlabScreenModel,
+    fileGateway: HomeworkFileGateway,
+    onOpenActivity: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val state by model.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    var showUpload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showUploadConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var uploadFiles by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<HomeworkFileContent>>(emptyList()) }
+    var uploadFeedback by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+
+    LaunchedEffect(model, state.selectedActivity) {
+        if (state.selectedActivity != null) model.loadSelectedActivityDetail()
+        showUpload = false
+        showUploadConfirm = false
+        uploadFiles = emptyList()
+        uploadFeedback = null
+    }
+
+    val activity = state.selectedActivity
+    if (activity == null) {
+        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("未选择物理在线作业。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    } else {
+        val selectedActivity = requireNotNull(activity)
+        PhyVlabAssignmentDetailContent(
+            activity = selectedActivity,
+            detail = state.assignmentDetail,
+            isLoading = state.isDetailLoading,
+            failure = state.detailFailure,
+            feedback = state.submissionFeedback,
+            fileGatewayAvailable = fileGateway.isAvailable,
+            fullScreen = true,
+            modifier = modifier,
+            onRetry = { scope.launch { model.loadSelectedActivityDetail(force = true) } },
+            onUpload = {
+                uploadFiles = emptyList()
+                uploadFeedback = null
+                showUpload = true
+            },
+            onOpenWeb = { onOpenActivity(selectedActivity.activityUrl) },
+        )
+    }
+
+    if (showUpload) {
+        PhyVlabUploadDialog(
+            files = uploadFiles,
+            feedback = uploadFeedback,
+            isSubmitting = state.isSubmitting,
+            onPickFiles = {
+                scope.launch {
+                    when (val result = fileGateway.pickFiles()) {
+                        HomeworkFilePickResult.Cancelled -> Unit
+                        is HomeworkFilePickResult.Failed -> uploadFeedback = "无法读取所选文件，请重新选择。"
+                        is HomeworkFilePickResult.Selected -> {
+                            uploadFiles = (uploadFiles + result.files).distinctBy { it.fileName }
+                            uploadFeedback = null
+                        }
+                    }
+                }
+            },
+            onRemoveFile = { index -> uploadFiles = uploadFiles.filterIndexed { i, _ -> i != index } },
+            onSubmit = { showUploadConfirm = true },
+            onDismiss = { if (!state.isSubmitting) showUpload = false },
+        )
+    }
+
+    if (showUploadConfirm) {
+        AlertDialog(
+            onDismissRequest = { if (!state.isSubmitting) showUploadConfirm = false },
+            title = { Text("确认提交物理在线作业？") },
+            text = { Text("将把已选择的 ${uploadFiles.size} 个文件提交到“${activity?.title.orEmpty()}”。提交后可在详情中查看最新状态。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showUploadConfirm = false
+                        showUpload = false
+                        scope.launch { model.submitSelectedActivity(uploadFiles) }
+                    },
+                    enabled = uploadFiles.isNotEmpty() && !state.isSubmitting,
+                ) { Text("确认提交") }
+            },
+            dismissButton = { TextButton(onClick = { showUploadConfirm = false }) { Text("取消") } },
+        )
+    }
+}
+
 @Composable
 private fun PhyVlabScheduleCard(state: PhyVlabUiState, onPrev: () -> Unit, onNext: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.72f),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("安排", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(
-                    state.monthLabel.ifBlank { "本月" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-                OutlinedButton(onClick = onPrev) { Text("上月") }
-                OutlinedButton(onClick = onNext, modifier = Modifier.padding(start = 8.dp)) { Text("下月") }
+        Column(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                if (maxWidth < 500.dp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("安排", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text(
+                                state.monthLabel.ifBlank { "本月" },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            OutlinedButton(onClick = onPrev) { Text("上月") }
+                            OutlinedButton(onClick = onNext, modifier = Modifier.padding(start = 8.dp)) { Text("下月") }
+                        }
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("安排", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Text(
+                            state.monthLabel.ifBlank { "本月" },
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                        OutlinedButton(onClick = onPrev) { Text("上月") }
+                        OutlinedButton(onClick = onNext, modifier = Modifier.padding(start = 8.dp)) { Text("下月") }
+                    }
+                }
             }
             if (state.events.isEmpty()) {
                 Text("本月暂无安排", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -273,8 +444,13 @@ private fun PhyVlabEventRow(event: PhyVlabEvent, onOpen: () -> Unit) {
     ElevatedCard(onClick = onOpen, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (event.kind == PhyVlabEventKind.START) "开放" else "截止",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 Text(event.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-                Text(event.dateText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatPhyVlabEventDate(event), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text("打开", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
@@ -305,14 +481,110 @@ private fun PhyVlabCourseRow(course: PhyVlabCourse, selected: Boolean, onSelect:
 
 @Composable
 private fun PhyVlabActivityRow(activity: PhyVlabActivity, onOpen: () -> Unit) {
-    ElevatedCard(onClick = onOpen, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(activity.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                activity.openText?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                activity.dueText?.let { Text("截止：$it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                Text(if (activity.completed) "已完成" else "未完成", style = MaterialTheme.typography.bodySmall, color = if (activity.completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+    val openedAt = activity.openText?.let(::formatPhyVlabDateTime)
+    val dueAt = activity.dueText?.let(::formatPhyVlabDateTime)
+    ElevatedCard(
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(activity.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (openedAt != null || dueAt != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.78f),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Text(
+                            "时间",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        openedAt?.let { PhyVlabTimeRow("开放", it) }
+                        dueAt?.let {
+                            PhyVlabTimeRow("截止", it, valueColor = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
             }
+            Surface(
+                color = if (activity.completed) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.errorContainer
+                },
+                contentColor = if (activity.completed) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onErrorContainer
+                },
+                shape = RoundedCornerShape(999.dp),
+            ) {
+                Text(
+                    if (activity.completed) "已完成" else "未完成",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhyVlabTimeRow(label: String, value: String, valueColor: Color = LocalContentColor.current) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = valueColor,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun PhyVlabSortIcon(descending: Boolean) {
+    val tint = MaterialTheme.colorScheme.onSecondaryContainer
+    Canvas(Modifier.size(22.dp)) {
+        val stroke = 1.8.dp.toPx()
+        val left = 2.dp.toPx()
+        val barTop = 4.dp.toPx()
+        val barGap = 6.dp.toPx()
+        listOf(11.dp, 8.dp, 5.dp).forEachIndexed { index, length ->
+            val y = barTop + index * barGap
+            drawLine(
+                color = tint,
+                start = Offset(left, y),
+                end = Offset(left + length.toPx(), y),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+        }
+        val arrowX = size.width - 4.dp.toPx()
+        val arrowTop = 4.dp.toPx()
+        val arrowBottom = size.height - 4.dp.toPx()
+        if (descending) {
+            drawLine(tint, Offset(arrowX, arrowTop), Offset(arrowX, arrowBottom), stroke, StrokeCap.Round)
+            drawLine(tint, Offset(arrowX - 3.dp.toPx(), arrowBottom - 3.dp.toPx()), Offset(arrowX, arrowBottom), stroke, StrokeCap.Round)
+            drawLine(tint, Offset(arrowX + 3.dp.toPx(), arrowBottom - 3.dp.toPx()), Offset(arrowX, arrowBottom), stroke, StrokeCap.Round)
+        } else {
+            drawLine(tint, Offset(arrowX, arrowBottom), Offset(arrowX, arrowTop), stroke, StrokeCap.Round)
+            drawLine(tint, Offset(arrowX - 3.dp.toPx(), arrowTop + 3.dp.toPx()), Offset(arrowX, arrowTop), stroke, StrokeCap.Round)
+            drawLine(tint, Offset(arrowX + 3.dp.toPx(), arrowTop + 3.dp.toPx()), Offset(arrowX, arrowTop), stroke, StrokeCap.Round)
         }
     }
 }
@@ -328,12 +600,16 @@ private fun PhyVlabAssignmentDetailContent(
     onRetry: () -> Unit,
     onUpload: () -> Unit,
     onOpenWeb: () -> Unit,
+    fullScreen: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
+    val openedAt = activity.openText?.let(::formatPhyVlabDateTime)
+    val dueAt = activity.dueText?.let(::formatPhyVlabDateTime)
+    val submittedAt = detail?.submissionDateText?.let(::formatPhyVlabDateTime)
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 680.dp)
+        modifier = modifier
+            .then(if (fullScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 680.dp))
             .verticalScroll(scrollState)
             .desktopTouchScroll(scrollState)
             .padding(horizontal = 24.dp, vertical = 12.dp),
@@ -341,8 +617,48 @@ private fun PhyVlabAssignmentDetailContent(
     ) {
         Text(activity.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(activity.courseName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-        activity.openText?.let { Text("开放：$it", style = MaterialTheme.typography.bodySmall) }
-        activity.dueText?.let { Text("截止：$it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        if (openedAt != null || dueAt != null || submittedAt != null || detail != null) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                // macOS 的 ModalBottomSheet 有约 640dp 的最大内容宽度；扣除 sheet 内边距后，
+                // 约 560dp 已足够让两块各自拥有舒适的半宽。手机内容宽度会自然落入单列。
+                val splitSections = maxWidth >= 560.dp && detail != null &&
+                    (openedAt != null || dueAt != null || submittedAt != null)
+                if (splitSections) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        PhyVlabTimeDetailSection(
+                            openedAt = openedAt,
+                            dueAt = dueAt,
+                            submittedAt = submittedAt,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PhyVlabSubmissionDetailSection(
+                            page = detail,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (openedAt != null || dueAt != null || submittedAt != null) {
+                            PhyVlabTimeDetailSection(
+                                openedAt = openedAt,
+                                dueAt = dueAt,
+                                submittedAt = submittedAt,
+                            )
+                        }
+                        detail?.let { page ->
+                            PhyVlabSubmissionDetailSection(page = page)
+                        }
+                    }
+                }
+            }
+        }
         feedback?.let {
             Surface(
                 color = MaterialTheme.colorScheme.secondaryContainer,
@@ -377,21 +693,24 @@ private fun PhyVlabAssignmentDetailContent(
             }
         }
         detail?.let { page ->
-            PhyVlabDetailLine("提交状态", page.submissionStatus.ifBlank { "未提供" })
-            page.submissionDateText?.let { PhyVlabDetailLine("提交时间", it) }
-            page.gradingStatus?.let { PhyVlabDetailLine("批改状态", it) }
-            PhyVlabDetailLine("批改成绩", page.gradeText?.ifBlank { "未批改" } ?: "未批改")
-            if (!page.feedbackText.isNullOrBlank()) {
-                PhyVlabDetailLine("教师评语", page.feedbackText)
-            }
             if (page.description.isNotBlank()) {
-                Text("作业要求", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(page.description, style = MaterialTheme.typography.bodyMedium)
+                PhyVlabDetailSection(
+                    title = "作业要求",
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                ) {
+                    Text(page.description, style = MaterialTheme.typography.bodyMedium)
+                }
             }
             if (page.submittedFiles.isNotEmpty()) {
-                Text("已提交文件", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                page.submittedFiles.forEach { file ->
-                    Text("• ${file.fileName}", style = MaterialTheme.typography.bodyMedium)
+                PhyVlabDetailSection(
+                    title = "已提交文件",
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    page.submittedFiles.forEach { file ->
+                        Text("• " + file.fileName, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
             if (page.canSubmit) {
@@ -404,16 +723,150 @@ private fun PhyVlabAssignmentDetailContent(
                 }
             }
         }
-        TextButton(onClick = onOpenWeb, modifier = Modifier.fillMaxWidth()) { Text("在网页中打开（备用）") }
+        FilledTonalButton(onClick = onOpenWeb, modifier = Modifier.fillMaxWidth()) {
+            Text("在网页中打开")
+        }
     }
 }
 
 @Composable
-private fun PhyVlabDetailLine(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
+private fun PhyVlabTimeDetailSection(
+    openedAt: String?,
+    dueAt: String?,
+    submittedAt: String?,
+    modifier: Modifier = Modifier,
+) {
+    PhyVlabDetailSection(
+        modifier = modifier,
+        title = "时间",
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        openedAt?.let { PhyVlabDetailLine("开放", it) }
+        dueAt?.let {
+            PhyVlabDetailLine("截止", it, valueColor = MaterialTheme.colorScheme.error)
+        }
+        submittedAt?.let { PhyVlabDetailLine("提交", it) }
     }
+}
+
+@Composable
+private fun PhyVlabSubmissionDetailSection(
+    page: team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabAssignmentDetail,
+    modifier: Modifier = Modifier,
+) {
+    PhyVlabDetailSection(
+        modifier = modifier,
+        title = "提交与批改",
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        PhyVlabDetailLine("提交状态", page.submissionStatus.ifBlank { "未提供" })
+        page.gradingStatus?.let { PhyVlabDetailLine("批改状态", it) }
+        PhyVlabDetailLine("批改成绩", page.gradeText?.ifBlank { "未批改" } ?: "未批改")
+        if (!page.feedbackText.isNullOrBlank()) {
+            PhyVlabDetailLine("教师评语", page.feedbackText)
+        }
+    }
+}
+
+@Composable
+private fun PhyVlabDetailSection(
+    modifier: Modifier = Modifier,
+    title: String,
+    containerColor: Color,
+    contentColor: Color,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                content()
+            },
+        )
+    }
+}
+
+@Composable
+private fun PhyVlabDetailLine(label: String, value: String, valueColor: Color = LocalContentColor.current) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = LocalContentColor.current.copy(alpha = 0.72f))
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val baseStyle = MaterialTheme.typography.bodyLarge
+            val maxFontSize = baseStyle.fontSize.takeIf { it != TextUnit.Unspecified } ?: 16.sp
+            val minFontSize = 13.sp
+            var fontSize by remember(value, maxWidth, maxFontSize) {
+                androidx.compose.runtime.mutableStateOf(maxFontSize)
+            }
+            Text(
+                value,
+                style = baseStyle.copy(fontSize = fontSize),
+                color = valueColor,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                onTextLayout = { result ->
+                    if (result.hasVisualOverflow && fontSize > minFontSize) {
+                        val next = (fontSize.value - 1f).coerceAtLeast(minFontSize.value).sp
+                        if (next != fontSize) fontSize = next
+                    }
+                },
+            )
+        }
+    }
+}
+
+private val phyVlabUiDatePattern = Regex(
+    """(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})""",
+)
+
+private fun formatPhyVlabDateTime(value: String): String {
+    val match = phyVlabUiDatePattern.find(value) ?: return value
+    val (year, month, day, hour, minute) = match.destructured
+    val date = runCatching {
+        LocalDate(year.toInt(), month.toInt(), day.toInt())
+    }.getOrNull() ?: return value
+    val normalized = buildString {
+        append(year)
+        append("年")
+        append(month.padStart(2, '0'))
+        append("月")
+        append(day.padStart(2, '0'))
+        append("日 ")
+        append(hour.padStart(2, '0'))
+        append(":")
+        append(minute.padStart(2, '0'))
+    }
+    return normalized + " · " + date.dayOfWeek.chineseLabel()
+}
+
+private fun formatPhyVlabEventDate(event: PhyVlabEvent): String {
+    if (Regex("周[一二三四五六日]").containsMatchIn(event.dateText)) return event.dateText
+    val weekday = runCatching {
+        Instant.fromEpochSeconds(event.dayTimestamp)
+            .toLocalDateTime(TimeZone.of("Asia/Shanghai"))
+            .dayOfWeek
+            .chineseLabel()
+    }.getOrNull() ?: return event.dateText
+    return event.dateText + " · " + weekday
+}
+
+private fun kotlinx.datetime.DayOfWeek.chineseLabel(): String = when (this) {
+    kotlinx.datetime.DayOfWeek.MONDAY -> "周一"
+    kotlinx.datetime.DayOfWeek.TUESDAY -> "周二"
+    kotlinx.datetime.DayOfWeek.WEDNESDAY -> "周三"
+    kotlinx.datetime.DayOfWeek.THURSDAY -> "周四"
+    kotlinx.datetime.DayOfWeek.FRIDAY -> "周五"
+    kotlinx.datetime.DayOfWeek.SATURDAY -> "周六"
+    kotlinx.datetime.DayOfWeek.SUNDAY -> "周日"
 }
 
 @Composable
@@ -467,7 +920,8 @@ private fun PhyVlabUploadDialog(
 @Composable
 private fun PhyVlabFailureBanner(
     failure: PhyVlabSyncFailure,
-    detail: String?,
+    hasCachedContent: Boolean,
+    cachedAtEpochMillis: Long?,
     onRetry: () -> Unit,
 ) {
     Surface(
@@ -478,27 +932,53 @@ private fun PhyVlabFailureBanner(
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    when (failure) {
-                        PhyVlabSyncFailure.NETWORK -> "网络失败，请检查网络后重试。"
+                    "失败原因：${when (failure) {
+                        PhyVlabSyncFailure.NETWORK -> "网络问题。请确认已连接到校园网。"
                         PhyVlabSyncFailure.PARSE -> "页面结构变化，暂时无法读取。"
-                        PhyVlabSyncFailure.SESSION_EXPIRED -> "物理在线会话已失效，请重新登录。"
-                    },
+                        PhyVlabSyncFailure.SESSION_EXPIRED -> "会话失效，请重新登录。"
+                    }}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
-                detail?.let {
+                Text(
+                    "仅校园网下同步",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                if (hasCachedContent) {
                     Text(
-                        text = "诊断：$it",
+                        text = "当前显示本地缓存",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Text(
+                        text = "缓存创建时间：${formatPhyVlabCacheTime(cachedAtEpochMillis) ?: "未记录"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
                 }
             }
-            // 仅显示协议层的粗粒度标签，便于定位部署差异；不显示 URL、Cookie
-            // 或 OAuth/Moodle 会话参数。
-            // 这些标签在正常成功状态下不会出现在界面上。
             TextButton(onClick = onRetry) { Text("重试") }
         }
+    }
+}
+
+private fun formatPhyVlabCacheTime(epochMillis: Long?): String? {
+    val dateTime = epochMillis?.let {
+        runCatching {
+            Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.of("Asia/Shanghai"))
+        }.getOrNull()
+    } ?: return null
+    return buildString {
+        append(dateTime.year)
+        append("年")
+        append((dateTime.month.ordinal + 1).toString().padStart(2, '0'))
+        append("月")
+        append(dateTime.day.toString().padStart(2, '0'))
+        append("日 ")
+        append(dateTime.hour.toString().padStart(2, '0'))
+        append(":")
+        append(dateTime.minute.toString().padStart(2, '0'))
     }
 }
 

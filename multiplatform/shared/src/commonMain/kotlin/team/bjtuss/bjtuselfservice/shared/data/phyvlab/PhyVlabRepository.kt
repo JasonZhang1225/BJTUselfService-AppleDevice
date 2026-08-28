@@ -1,6 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.data.phyvlab
 
 import kotlinx.coroutines.CancellationException
+import team.bjtuss.bjtuselfservice.shared.cache.CacheStore
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabActivity
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabAssignmentDetail
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabCourse
@@ -11,6 +12,37 @@ enum class PhyVlabSyncFailure {
     NETWORK,
     PARSE,
     SESSION_EXPIRED,
+}
+
+/** 物理在线列表/安排的本地快照；不包含 Cookie、sesskey 或其它短期会话字段。 */
+data class PhyVlabCacheSnapshot(
+    val courses: List<PhyVlabCourse>,
+    val activities: List<PhyVlabActivity>,
+    val events: List<PhyVlabEvent>,
+    val assignmentDetails: List<PhyVlabCachedAssignmentDetail> = emptyList(),
+    val savedAtEpochMillis: Long = 0L,
+)
+
+data class PhyVlabCachedAssignmentDetail(
+    val courseId: Int,
+    val activityId: Int,
+    val detail: PhyVlabAssignmentDetail,
+)
+
+interface PhyVlabLocalDataSource {
+    fun load(accountScope: String): PhyVlabCacheSnapshot?
+    fun replace(accountScope: String, snapshot: PhyVlabCacheSnapshot)
+}
+
+class CacheStorePhyVlabLocalDataSource(
+    private val cacheStore: CacheStore,
+) : PhyVlabLocalDataSource {
+    override fun load(accountScope: String): PhyVlabCacheSnapshot? =
+        cacheStore.metadata(accountScope, PHYVLAB_CACHE_KEY)?.let(::decodePhyVlabCache)
+
+    override fun replace(accountScope: String, snapshot: PhyVlabCacheSnapshot) {
+        cacheStore.putMetadata(accountScope, PHYVLAB_CACHE_KEY, encodePhyVlabCache(snapshot))
+    }
 }
 
 sealed interface PhyVlabCoursesResult {
@@ -112,3 +144,5 @@ private fun PhyVlabRemoteFailure.toSyncFailure(): PhyVlabSyncFailure = when (thi
     PhyVlabRemoteFailure.PARSE -> PhyVlabSyncFailure.PARSE
     PhyVlabRemoteFailure.SESSION_EXPIRED -> PhyVlabSyncFailure.SESSION_EXPIRED
 }
+
+private const val PHYVLAB_CACHE_KEY = "phyvlab_snapshot_v1"

@@ -12,6 +12,9 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabActivitiesResult
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabAssignmentDetailResult
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabCacheSnapshot
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabCachedAssignmentDetail
+import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabLocalDataSource
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabRemoteFailure
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabCoursesResult
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabEventsResult
@@ -25,15 +28,25 @@ import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabActivity
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabAssignmentDetail
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabCourse
 import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEvent
+import team.bjtuss.bjtuselfservice.shared.domain.phyvlab.PhyVlabEventKind
 import team.bjtuss.bjtuselfservice.shared.domain.homework.HomeworkFileContent
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 /** 物理在线是学校平台，页面日期和 Moodle 日历均以北京时间为准。 */
 private val PHYVLAB_TIME_ZONE = TimeZone.of("Asia/Shanghai")
 
+enum class PhyVlabContentSource {
+    NONE,
+    CACHE,
+    NETWORK,
+}
+
 data class PhyVlabUiState(
     val courses: List<PhyVlabCourse> = emptyList(),
     val events: List<PhyVlabEvent> = emptyList(),
+    /** 不受当前物理在线月视图限制，专供首页“本周安排”使用。 */
+    val agendaEvents: List<PhyVlabEvent> = emptyList(),
     val monthLabel: String = "",
     val activities: List<PhyVlabActivity> = emptyList(),
     val selectedCourse: PhyVlabCourse? = null,
@@ -47,6 +60,8 @@ data class PhyVlabUiState(
     val failure: PhyVlabSyncFailure? = null,
     val failureDetail: String? = null,
     val casLoginRequired: Boolean = false,
+    val contentSource: PhyVlabContentSource = PhyVlabContentSource.NONE,
+    val cachedAtEpochMillis: Long? = null,
 ) {
     val hasLoaded: Boolean
         get() = failure != null || courses.isNotEmpty() || selectedCourse != null || casLoginRequired
@@ -60,6 +75,8 @@ class PhyVlabScreenModel(
      * 不把用户直接送去系统浏览器；恢复失败才显示重新登录提示。
      */
     private val reauthenticate: (suspend () -> Boolean)? = null,
+    private val localDataSource: PhyVlabLocalDataSource? = null,
+    accountScope: String? = null,
 ) {
     private val mutableState = MutableStateFlow(PhyVlabUiState())
     val state: StateFlow<PhyVlabUiState> = mutableState.asStateFlow()
@@ -67,14 +84,18 @@ class PhyVlabScreenModel(
     private var lastRequestedMonthSeconds: Long? = null
     private var networkAutoSyncStarted = false
     private var sessionReady = false
+    private var cacheLoaded = false
+    private val cacheAccountScope = accountScope?.trim()?.takeIf { it.isNotEmpty() }
     private val activitiesByCourse = mutableMapOf<Int, List<PhyVlabActivity>>()
-    private var deadlineEvents: List<PhyVlabEvent> = emptyList()
+    private var scheduleEvents: List<PhyVlabEvent> = emptyList()
+    private val assignmentDetailsByActivity = mutableMapOf<ActivityCacheKey, PhyVlabAssignmentDetail>()
 
     /**
      * 登录完成后的自动同步与用户进入物理在线页共用同一个请求入口。
      * 关闭自动同步时不预取网络；用户打开物理在线页仍会按需刷新。
      */
     suspend fun initialize(refreshFromNetwork: Boolean = true) {
+        loadCachedSnapshotIfNeeded()
         if (refreshFromNetwork && !networkAutoSyncStarted) {
             networkAutoSyncStarted = true
             refresh()
@@ -84,13 +105,20 @@ class PhyVlabScreenModel(
     suspend fun refresh() {
         if (!refreshMutex.tryLock()) return
         try {
+            // 首页主动刷新、失败后的用户重试和物理在线页初始化都走这里。
+            // 只要真正进入过一次网络刷新，本次登录会话内再次进入页面就只复用
+            // 当前状态/缓存，不再因为 Workspace 重建而重复触发自动同步。
+            networkAutoSyncStarted = true
+            loadCachedSnapshotIfNeeded()
             phyVlabDebug("refresh start")
             sessionReady = false
             mutableState.value = mutableState.value.copy(isLoading = true, failure = null, casLoginRequired = false)
             when (val session = establishSessionWithRecovery()) {
                 is PhyVlabSessionResult.Failed -> {
                     phyVlabDebug("session failed reason=${session.reason} detail=${session.detail ?: "none"}")
-                    if (session.reason == PhyVlabRemoteFailure.SESSION_EXPIRED) {
+                    if (session.reason == PhyVlabRemoteFailure.SESSION_EXPIRED &&
+                        mutableState.value.contentSource != PhyVlabContentSource.CACHE
+                    ) {
                         // 即使恢复入口不可用/失败，也进入统一的“重新建立认证”状态，
                         // 不退回“没有课程→打开浏览器”的旧兜底路径。
                         mutableState.value = mutableState.value.copy(casLoginRequired = true)
@@ -118,42 +146,76 @@ class PhyVlabScreenModel(
                     return
                 }
             }
-            activitiesByCourse.clear()
-            deadlineEvents = emptyList()
-            mutableState.value = PhyVlabUiState(
-                courses = courses,
-                monthLabel = monthLabelFor(monthStart),
-                selectedCourse = courses.firstOrNull(),
-                isLoading = true,
-            )
-            lastRequestedMonthSeconds = monthStart
+            val selectedCourseId = mutableState.value.selectedCourse?.id
+            val fetchedActivitiesByCourse = linkedMapOf<Int, List<PhyVlabActivity>>()
+            val fetchedScheduleEvents = mutableListOf<PhyVlabEvent>()
+            var activityFetchFailed = false
 
-            // 课程页是服务端渲染的，作业的“到期日”比日历月视图更稳定；逐门课程读取后，
-            // 立即把已完成的课程和截止安排推到 UI，不让一个慢页面把整个物理在线页卡成空白。
+            // 课程页是服务端渲染的，作业的开放/到期时间比日历月视图更稳定；先在内存中
+            // 组成完整快照，成功后一次性替换，网络失败时才能继续可靠地显示旧缓存。
             courses.forEach { course ->
                 when (val result = repository.fetchCourseActivities(course)) {
                     is PhyVlabActivitiesResult.Success -> {
-                        activitiesByCourse[course.id] = result.activities
-                        deadlineEvents = (deadlineEvents + result.activities.mapNotNull { it.toDeadlineEvent() })
-                            .distinctBy(PhyVlabEvent::id)
-                        val selectedActivities = activitiesByCourse[mutableState.value.selectedCourse?.id].orEmpty()
-                        mutableState.value = mutableState.value.copy(
-                            activities = selectedActivities,
-                            events = eventsForMonth(deadlineEvents, monthStart),
-                        )
+                        fetchedActivitiesByCourse[course.id] = result.activities
+                        fetchedScheduleEvents += result.activities.flatMap { activity ->
+                            listOfNotNull(activity.toStartEvent(), activity.toDeadlineEvent())
+                        }
                         phyVlabDebug(
                             "course activities courseId=${course.id} count=${result.activities.size} " +
+                                "starts=${result.activities.count { it.openTimestamp != null }} " +
                                 "deadlines=${result.activities.count { it.dueTimestamp != null }}",
                         )
                     }
                     is PhyVlabActivitiesResult.Failure -> {
+                        activityFetchFailed = true
                         phyVlabDebug("course activities failed courseId=${course.id} reason=${result.reason}")
                     }
                 }
             }
+
+            // 有旧内容时，任意一门课程读取失败都保留原快照；避免把“缓存”标签贴在半截新数据上。
+            if (activityFetchFailed && (
+                    mutableState.value.courses.isNotEmpty() ||
+                        mutableState.value.contentSource == PhyVlabContentSource.CACHE
+                    )
+            ) {
+                publishFailure(PhyVlabSyncFailure.NETWORK)
+                return
+            }
+
+            activitiesByCourse.clear()
+            activitiesByCourse.putAll(fetchedActivitiesByCourse)
+            scheduleEvents = fetchedScheduleEvents.distinctBy(PhyVlabEvent::id)
+            assignmentDetailsByActivity.keys.retainAll(
+                activitiesByCourse.values.flatten().map { it.cacheKey() }.toSet(),
+            )
+            val selectedCourse = courses.firstOrNull { it.id == selectedCourseId } ?: courses.firstOrNull()
+            val syncedAt = Clock.System.now().toEpochMilliseconds()
+            mutableState.value = mutableState.value.copy(
+                courses = courses,
+                events = eventsForMonth(scheduleEvents, monthStart),
+                agendaEvents = scheduleEvents,
+                monthLabel = monthLabelFor(monthStart),
+                activities = selectedCourse?.let { activitiesByCourse[it.id].orEmpty() }.orEmpty(),
+                selectedCourse = selectedCourse,
+                selectedActivity = null,
+                assignmentDetail = null,
+                detailFailure = null,
+                submissionFeedback = null,
+                contentSource = if (activityFetchFailed) {
+                    PhyVlabContentSource.NONE
+                } else {
+                    PhyVlabContentSource.NETWORK
+                },
+                cachedAtEpochMillis = syncedAt.takeIf { !activityFetchFailed },
+                failure = PhyVlabSyncFailure.NETWORK.takeIf { activityFetchFailed },
+                failureDetail = null,
+            )
+            lastRequestedMonthSeconds = monthStart
+            if (!activityFetchFailed) persistCache(syncedAt)
             phyVlabDebug(
                 "refresh data courses=${courses.size} activities=${activitiesByCourse.values.sumOf { it.size }} " +
-                    "events=${mutableState.value.events.size}",
+                    "events=${scheduleEvents.size}",
             )
         } catch (error: CancellationException) {
             clearLoading()
@@ -170,7 +232,6 @@ class PhyVlabScreenModel(
         mutableState.value = mutableState.value.copy(
             selectedCourse = course,
             activities = activitiesByCourse[course.id].orEmpty(),
-            failure = null,
         )
     }
 
@@ -204,10 +265,7 @@ class PhyVlabScreenModel(
         )
         try {
             if (!ensureSessionForOperation()) {
-                mutableState.value = mutableState.value.copy(
-                    isDetailLoading = false,
-                    detailFailure = PhyVlabSyncFailure.SESSION_EXPIRED,
-                )
+                publishDetailFailure(activity, PhyVlabSyncFailure.SESSION_EXPIRED)
                 return
             }
             var result = repository.fetchAssignmentDetail(activity)
@@ -221,24 +279,27 @@ class PhyVlabScreenModel(
                 }
             }
             when (result) {
-                is PhyVlabAssignmentDetailResult.Success -> mutableState.value = mutableState.value.copy(
-                    assignmentDetail = result.detail,
-                    isDetailLoading = false,
-                    detailFailure = null,
-                )
-                is PhyVlabAssignmentDetailResult.Failure -> mutableState.value = mutableState.value.copy(
-                    isDetailLoading = false,
-                    detailFailure = result.reason,
-                )
+                is PhyVlabAssignmentDetailResult.Success -> {
+                    phyVlabDebug("assignment detail model success canSubmit=${result.detail.canSubmit}")
+                    mutableState.value = mutableState.value.copy(
+                        assignmentDetail = result.detail,
+                        isDetailLoading = false,
+                        detailFailure = null,
+                    )
+                    assignmentDetailsByActivity[activity.cacheKey()] = result.detail
+                    persistCache(mutableState.value.cachedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds())
+                }
+                is PhyVlabAssignmentDetailResult.Failure -> {
+                    phyVlabDebug("assignment detail model failure reason=${result.reason}")
+                    publishDetailFailure(activity, result.reason)
+                }
             }
         } catch (error: CancellationException) {
             mutableState.value = mutableState.value.copy(isDetailLoading = false)
             throw error
         } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(
-                isDetailLoading = false,
-                detailFailure = PhyVlabSyncFailure.NETWORK,
-            )
+            phyVlabDebug("assignment detail model exception")
+            publishDetailFailure(activity, PhyVlabSyncFailure.NETWORK)
         }
     }
 
@@ -304,15 +365,20 @@ class PhyVlabScreenModel(
     suspend fun changeMonth(direction: Int) {
         val base = lastRequestedMonthSeconds ?: return
         val next = beijingMonthStartSecondsSafe(base, direction) ?: return
-        lastRequestedMonthSeconds = next
         try {
             when (val result = repository.fetchEvents(next)) {
-                is PhyVlabEventsResult.Success ->
+                is PhyVlabEventsResult.Success -> {
+                    scheduleEvents = mergeEvents(scheduleEvents, result.events)
                     mutableState.value = mutableState.value.copy(
-                        events = mergeEvents(result.events, eventsForMonth(deadlineEvents, next)),
+                        events = eventsForMonth(scheduleEvents, next),
+                        agendaEvents = scheduleEvents,
                         monthLabel = monthLabelFor(next),
                         failure = null,
+                        failureDetail = null,
                     )
+                    lastRequestedMonthSeconds = next
+                    persistCache(mutableState.value.cachedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds())
+                }
                 is PhyVlabEventsResult.Failure -> publishFailure(result.reason)
             }
         } catch (error: CancellationException) {
@@ -327,14 +393,30 @@ class PhyVlabScreenModel(
             when (val result = repository.fetchCourseActivities(course)) {
                 is PhyVlabActivitiesResult.Success -> {
                     activitiesByCourse[course.id] = result.activities
+                    val activityEvents = result.activities.flatMap { activity ->
+                        listOfNotNull(activity.toStartEvent(), activity.toDeadlineEvent())
+                    }
+                    scheduleEvents = mergeEvents(
+                        scheduleEvents.filterNot { it.id.startsWith("activity-${course.id}-") },
+                        activityEvents,
+                    )
+                    val month = lastRequestedMonthSeconds ?: currentBeijingMonthStartSeconds()
+                    val refreshedAt = Clock.System.now().toEpochMilliseconds()
                     mutableState.value = mutableState.value.copy(
                         activities = result.activities,
-                        events = mergeEvents(
-                            mutableState.value.events,
-                            result.activities.mapNotNull { it.toDeadlineEvent() },
-                        ),
+                        events = eventsForMonth(scheduleEvents, month),
+                        agendaEvents = scheduleEvents,
+                        // 单门按需刷新不能宣称整份物理在线快照都已同步。
+                        contentSource = if (mutableState.value.contentSource == PhyVlabContentSource.CACHE) {
+                            PhyVlabContentSource.CACHE
+                        } else {
+                            PhyVlabContentSource.NETWORK
+                        },
+                        cachedAtEpochMillis = mutableState.value.cachedAtEpochMillis ?: refreshedAt,
                         failure = null,
+                        failureDetail = null,
                     )
+                    persistCache(mutableState.value.cachedAtEpochMillis ?: 0L)
                 }
                 is PhyVlabActivitiesResult.Failure -> publishFailure(result.reason)
             }
@@ -347,6 +429,95 @@ class PhyVlabScreenModel(
 
     private fun publishFailure(reason: PhyVlabSyncFailure, detail: String? = null) {
         mutableState.value = mutableState.value.copy(failure = reason, failureDetail = detail)
+    }
+
+    private fun publishDetailFailure(activity: PhyVlabActivity, reason: PhyVlabSyncFailure) {
+        mutableState.value = mutableState.value.copy(
+            assignmentDetail = mutableState.value.assignmentDetail
+                ?: assignmentDetailsByActivity[activity.cacheKey()],
+            isDetailLoading = false,
+            detailFailure = reason,
+        )
+    }
+
+    private fun loadCachedSnapshotIfNeeded() {
+        if (cacheLoaded) return
+        cacheLoaded = true
+        val source = localDataSource ?: return
+        val scope = cacheAccountScope ?: return
+        val snapshot = runCatching { source.load(scope) }.getOrNull() ?: return
+        if (snapshot.courses.isEmpty() && snapshot.activities.isEmpty() && snapshot.events.isEmpty() &&
+            snapshot.assignmentDetails.isEmpty()
+        ) {
+            return
+        }
+
+        activitiesByCourse.clear()
+        snapshot.activities.groupBy(PhyVlabActivity::courseId).forEach { (courseId, activities) ->
+            activitiesByCourse[courseId] = activities
+        }
+        val activityEvents = snapshot.activities.flatMap { activity ->
+            listOfNotNull(activity.toStartEvent(), activity.toDeadlineEvent())
+        }
+        scheduleEvents = mergeEvents(snapshot.events, activityEvents)
+        assignmentDetailsByActivity.clear()
+        snapshot.assignmentDetails.forEach { cached ->
+            assignmentDetailsByActivity[ActivityCacheKey(cached.courseId, cached.activityId)] = cached.detail
+        }
+        val monthStart = currentBeijingMonthStartSeconds()
+        val selectedCourse = snapshot.courses.firstOrNull()
+        mutableState.value = mutableState.value.copy(
+            courses = snapshot.courses,
+            events = eventsForMonth(scheduleEvents, monthStart),
+            agendaEvents = scheduleEvents,
+            monthLabel = monthLabelFor(monthStart),
+            activities = selectedCourse?.let { activitiesByCourse[it.id].orEmpty() }.orEmpty(),
+            selectedCourse = selectedCourse,
+            contentSource = PhyVlabContentSource.CACHE,
+            cachedAtEpochMillis = snapshot.savedAtEpochMillis.takeIf { it > 0L },
+            failure = null,
+            failureDetail = null,
+        )
+        lastRequestedMonthSeconds = monthStart
+        phyVlabDebug(
+            "cache loaded courses=${snapshot.courses.size} activities=${snapshot.activities.size} " +
+                "events=${snapshot.events.size}",
+        )
+    }
+
+    private fun persistCache(savedAtEpochMillis: Long) {
+        val source = localDataSource ?: return
+        val scope = cacheAccountScope ?: return
+        val activities = activitiesByCourse.values
+            .flatten()
+            .distinctBy { activity -> activity.courseId to activity.id }
+        val details = assignmentDetailsByActivity.map { (key, detail) ->
+            PhyVlabCachedAssignmentDetail(
+                courseId = key.courseId,
+                activityId = key.activityId,
+                // 缓存只用于离线阅读，不能把当前会话的上传能力带到下次启动。
+                detail = detail.copy(canSubmit = false),
+            )
+        }
+        runCatching {
+            source.replace(
+                scope,
+                PhyVlabCacheSnapshot(
+                    courses = mutableState.value.courses,
+                    activities = activities,
+                    events = scheduleEvents,
+                    assignmentDetails = details,
+                    savedAtEpochMillis = savedAtEpochMillis,
+                ),
+            )
+        }.onFailure { error ->
+            phyVlabDebug("cache save failed type=${error::class.simpleName}")
+        }
+    }
+
+    private fun currentBeijingMonthStartSeconds(): Long {
+        val now = Clock.System.now().toLocalDateTime(PHYVLAB_TIME_ZONE)
+        return beijingMonthStartSeconds(now.year, now.month.ordinal + 1)
     }
 
     private fun clearLoading() {
@@ -386,6 +557,25 @@ class PhyVlabScreenModel(
         }
     }
 }
+
+private data class ActivityCacheKey(
+    val courseId: Int,
+    val activityId: Int,
+)
+
+private fun PhyVlabActivity.cacheKey(): ActivityCacheKey = ActivityCacheKey(courseId, id)
+
+private fun PhyVlabActivity.toStartEvent(): PhyVlabEvent? = openTimestamp?.let { timestamp ->
+    PhyVlabEvent(
+        id = "activity-$courseId-$id-start",
+        title = "$courseName · $title",
+        dateText = openText.orEmpty(),
+        dayTimestamp = timestamp,
+        eventUrl = activityUrl,
+        kind = PhyVlabEventKind.START,
+    )
+}
+
 private fun PhyVlabActivity.toDeadlineEvent(): PhyVlabEvent? = dueTimestamp?.let { timestamp ->
     PhyVlabEvent(
         id = "activity-$courseId-$id-due",
@@ -393,6 +583,7 @@ private fun PhyVlabActivity.toDeadlineEvent(): PhyVlabEvent? = dueTimestamp?.let
         dateText = dueText.orEmpty(),
         dayTimestamp = timestamp,
         eventUrl = activityUrl,
+        kind = PhyVlabEventKind.DEADLINE,
     )
 }
 
@@ -406,7 +597,9 @@ private fun mergeEvents(
     primary: List<PhyVlabEvent>,
     secondary: List<PhyVlabEvent>,
 ): List<PhyVlabEvent> = (primary + secondary)
-    .distinctBy { event -> event.eventUrl ?: "id:${event.id}" }
+    .distinctBy { event ->
+        "${event.kind.name}:${event.eventUrl ?: "id:${event.id}"}"
+    }
     .sortedWith(compareBy<PhyVlabEvent> { it.dayTimestamp }.thenBy { it.title })
 
 private fun monthLabelFor(timestamp: Long): String = kotlin.time.Instant.fromEpochSeconds(timestamp)
