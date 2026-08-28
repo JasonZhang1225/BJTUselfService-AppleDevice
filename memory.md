@@ -14,7 +14,7 @@
 - **Windows 移植（M14）**：DPAPI 凭据保险库、%LOCALAPPDATA% 缓存、AWT 文件网关、系统浏览器、Ktor CIO、GB18030、验证码推理、品牌图标与打包链路已实现；细节见 `history_full.md`。
 - **M13 物理在线首版**：CAS/OAuth2 白名单握手、课程/作业/首页安排、按学号隔离缓存、失败提示、窄屏原生详情、自动同步“仅校园网”；Mac 真实登录态可读 3 门课、32 个活动。真实上传未执行。调研与结果见 `docs/migration/m13-phyvlab-integration-*.md`。
 - **2026-08-28 iOS unsigned IPA**：`BJTUSelfService-KMP-1.7.4-KMP-iOS-unsigned.ipa` 已放入 `/Users/zjg/Downloads`；Bundle ID `team.bjtuss.bjtuselfservice.kmp.ios`、版本 `1.7.4-KMP`、Build `15`，包内无 `_CodeSignature`。SHA-256 `796d977f659de7732577e5729c035660a96d00f71ba9a36a611b7b7b2a1776ca`。iOS Simulator Debug 已启动到版本正确的登录页；实体机缺 provisioning profile。
-- **2026-08-28 Android 共用签名**：本机 `~/.android/bjtu-kmp-upload.keystore` 与当前 Release APK 同一证书（SHA-256 `5d0dabc3…c773`）。`:androidApp` debug/release 都用这把钥匙；CI 从 `BJTU_ANDROID_KEYSTORE_BASE64` 等 Secrets 恢复。密钥文件未进 Git。`v1.7.4-KMP` APK 仍为 `BJTUSelfService-KMP-1.7.4-KMP-arm64-v8a.apk`（142,270,345 字节，SHA-256 `33eb697e042eed46040c296d852024fd9ef8dc1c5ed55c794ce106864a469c7f`）。旧 Actions 包需先卸载再装。
+- **2026-08-28 Android 共用签名**：本机 `~/.android/bjtu-kmp-upload.keystore` 与当前 Release APK 同一证书（SHA-256 `5d0dabc3…c773`）。`:androidApp` debug/release 都用这把钥匙；GitHub Secrets 已写入 `BJTU_ANDROID_KEYSTORE_BASE64` / `STORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`。密钥文件不进 Git。`v1.7.4-KMP` APK 为 `BJTUSelfService-KMP-1.7.4-KMP-arm64-v8a.apk`（142,270,345 字节）。旧 Actions 包需先卸载再装。
 - **2026-08-28 冻结 Android CI**：PR #3 合入后 `Build Debug APK`（run 33162675067）因 `maven.aliyun.com` 502 失败。已在 Actions 上改写 Maven 源为 Google/Maven Central（不改冻结 `settings.gradle.kts`），纯 KMP/文档提交不再触发这份旧打包。复跑 [33165162229](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/actions/runs/33165162229) 成功（4m49s，已上传 APK）。
 - **2026-08-27 同步失败提示收口**：首页失败胶囊同时弹出模块清单并重试；物理在线失败且有缓存时顶栏为“同步失败·正显示缓存”，横幅改为校园网说明，不再显示原始 `network` 诊断。
 - **2026-08-27 打包与图标**：`1.7.4-KMP` 四端产物曾由 CI 上传；macOS DMG 文件图标已换成圆角透明留白版本。开发版 `1.7.4-KMP-DEV` 仅作 Windows 验收副本，当前对外版本是 `1.7.4-KMP`。
@@ -24,7 +24,7 @@
 - **Windows 安装器品牌化受限**：jpackage 安装向导 UI（横幅、右上角图标、进度框）无参数可定制；安装完成后的 EXE/快捷方式/窗口/任务栏图标已是品牌 logo。若用户要完全品牌化安装向导，需引入 Inno Setup 等替代打包管线（未授权、未规划）。
 - **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1 已实验绕过；Windows 侧 Android SDK/AVD/APK 门禁已通过。Mac 侧 Xcode 27.0、iOS Simulator/iphoneos arm64 构建和 macOS arm64 分发构建均通过；iOS 模拟器已启动应用，实体机和登录后移动端仍待设备/签名条件。
 - **打包 JDK**：JBR 无 jlink/jpackage，需完整 JDK（本机 Microsoft JDK 21 `C:/Users/zjg/jdk21/jdk-21.0.8+9`，`WINDOWS_PACKAGE_JAVA_HOME` 可覆盖）。
-- **KMP Android 签名 Secrets 待写入**：Gradle/CI 已接共用钥匙，但本会话不能把 keystore 传到 GitHub Secrets。需在本机执行 `gh secret set` 写入 `BJTU_ANDROID_KEYSTORE_BASE64` / `BJTU_ANDROID_STORE_PASSWORD` / `BJTU_ANDROID_KEY_ALIAS` / `BJTU_ANDROID_KEY_PASSWORD` 后，Actions 才会签同一张证书。Windows 曾 `light.exe 311`。
+- **Windows MSI**：曾 `light.exe 311`（中文 description 进 MSI 字符串表）。KMP Android 共用上传签名已写入 GitHub Secrets（`BJTU_ANDROID_KEYSTORE_BASE64` 等四项），与本机 `~/.android/bjtu-kmp-upload.keystore` 同一把钥匙。
 - **Windows 卸载清凭据待复测**：请装带卸载清理的 MSI 后再卸，确认 AppData 缓存和注册表凭据被删。
 - **iOS 真机签名/连接**：generic iPhoneOS unsigned 构建通过，但当前 Bundle ID 没有匹配 provisioning profile；实体 iPhone 在 `devicectl` 中为 `unavailable`，合法签名、安装、Keychain 往返仍未取得证据。
 - **验证码发布级准确率仍待扩样**；课件深层变化仍缺自然样本；官方 1.7.0 / KMP PyTorch 2.1 在 API 37.1 有 16 KB page-size 提示。
