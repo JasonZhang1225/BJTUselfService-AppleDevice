@@ -1,7 +1,7 @@
 # BJTUselfService KMP 迁移工作记忆
 
 > 最后更新：2026-08-28
-> 当前分支：`windows-dev`（已快进同步 `v1.7.3-KMP-B`，M13 物理在线首版改动仍在工作区）
+> 当前分支：`fix/android-arm64-release-size`（基于远程 `main@e6ef1c5` 新建；仅处理 KMP Android arm64 APK 体积）
 > 阶段状态：**173B 基座已同步；M13 代码层初步开发完成。Mac 已完成开发包构建、真实登录态列表与作业详情交互，已修复可选编辑提交页 404 导致的详情误报，并补齐详情页宽窄屏自适应布局、中文 Dock 名称和物理在线首页安排/缓存。iOS 模拟器已安装启动到登录页，实体 iPhone 当前不可用且缺匹配 provisioning profile。原生附件提交仍待用户确认后的真实上传；触摸屏和移动端登录后运行仍待验收。当前版本为 `1.7.4-KMP`。**
 > 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B` (`a342615`)**；上一发布 `v1.7.3-KMP-A@6c69c85` 保留。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
@@ -20,6 +20,7 @@
 - **2026-08-27 开发版打包**：统一版本更新为 `1.7.4-KMP-DEV`（Android/iOS build 15；Windows/desktop jpackage 数值版本 `1.7.4`），保留 Windows UpgradeCode 以覆盖 `1.7.3`；排序与 Android 网络权限修正后的 MSI/EXE 和 Android debug APK 均已生成并复制到用户 OneDrive 桌面，安装器描述和设置页均标记“开发版”。`Program Files` 中仍是较早安装副本，需用户覆盖安装后再验收日期/排序。
 - **2026-08-27 DMG 文件图标**：最新 `BJTUselfServiceKMP-1.7.4.dmg` 已重打并复制到 `/Users/zjg/Downloads`；DMG 文件的 Finder 自定义图标改为带透明留白的圆角版本，应用本身和挂载卷图标保持原样。
 - **2026-08-27 首页安排与物理在线缓存**：物理在线作业解析并生成“开放/截止”两条首页安排；普通作业和物理在线截止若恰好为次日 `00:00`，首页均归到前一天，开放事件不平移。物理在线课程/作业/安排/已读取详情使用按学号隔离的 `CacheStore` 快照，网络或 CAS 不可达时保留只读缓存，物理在线顶栏显示“未同步 · 缓存”；不缓存 Cookie、sesskey、草稿上传上下文或可提交能力。
+- **2026-08-28 Android APK 体积修复分支**：对照原作者 `HFDLYS/BJTUselfService@v1.7.0`（正式 APK `156515923` 字节、仅 `arm64-v8a`），在 KMP Android app 增加同样的 ABI split，并让 CI 只收集/命名 arm64 debug APK；代码已提交到 `fix/android-arm64-release-size`。本机浅克隆成功，但构建在 Gradle wrapper 下载 `9.3.1` 时因当前环境网络受限而未开始，新的 APK 体积待 Actions 验证。
 - **2026-08-28 iOS unsigned IPA**：基于当前 `windows-dev` 工作区用 Xcode Release/generic iOS、`CODE_SIGNING_ALLOWED=NO` 生成并封装 `BJTUSelfService-KMP-1.7.4-KMP-iOS-unsigned.ipa`，已放入 `/Users/zjg/Downloads`；Bundle ID `team.bjtuss.bjtuselfservice.kmp.ios`、版本 `1.7.4-KMP`、Build `15`，包内无 `_CodeSignature`。SHA-256 为 `796d977f659de7732577e5729c035660a96d00f71ba9a36a611b7b7b2a1776ca`；无匹配 provisioning profile 时只能用于留档/后续签名，不能直接装实体机。
 - **2026-08-28 移动端物理在线收口**：物理在线列表在窄屏增加自适应水平边距，安排月份控件在小宽度下换行；点击作业在紧凑窗口按作业功能同样进入原生二级详情页，宽屏继续使用底部详情弹窗。设置页将自动同步文案缩为“仅校园网”，移除开发版验证提示，Android/iOS/更新检测版本统一为 `1.7.4-KMP`。iOS Simulator Debug 已重新构建、安装并启动到版本正确的登录页。
 - **2026-08-28 同步失败提示收口**：首页“部分同步失败/同步失败”胶囊点击后同时弹出失败模块清单并主动重试；清单会明确列出“物理在线（仅校园网下同步）”。物理在线失败且有缓存时，顶栏显示“同步失败·正显示缓存”，失败横幅改为“失败原因：网络问题。请确认已连接到校园网。”并标出“仅校园网下同步”“当前显示本地缓存”和缓存创建时间，不再显示原始 `network` 诊断。
