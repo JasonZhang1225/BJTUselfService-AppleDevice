@@ -6,6 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailComposeDraft
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpResponse
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpTransport
@@ -81,6 +82,53 @@ class MailboxRemoteDataSourceTest {
 
         val rawBody = assertNotNull(transport.requests[1].rawBody).decodeToString()
         assertTrue(rawBody.contains("\"fid\":-5"))
+    }
+
+    @Test
+    fun createsReplyDraftAndSendsDeliverPayloadWithoutSendingDuringCreate() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/XT/index.jsp?sid=fixture-sid",
+            ),
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/XT/jsp/compose.jsp",
+                body = """
+                    {"code":"S_OK","var":{"id":"compose-1","to":["teacher@example.test"],"subject":"Re: 课程通知","content":"<br><blockquote>原文</blockquote>"}}
+                """.trimIndent().encodeToByteArray(),
+            ),
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/s/json",
+                body = "{\"code\":\"S_OK\",\"var\":{}}".encodeToByteArray(),
+            ),
+        )
+        val remote = SchoolMailboxRemoteDataSource(transport)
+
+        val draft = remote.beginCompose(replyToMessageId = "message-1")
+        assertEquals(
+            MailComposeDraft(
+                id = "compose-1",
+                to = "teacher@example.test",
+                subject = "Re: 课程通知",
+                bodyText = "原文",
+                replyToMessageId = "message-1",
+                isReply = true,
+            ),
+            draft,
+        )
+
+        remote.sendMessage(draft.copy(bodyText = "收到\n谢谢"))
+
+        assertEquals(3, transport.requests.size)
+        val createRequest = transport.requests[1]
+        assertEquals("reply", createRequest.formFields["ctype"])
+        assertEquals("message-1", createRequest.formFields["mid"])
+        val sendBody = transport.requests[2].rawBody!!.decodeToString()
+        assertTrue(sendBody.contains("\"action\":\"deliver\""))
+        assertTrue(sendBody.contains("\"ctype\":\"reply\""))
+        assertTrue(sendBody.contains("收到<br>谢谢"))
     }
 
     private fun listResponse(): String =

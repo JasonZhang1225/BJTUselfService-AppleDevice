@@ -69,13 +69,22 @@ android {
         }
     }
 
-    // Align with the original author's v1.7.0 APK: do not bundle
-    // PyTorch native libraries for unrelated CPU architectures.
+    // Align with the original author's v1.7.0 APK: release builds default to
+    // arm64 only. A verifier can opt into an emulator ABI without changing
+    // the published default, for example BJTU_ANDROID_ABIS=arm64-v8a,x86_64.
+    val requestedAbis = providers.environmentVariable("BJTU_ANDROID_ABIS")
+        .orNull
+        ?.split(',', ';', ' ')
+        ?.map(String::trim)
+        ?.filter(String::isNotEmpty)
+        ?.distinct()
+        ?.takeIf { it.isNotEmpty() }
+        ?: listOf("arm64-v8a")
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a")
+            include(*requestedAbis.toTypedArray())
         }
     }
 }

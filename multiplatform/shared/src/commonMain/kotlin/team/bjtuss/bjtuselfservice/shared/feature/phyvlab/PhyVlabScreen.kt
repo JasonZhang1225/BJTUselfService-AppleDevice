@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -53,10 +55,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Clock
 import kotlin.time.Instant
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.phyvlab.PhyVlabSyncFailure
@@ -95,6 +99,7 @@ fun PhyVlabWorkspace(
     var activityOrderDescending by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
     val listState = rememberLazyListState()
     val displayedActivities = orderPhyVlabActivities(state.activities, activityOrderDescending)
+    val nowEpochSeconds = rememberPhyVlabNowEpochSeconds()
 
     LaunchedEffect(model, holdNetwork) {
         if (!holdNetwork) model.initialize()
@@ -219,7 +224,11 @@ fun PhyVlabWorkspace(
                     }
                 }
                 items(displayedActivities, key = { "activity-${it.id}" }) { activity ->
-                    PhyVlabActivityRow(activity = activity, onOpen = { onOpenActivityDetail(activity) })
+                    PhyVlabActivityRow(
+                        activity = activity,
+                        nowEpochSeconds = nowEpochSeconds,
+                        onOpen = { onOpenActivityDetail(activity) },
+                    )
                 }
             }
         }
@@ -240,6 +249,7 @@ fun PhyVlabWorkspace(
                 failure = state.detailFailure,
                 feedback = state.submissionFeedback,
                 fileGatewayAvailable = fileGateway.isAvailable,
+                nowEpochSeconds = nowEpochSeconds,
                 onRetry = { scope.launch { model.loadSelectedActivityDetail(force = true) } },
                 onUpload = {
                     uploadFiles = emptyList()
@@ -310,6 +320,7 @@ fun PhyVlabDetailWorkspace(
     var showUploadConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var uploadFiles by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<HomeworkFileContent>>(emptyList()) }
     var uploadFeedback by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val nowEpochSeconds = rememberPhyVlabNowEpochSeconds()
 
     LaunchedEffect(model, state.selectedActivity) {
         if (state.selectedActivity != null) model.loadSelectedActivityDetail()
@@ -333,6 +344,7 @@ fun PhyVlabDetailWorkspace(
             failure = state.detailFailure,
             feedback = state.submissionFeedback,
             fileGatewayAvailable = fileGateway.isAvailable,
+            nowEpochSeconds = nowEpochSeconds,
             fullScreen = true,
             modifier = modifier,
             onRetry = { scope.launch { model.loadSelectedActivityDetail(force = true) } },
@@ -480,9 +492,15 @@ private fun PhyVlabCourseRow(course: PhyVlabCourse, selected: Boolean, onSelect:
 }
 
 @Composable
-private fun PhyVlabActivityRow(activity: PhyVlabActivity, onOpen: () -> Unit) {
+private fun PhyVlabActivityRow(
+    activity: PhyVlabActivity,
+    nowEpochSeconds: Long,
+    onOpen: () -> Unit,
+) {
     val openedAt = activity.openText?.let(::formatPhyVlabDateTime)
     val dueAt = activity.dueText?.let(::formatPhyVlabDateTime)
+    val deadlineState = phyVlabActivityDeadlineState(activity, nowEpochSeconds)
+    val statusPalette = phyVlabActivityStatusPalette(deadlineState)
     ElevatedCard(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth(),
@@ -511,27 +529,42 @@ private fun PhyVlabActivityRow(activity: PhyVlabActivity, onOpen: () -> Unit) {
                         )
                         openedAt?.let { PhyVlabTimeRow("开放", it) }
                         dueAt?.let {
-                            PhyVlabTimeRow("截止", it, valueColor = MaterialTheme.colorScheme.error)
+                            PhyVlabTimeRow(
+                                label = "截止",
+                                value = it,
+                                valueColor = statusPalette.content,
+                                 valueFontWeight = if (
+                                     deadlineState == PhyVlabActivityDeadlineState.OVERDUE ||
+                                     deadlineState == PhyVlabActivityDeadlineState.LATE_SUBMITTED
+                                 ) {
+                                    FontWeight.Bold
+                                } else {
+                                    FontWeight.Normal
+                                },
+                            )
                         }
                     }
                 }
             }
             Surface(
-                color = if (activity.completed) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.errorContainer
-                },
-                contentColor = if (activity.completed) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onErrorContainer
-                },
+                color = statusPalette.container,
+                contentColor = statusPalette.content,
                 shape = RoundedCornerShape(999.dp),
+                modifier = Modifier.semantics {
+                    contentDescription = phyVlabActivityStatusDescription(deadlineState)
+                },
             ) {
                 Text(
-                    if (activity.completed) "已完成" else "未完成",
+                    phyVlabActivityStatusLabel(deadlineState),
                     style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (
+                        deadlineState == PhyVlabActivityDeadlineState.OVERDUE ||
+                        deadlineState == PhyVlabActivityDeadlineState.LATE_SUBMITTED
+                    ) {
+                        FontWeight.Bold
+                    } else {
+                        FontWeight.SemiBold
+                    },
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                 )
             }
@@ -539,8 +572,75 @@ private fun PhyVlabActivityRow(activity: PhyVlabActivity, onOpen: () -> Unit) {
     }
 }
 
+private data class PhyVlabStatusPalette(
+    val container: Color,
+    val content: Color,
+)
+
 @Composable
-private fun PhyVlabTimeRow(label: String, value: String, valueColor: Color = LocalContentColor.current) {
+private fun phyVlabActivityStatusPalette(
+    state: PhyVlabActivityDeadlineState,
+): PhyVlabStatusPalette {
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return when (state) {
+        PhyVlabActivityDeadlineState.SUBMITTED -> PhyVlabStatusPalette(
+            container = if (darkTheme) Color(0xFF174D2A) else Color(0xFFD9F2DF),
+            content = if (darkTheme) Color(0xFF9BE7AA) else Color(0xFF1C6B35),
+        )
+        PhyVlabActivityDeadlineState.LATE_SUBMITTED -> PhyVlabStatusPalette(
+            container = if (darkTheme) Color(0xFF690005) else Color(0xFFFFDAD6),
+            content = if (darkTheme) Color(0xFFFFB4AB) else Color(0xFF8C1D18),
+        )
+        PhyVlabActivityDeadlineState.DUE_SOON -> PhyVlabStatusPalette(
+            container = if (darkTheme) Color(0xFF5B4500) else Color(0xFFFFEFC2),
+            content = if (darkTheme) Color(0xFFFFD66B) else Color(0xFF7A4F00),
+        )
+        PhyVlabActivityDeadlineState.OVERDUE -> PhyVlabStatusPalette(
+            container = if (darkTheme) Color(0xFF690005) else Color(0xFFFFDAD6),
+            content = if (darkTheme) Color(0xFFFFB4AB) else Color(0xFF8C1D18),
+        )
+        PhyVlabActivityDeadlineState.UNKNOWN -> PhyVlabStatusPalette(
+            container = MaterialTheme.colorScheme.surfaceVariant,
+            content = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun phyVlabActivityStatusLabel(state: PhyVlabActivityDeadlineState): String = when (state) {
+    PhyVlabActivityDeadlineState.SUBMITTED -> "已完成"
+    PhyVlabActivityDeadlineState.LATE_SUBMITTED -> "逾期提交"
+    PhyVlabActivityDeadlineState.DUE_SOON -> "未完成"
+    PhyVlabActivityDeadlineState.OVERDUE -> "逾期未交"
+    PhyVlabActivityDeadlineState.UNKNOWN -> "未完成"
+}
+
+private fun phyVlabActivityStatusDescription(state: PhyVlabActivityDeadlineState): String = when (state) {
+    PhyVlabActivityDeadlineState.SUBMITTED -> "作业已完成"
+    PhyVlabActivityDeadlineState.LATE_SUBMITTED -> "作业已提交，但提交时间晚于截止时间"
+    PhyVlabActivityDeadlineState.DUE_SOON -> "作业未完成，尚未到截止时间"
+    PhyVlabActivityDeadlineState.OVERDUE -> "作业已逾期且未完成"
+    PhyVlabActivityDeadlineState.UNKNOWN -> "作业未完成，截止时间未知"
+}
+
+@Composable
+private fun rememberPhyVlabNowEpochSeconds(): Long {
+    var nowEpochSeconds by remember { mutableStateOf(Clock.System.now().epochSeconds) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            nowEpochSeconds = Clock.System.now().epochSeconds
+        }
+    }
+    return nowEpochSeconds
+}
+
+@Composable
+private fun PhyVlabTimeRow(
+    label: String,
+    value: String,
+    valueColor: Color = LocalContentColor.current,
+    valueFontWeight: FontWeight = FontWeight.Normal,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -551,6 +651,7 @@ private fun PhyVlabTimeRow(label: String, value: String, valueColor: Color = Loc
             value,
             style = MaterialTheme.typography.bodySmall,
             color = valueColor,
+            fontWeight = valueFontWeight,
             modifier = Modifier.weight(1f),
         )
     }
@@ -597,6 +698,7 @@ private fun PhyVlabAssignmentDetailContent(
     failure: PhyVlabSyncFailure?,
     feedback: String?,
     fileGatewayAvailable: Boolean,
+    nowEpochSeconds: Long,
     onRetry: () -> Unit,
     onUpload: () -> Unit,
     onOpenWeb: () -> Unit,
@@ -607,6 +709,13 @@ private fun PhyVlabAssignmentDetailContent(
     val openedAt = activity.openText?.let(::formatPhyVlabDateTime)
     val dueAt = activity.dueText?.let(::formatPhyVlabDateTime)
     val submittedAt = detail?.submissionDateText?.let(::formatPhyVlabDateTime)
+    val submitted = activity.completed || detail?.let(::phyVlabAssignmentDetailHasSubmission) == true
+    val deadlineState = phyVlabActivityDeadlineState(
+        activity = activity,
+        nowEpochSeconds = nowEpochSeconds,
+        submitted = submitted,
+        submittedAtEpochSeconds = detail?.submissionDateTimestamp,
+    )
     Column(
         modifier = modifier
             .then(if (fullScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(max = 680.dp))
@@ -633,6 +742,7 @@ private fun PhyVlabAssignmentDetailContent(
                             openedAt = openedAt,
                             dueAt = dueAt,
                             submittedAt = submittedAt,
+                            deadlineState = deadlineState,
                             modifier = Modifier.weight(1f),
                         )
                         PhyVlabSubmissionDetailSection(
@@ -650,6 +760,7 @@ private fun PhyVlabAssignmentDetailContent(
                                 openedAt = openedAt,
                                 dueAt = dueAt,
                                 submittedAt = submittedAt,
+                                deadlineState = deadlineState,
                             )
                         }
                         detail?.let { page ->
@@ -734,8 +845,10 @@ private fun PhyVlabTimeDetailSection(
     openedAt: String?,
     dueAt: String?,
     submittedAt: String?,
+    deadlineState: PhyVlabActivityDeadlineState,
     modifier: Modifier = Modifier,
 ) {
+    val statusPalette = phyVlabActivityStatusPalette(deadlineState)
     PhyVlabDetailSection(
         modifier = modifier,
         title = "时间",
@@ -744,7 +857,19 @@ private fun PhyVlabTimeDetailSection(
     ) {
         openedAt?.let { PhyVlabDetailLine("开放", it) }
         dueAt?.let {
-            PhyVlabDetailLine("截止", it, valueColor = MaterialTheme.colorScheme.error)
+            PhyVlabDetailLine(
+                label = "截止",
+                value = it,
+                valueColor = statusPalette.content,
+                valueFontWeight = if (
+                    deadlineState == PhyVlabActivityDeadlineState.OVERDUE ||
+                    deadlineState == PhyVlabActivityDeadlineState.LATE_SUBMITTED
+                ) {
+                    FontWeight.Bold
+                } else {
+                    FontWeight.Normal
+                },
+            )
         }
         submittedAt?.let { PhyVlabDetailLine("提交", it) }
     }
@@ -796,7 +921,12 @@ private fun PhyVlabDetailSection(
 }
 
 @Composable
-private fun PhyVlabDetailLine(label: String, value: String, valueColor: Color = LocalContentColor.current) {
+private fun PhyVlabDetailLine(
+    label: String,
+    value: String,
+    valueColor: Color = LocalContentColor.current,
+    valueFontWeight: FontWeight = FontWeight.Normal,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(label, style = MaterialTheme.typography.labelLarge, color = LocalContentColor.current.copy(alpha = 0.72f))
         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -808,7 +938,7 @@ private fun PhyVlabDetailLine(label: String, value: String, valueColor: Color = 
             }
             Text(
                 value,
-                style = baseStyle.copy(fontSize = fontSize),
+                style = baseStyle.copy(fontSize = fontSize, fontWeight = valueFontWeight),
                 color = valueColor,
                 maxLines = 1,
                 softWrap = false,

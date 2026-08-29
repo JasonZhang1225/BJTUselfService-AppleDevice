@@ -47,8 +47,8 @@ class AuthenticatedSession(
     val coursewareDirectoryGateway: CoursewareDirectoryGateway,
     val systemCalendarGateway: SystemCalendarGateway,
     val onLogout: () -> Unit,
-    /** 物理在线 Moodle 会话失效时，在 App 内复用现有 CAS 凭据恢复一次。 */
-    val reauthenticatePhyVlab: (suspend () -> Boolean)? = null,
+    /** 业务会话失效时，在 App 内复用当前内存中的 CAS 凭据恢复一次。 */
+    val reauthenticateSession: (suspend () -> Boolean)? = null,
 ) {
     /**
      * 智慧教学明文 HTTP 风险提示是否已在本登录态关闭。
@@ -73,9 +73,11 @@ fun isNativeDetailRoute(routeId: String): Boolean =
         routeId == "CLASSROOM_DETAIL" ||
         routeId == "CLASSROOM_OCCUPANCY_DETAIL" ||
         routeId == "HOMEWORK_DETAIL" ||
-        routeId == "MAILBOX_DETAIL" ||
         routeId == "MAILBOX" ||
+        routeId == "MAILBOX_DETAIL" ||
+        routeId == "MAILBOX_COMPOSE" ||
         routeId == "CALENDAR" ||
         routeId == "REPORT_CARD_DOWNLOAD" ||
         routeId == "PHYVLAB" ||
+        routeId == "PHYVLAB_DETAIL" ||
         routeId == "SETTINGS"

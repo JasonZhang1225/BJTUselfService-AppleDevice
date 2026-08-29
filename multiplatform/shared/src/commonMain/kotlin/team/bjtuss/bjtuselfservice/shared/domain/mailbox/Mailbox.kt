@@ -48,3 +48,15 @@ data class MailMessage(
     val sentAt: String,
     val attachments: List<MailAttachment>,
 )
+
+/** 写信/回复编辑器的最小草稿模型；正文在 UI 中以纯文本编辑，发送时再转成安全 HTML。 */
+data class MailComposeDraft(
+    val id: String,
+    val to: String = "",
+    val cc: String = "",
+    val bcc: String = "",
+    val subject: String = "",
+    val bodyText: String = "",
+    val replyToMessageId: String? = null,
+    val isReply: Boolean = false,
+)

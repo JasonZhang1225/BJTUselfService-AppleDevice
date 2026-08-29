@@ -377,6 +377,7 @@ internal fun parsePhyVlabAssignmentPage(
         description = normalizePhyVlabDatesInText(description),
         submissionStatus = normalizePhyVlabDatesInText(submissionStatus),
         submissionDateText = submissionDate?.let(::normalizePhyVlabDateText),
+        submissionDateTimestamp = submissionDate?.let(::parsePhyVlabDateTimestamp),
         gradingStatus = gradingStatus?.let(::normalizePhyVlabDatesInText),
         gradeText = grade?.let(::normalizePhyVlabDatesInText),
         feedbackText = feedback?.let(::normalizePhyVlabDatesInText),

@@ -1,8 +1,8 @@
 # BJTUselfService KMP 迁移工作记忆
 
 > 最后更新：2026-08-29
-> 当前分支：`maildev`（从 `main@c181dbf` 派生；本轮未改写或推送 `main`；含校历入口替换、M13/M15/M16 相关改动、PR #3 ABI 拆分、冻结 Android CI Maven 兜底和 KMP Android 共用签名配置）
-> 阶段状态：**173B 基座已同步；M13 代码层初步开发完成。校历入口已移除失效下载接口并改为公众号文章。M15 邮箱已完成 Coremail 只读文件夹/列表/详情扩展，宽屏三栏与紧凑端二级阅读 UI 按 Apple Mail 方向重做；本轮修正实际文件夹 FID 和紧凑端重复返回入口。Mac 已有真实登录态列表/详情证据，写信/删除/附件下载和真实登录后的 iOS 邮箱验收未完成。M16 VPN 仅保留调研，当前不开发。PR #3 已合入。Android 已改为本地/CI 共用上传签名（证书 SHA-256 `5d0dabc3…c773`）。`v1.7.4-KMP` Release Android 包为仅 `arm64-v8a`、无 debug 文件名（142,270,345 字节）。实体 iPhone 仍缺 provisioning profile。当前版本为 `1.7.4-KMP`。**
+> 当前分支：`maildev`（M15/M13 本轮代码与文档已收口并准备提交；从 `main@c181dbf` 派生；本轮未改写或推送 `main`；含校历入口替换、M13/M15/M16 相关改动、PR #3 ABI 拆分、冻结 Android CI Maven 兜底和 KMP Android 共用签名配置）
+> 阶段状态：**173B 基座已同步；M13 代码层初步开发完成。校历入口已移除失效下载接口并改为公众号文章。M15 邮箱已完成 Coremail 只读文件夹/列表/详情扩展，宽屏三栏与紧凑端文件夹选择/二级阅读 UI 按 Apple Mail 方向重做；紧凑端邮箱主页、邮件详情和写信/回复现统一采用平台原生页面层级（Android Activity、iOS UIKit push），与两个教室查询入口保持一致；根页面转场期间不再先显示内嵌详情，避免重复视觉跳转。紧凑端当前文件夹 banner 负责文件夹切换，邮箱右上角胶囊显示“刷新”；HTML 表格正文已结构化渲染。当前已补上写信/回复首版和 `MAILBOX_COMPOSE` 原生编辑页，发送前确认但未实际发送，详情返回统一到左上角。Windows 与 Android x86_64 模拟器均已用真实登录态核对邮箱主页、当前文件夹 banner、刷新控件和编辑页，Android 另核对普通刷新、邮件详情、回复预填和发送确认。Mac 已有真实登录态列表/详情证据，真实发送/删除/附件下载和真实登录后的 iOS 邮箱验收未完成。M16 VPN 仅保留调研，当前不开发。PR #3 已合入。Android 已改为本地/CI 共用上传签名（证书 SHA-256 `5d0dabc3…c773`）。`v1.7.4-KMP` Release Android 包为仅 `arm64-v8a`、无 debug 文件名（142,270,345 字节）。本轮已在 `C:\Users\zjg\Android\Sdk` 恢复 Android SDK/`adb`/模拟器；Android x86_64 debug 构建、安装、登录和邮箱视觉回归均完成，实体 iPhone 仍缺 provisioning profile。当前版本为 `1.7.4-KMP`。**
 > 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B` (`a342615`)**；当前发布 **`v1.7.4-KMP`**；上一发布 `v1.7.3-KMP-B@a342615` 保留。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
 > 本文件是实时工作记忆，不是只追加日志：任务开始读、结束改，只保留当前接续工作需要的状态。
@@ -10,9 +10,10 @@
 ## 1. 本阶段已做到（≤10 行）
 
 - **第一阶段收口 + `1.7.1-KMP`/`1.7.2-KMP` + M12 + `1.7.2-KMP-A` + M14 Windows**：细节见 `history_full.md`。
-- **2026-08-17 `1.7.3-KMP-B` 基座**：教学周改 `getTimeList`；作业容错对齐 1.7.0；CI、Windows MSI ASCII 修复、macOS JDK/iOS 任务拆分均已合入 `a342615`。2026-08-29 实测学期末 `getTimeList` 与 `room_view` 都可能误给第 1 周，现用当前学期校历按日期校正并把校正值写回缓存，教学周范围统一为 1–30。
+- **2026-08-17 `1.7.3-KMP-B` 基座**：教学周改 `getTimeList`；作业容错对齐 1.7.0；CI、Windows MSI ASCII 修复、macOS JDK/iOS 任务拆分均已合入 `a342615`。2026-08-29 实测学期末 `getTimeList` 与 `room_view` 都可能误给第 1 周，现用当前学期校历按日期校正并把校正值写回缓存：只有当前日期命中当前学期校历时才允许覆盖；校历未确认时保留可追溯缓存，无缓存显示未知，禁止把远端裸第 1 周展示给用户。教学周范围统一为 1–30。
 - **Windows 移植（M14）**：DPAPI 凭据保险库、%LOCALAPPDATA% 缓存、AWT 文件网关、系统浏览器、Ktor CIO、GB18030、验证码推理、品牌图标与打包链路已实现；细节见 `history_full.md`。
 - **M13 物理在线首版**：CAS/OAuth2 白名单握手、课程/作业/首页安排、按学号隔离缓存、失败提示、窄屏原生详情、自动同步“仅校园网”；Mac 真实登录态可读 3 门课、32 个活动。真实上传未执行。调研与结果见 `docs/migration/m13-phyvlab-integration-*.md`。
+- **2026-08-29 M13 作业截止状态**：物理在线作业列表与详情统一按当前北京时间判断：已完成为绿色，未完成且未到截止为黄色，未完成且已到截止为红色并加粗；缺少可靠截止时间时保持中性，不猜测颜色。详情页拿到明确提交状态/时间时优先覆盖列表完成标记，新增截止边界与提交信号回归测试；Android/Windows 真实账号当前样本均为已完成，未执行真实提交。
 - **2026-08-29 iOS/macOS 最新产物**：`BJTUSelfService-KMP-1.7.4-KMP-iOS-unsigned.ipa` 与 `BJTUselfServiceKMP-1.7.4.dmg` 已放入 `/Users/zjg/Downloads`；iOS Bundle ID `team.bjtuss.bjtuselfservice.kmp.ios`、版本 `1.7.4-KMP`、Build `15`，IPA 包内无 `_CodeSignature`，SHA-256 `6a9b37300270b83680e935018b0ecab88b08dc8817b4f22625252b14603a3cd3`；macOS DMG SHA-256 `239ccc9e82d360c31a15f6b49939f94391822b665bda8c9257f8de7055d5650c`。最新 iOS Simulator Debug 已安装并启动到登录页；实体机缺 provisioning profile。
 - **2026-08-28 Android 共用签名**：本机 `~/.android/bjtu-kmp-upload.keystore` 与当前 Release APK 同一证书（SHA-256 `5d0dabc3…c773`）。`:androidApp` debug/release 都用这把钥匙；GitHub Secrets 已写入 `BJTU_ANDROID_KEYSTORE_BASE64` / `STORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`。密钥文件不进 Git。`v1.7.4-KMP` APK 为 `BJTUSelfService-KMP-1.7.4-KMP-arm64-v8a.apk`（142,270,345 字节）。旧 Actions 包需先卸载再装。
 - **2026-08-28 冻结 Android CI**：PR #3 合入后 `Build Debug APK`（run 33162675067）因 `maven.aliyun.com` 502 失败。已在 Actions 上改写 Maven 源为 Google/Maven Central（不改冻结 `settings.gradle.kts`），纯 KMP/文档提交不再触发这份旧打包。复跑 [33165162229](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/actions/runs/33165162229) 成功（4m49s，已上传 APK）。
@@ -24,23 +25,32 @@
 - **2026-08-29 多窗口验证链路已定位**：`desktopApp:run` 的 Gradle 前台进程结束后，源码子 JVM 可能继续运行；连续启动会与已打开的 `/Applications` 安装版形成多个同名窗口。`Main.kt` 只有一个 `Window`，生命周期回调不创建新窗口。已停止本轮源码实例，规则已写入 `CLAUDE.md`；后续每次只启动一个源码实例并按精确路径回收。
 - **2026-08-29 安装版/源码版对照**：`/Applications/交大自由行 KMP.app` 已用包含 M15 三栏阈值修复的最新 `BJTUselfServiceKMP.app` 逐文件覆盖，Info 版本为 `1.7.4`/Build `15`，签名校验通过；当前安装版已重新启动到登录页。验证时仍必须只保留一个明确路径的实例，不能用相同 Bundle ID 区分源码版与安装版。
 - **2026-08-29 M15 邮箱文件夹扩展**：按 Coremail 实际树节点 FID 修正收件箱 `1`、待办 `-5`、草稿 `2`、已发送 `3`，并加入已删除 `4`、垃圾邮件 `5`、病毒邮件 `6` 的只读列表；紧凑端内嵌详情隐藏邮箱页顶栏返回，只保留“返回邮件列表”。桌面/iOS Simulator 测试通过，真实登录后的新侧栏尚待用户点验。
+- **2026-08-29 M15 紧凑端文件夹入口**：Windows 默认邮箱内容区约 820dp，三栏门槛下原先只显示收件箱列表；`MailboxScreen.kt` 已加入“当前文件夹 / 切换”菜单，复用 7 个 Coremail FID。Windows 源码版真实登录态已视觉核对收件箱 216 封、已发送 36 封和待办空状态；Chrome DevTools MCP 已核对网页侧相同文件夹及 FID。Android SDK/`adb`/x86_64 模拟器已恢复，本轮 Android debug 已构建、安装并完成登录，邮箱主页与文件夹入口视觉验收已完成。
+- **2026-08-29 M15 邮箱主页重复跳转修复（历史尝试）**：曾尝试让紧凑端从“更多”进入邮箱时留在 `MainActivity`，以消除旧页面到新 Activity 的重复视觉跳转；该方案导致邮箱一级页没有平台转场，且与教室查询的导航层级不一致，现已由下一条记录替换。
+- **2026-08-29 M15 邮箱导航层级对齐教室查询**：紧凑端从“更多”进入邮箱重新调用 `onOpenNativeRoute("MAILBOX")`，启动 `NativeDetailActivity`；点击邮件进入新的 `MAILBOX_DETAIL` Activity，写信/回复进入 `MAILBOX_COMPOSE` Activity。Android 已验证任务栈为主 Activity → 邮箱列表 Activity → 邮件详情 Activity，平台转场恢复；宽屏/Windows 仍保留当前壳内布局。
+- **2026-08-29 M15 邮件详情重复跳转定位与修复**：Android 慢放截图显示列表点击后先出现 `MainActivity` 的内嵌详情加载/正文，再出现 `NativeDetailActivity`；logcat 对应一次 `NativeDetailActivity` OPEN 转场。`MailboxWorkspace` 现在在存在原生详情回调时保持根页列表，仅让 `MAILBOX_DETAIL` 原生页显示共享模型中的加载/正文状态；修复后慢放各帧均直接为“邮件详情”，没有中间内嵌详情页。
+- **2026-08-29 M15 邮箱标题与刷新控件收口**：紧凑端将文件夹卡片和列表标题合并为单一当前文件夹 banner，显示文件夹名、邮件总数，并把“切换”放入 banner；顶栏只保留“写信”和同步/刷新状态，宽屏列表刷新也改用右上角文字胶囊，加载时显示“同步中”，移除破碎的自绘刷新箭头。Android 与 Windows 真实登录态视觉核对通过。
+- **2026-08-29 M15 HTML 表格正文修复**：通过直接 Chrome DevTools MCP 核对两封真实邮件，确认一封是标准 HTML 表格，另一封包含多张 Word/Coremail 表格及嵌入式 `<style>`；旧实现把表格标签压成纯文本且把样式规则泄漏进正文。`SchoolRichText.kt` 现用 Ksoup DOM 遍历输出段落/表格块，跳过 `style`、`script` 等节点；`MailboxScreen.kt` 以带边框、可横向滚动的网格显示表格。新增两组解析回归测试；共享桌面测试、Windows 编译、Android x86_64 debug 构建均通过，Android 真实登录态已核对两封样本均无 CSS 泄漏且表格可见。未记录邮件正文、地址、Cookie 或带会话参数的 URL。
+- **2026-08-29 M15 写信/回复首版**：按直接 Chrome DevTools MCP 取证的 Coremail 协议，新增 `compose.jsp?ctype=normal/reply` 草稿初始化和 `mbox:compose` `action=deliver` 发送适配；新增 `MAILBOX_COMPOSE` 原生二级路由，写信/回复共用收件人、抄送、主题、正文编辑页，回复自动带入收件人、主题和原文引用，发送前必须确认，取消/系统返回尽力清理临时草稿。紧凑端详情已移除正文内单独的“返回邮件列表”，唯一返回固定在左上角；Android 已核对详情返回、写信、回复预填和发送确认，Windows 已核对写信页，未实际发送邮件。
+- **2026-08-29 M15 当前文件夹入口微调**：按用户反馈将“切换”从邮箱顶栏移入下方当前文件夹 banner；顶栏仅保留“写信”和同步/刷新状态，避免在窄屏中出现写信、切换、状态、刷新挤在一行。Android 与 Windows 源码版均已重新视觉核对，banner 内菜单可正常打开。
+- **2026-08-29 M15 基本完成收口**：用户确认邮箱原生页面层级、邮件详情、写信/回复首版、HTML 表格正文、刷新/重试职责和右上角“刷新”胶囊均符合预期；M15 代码与首轮真实账号验收基本完成，真实发送/删除/移动/附件写操作及登录后的 iOS 页面仍明确保留为后续风险验收项。
 - **2026-08-29 `maildev` 提交前状态**：在 `main@c181dbf` 基础上创建 `maildev`，本轮不修改 `main`；补充发件箱按收件人显示、特殊文件夹分组和会话失效重置，新增导航/FID/解析回归测试。`:shared:desktopTest` 与 `:shared:iosSimulatorArm64Test` 均通过，冻结根 Android 文件无差异；最终一次 Xcode Simulator 构建由用户中断，未把中断写成通过，当前没有残留构建进程。
 
 ## 2. 当前痛点（≤8 条）
 
 - **Windows 安装器品牌化受限**：jpackage 安装向导 UI（横幅、右上角图标、进度框）无参数可定制；安装完成后的 EXE/快捷方式/窗口/任务栏图标已是品牌 logo。若用户要完全品牌化安装向导，需引入 Inno Setup 等替代打包管线（未授权、未规划）。
-- **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37，本机 SDK 36.1 已实验绕过；Windows 侧 Android SDK/AVD/APK 门禁已通过。Mac 侧 Xcode 27.0、iOS Simulator/iphoneos arm64 构建和 macOS arm64 分发构建均通过；iOS 模拟器已启动应用，实体机和登录后移动端仍待设备/签名条件。
+- **构建环境**：compose 1.12.0-beta03 要求 compileSdk 37；Android SDK/`adb`/模拟器已恢复到 `C:\Users\zjg\Android\Sdk`，x86_64 debug 验证通过构建、安装、登录和邮箱页面视觉回归。Mac 侧 Xcode 27.0、iOS Simulator/iphoneos arm64 构建和 macOS arm64 分发构建均通过；实体机和登录后的 iOS 邮箱仍待设备/签名条件。
 - **打包 JDK**：JBR 无 jlink/jpackage，需完整 JDK（本机 Microsoft JDK 21 `C:/Users/zjg/jdk21/jdk-21.0.8+9`，`WINDOWS_PACKAGE_JAVA_HOME` 可覆盖）。
 - **Windows MSI**：曾 `light.exe 311`（中文 description 进 MSI 字符串表）。KMP Android 共用上传签名已写入 GitHub Secrets（`BJTU_ANDROID_KEYSTORE_BASE64` 等四项），与本机 `~/.android/bjtu-kmp-upload.keystore` 同一把钥匙。
 - **Windows 卸载清凭据待复测**：请装带卸载清理的 MSI 后再卸，确认 AppData 缓存和注册表凭据被删。
 - **iOS 真机签名/连接**：generic iPhoneOS unsigned 构建通过，但当前 Bundle ID 没有匹配 provisioning profile；实体 iPhone 在 `devicectl` 中为 `unavailable`，合法签名、安装、Keychain 往返仍未取得证据。
 - **验证码发布级准确率仍待扩样**；课件深层变化仍缺自然样本；官方 1.7.0 / KMP PyTorch 2.1 在 API 37.1 有 16 KB page-size 提示。
 - **M13 现场解析差异与可选编辑页**：详情页状态标签是 `作业状态`（未交为“尚未批改”），不是 fixture 的 `提交状态`；filemanager 的 context/client/repo 在脚本 JSON 里，不在 DOM `data-*`。Mac 真实登录态课程/活动和主详情读取成功；已提交作业没有可用 filemanager，辅助 `action=editsubmission` 页返回 404 时按可选能力处理，不再覆盖主详情。真实上传仍未执行；Android/iOS 登录后 M13、REST token、Unity 外链仍待后续。arm64-only APK 不能装 x86_64 模拟器。
-- **M15 邮箱功能边界**：只读文件夹/列表/详情、分页加载与 Apple Mail 方向的响应式 UI 已完成首轮；紧凑端详情已接入 `MAILBOX_DETAIL` 平台原生二级路由，并修正内嵌详情与邮箱顶栏重复返回。本地正文缓存、写信、删除、移动、附件下载和真实登录后的 iOS 邮箱验收仍待单独切片，不能以当前构建通过代替真实邮箱验收。
+- **M15 邮箱功能边界**：只读文件夹/列表/详情、分页加载与 Apple Mail 方向的响应式 UI 已完成首轮；紧凑端邮箱主页、邮件详情和写信/回复统一走平台原生页面层级，邮箱右上角胶囊明确显示“刷新”，普通刷新与会话失效后的“重试登录”已分工，详情接入 `MAILBOX_DETAIL` 平台原生二级路由，并修正列表→内嵌详情→原生详情的重复视觉跳转、详情返回层级、标题/刷新控件重复与破碎问题；写信/回复首版已接入但未实际发送。本地正文缓存、转发、删除、移动、附件上传/下载和真实登录后的 iOS 邮箱验收仍待单独切片，不能以当前构建通过代替真实邮箱验收。
 
 ## 3. 接下来 1～3 个阶段
 
-1. **M15 邮箱只读验收与扩展**：在取得可用真实会话后复验宽屏三栏、紧凑端二级阅读页、动态字体与真实邮件数据；分页、本地缓存及写信/删除等动作仍单独评审。
+1. **M15 邮箱读写验收与扩展**：Android/Windows 紧凑端的文件夹选择、主页导航、二级阅读页、写信/回复编辑和发送确认已完成首轮真实登录回归；后续评审动态字体、分页、本地缓存、真实发送和写操作失败恢复。
 2. **M13 Apple 端补验**：实体 iPhone 取得合法 provisioning profile 后安装；Android/iOS 登录后复测详情、会话续期和网页备用入口，真实上传仍需用户明确确认。
 3. **M16 官方 VPN 验证**：暂缓，待用户明确恢复后由用户自行安装官方 Mac/iOS 客户端并用 OTP 建立连接，再分层验证物理在线登录与只读业务；不做代理或访问控制绕过。
 

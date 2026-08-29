@@ -6,6 +6,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import team.bjtuss.bjtuselfservice.shared.AuthenticatedDestinationApp
 import team.bjtuss.bjtuselfservice.shared.isNativeDetailRoute
 
@@ -49,6 +51,15 @@ class NativeDetailActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        if (isFinishing && intent.getStringExtra(EXTRA_ROUTE_ID) == MAILBOX_COMPOSE_ROUTE_ID) {
+            AndroidAuthenticatedSessionRegistry.session?.mailboxModel?.let { mailboxModel ->
+                lifecycleScope.launch { mailboxModel.cancelCompose() }
+            }
+        }
+        super.onDestroy()
+    }
+
     private fun openRoute(routeId: String) {
         if (!isNativeDetailRoute(routeId)) return
         startActivity(intentFor(this, routeId))
@@ -61,6 +72,7 @@ class NativeDetailActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_ROUTE_ID = "native_route_id"
+        private const val MAILBOX_COMPOSE_ROUTE_ID = "MAILBOX_COMPOSE"
 
         fun intentFor(activity: ComponentActivity, routeId: String): Intent =
             Intent(activity, NativeDetailActivity::class.java).putExtra(EXTRA_ROUTE_ID, routeId)

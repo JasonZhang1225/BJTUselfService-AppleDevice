@@ -63,6 +63,7 @@ class PhyVlabCacheCodecTest {
                         description = "完成实验报告",
                         submissionStatus = "已提交",
                         submissionDateText = "2026年06月14日 18:36",
+                        submissionDateTimestamp = 1781433360L,
                         gradingStatus = "未批改",
                         submittedFiles = listOf(PhyVlabSubmissionFile("报告 \"最终\".pdf")),
                         canSubmit = true,

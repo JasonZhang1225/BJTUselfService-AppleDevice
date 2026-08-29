@@ -175,6 +175,49 @@ class CourseScheduleScreenModelTest {
     }
 
     @Test
+    fun remoteWeekCannotOverwriteCachedWeekWhenCalendarValidationIsAvailable() = runBlocking {
+        val cached = CourseScheduleSnapshot(listOf(course(1, week = 26)), 26)
+        val remote = CourseScheduleSnapshot(listOf(course(2, week = 26)), 1)
+        val model = CourseScheduleScreenModel(
+            repository = FakeRepository(cached, remote),
+            calendarRepository = FakeCalendarRepository(
+                weeks = emptyList(),
+                selectedLabel = "2025-2026-2",
+            ),
+            todayProvider = { LocalDate(2026, 8, 29) },
+        )
+
+        model.initialize(refreshFromNetwork = false)
+        assertEquals(26, model.state.value.currentWeek)
+        model.ensureCalendarLoaded()
+        model.initialize(refreshFromNetwork = true)
+
+        assertEquals(26, model.state.value.currentWeek)
+        assertEquals(26, model.state.value.selectedWeek)
+    }
+
+    @Test
+    fun remoteWeekOneIsNotDisplayedWhenThereIsNoValidatedWeek() = runBlocking {
+        val empty = CourseScheduleSnapshot(emptyList(), 0)
+        val remote = CourseScheduleSnapshot(listOf(course(2, week = 1)), 1)
+        val model = CourseScheduleScreenModel(
+            repository = FakeRepository(empty, remote),
+            calendarRepository = FakeCalendarRepository(
+                weeks = emptyList(),
+                selectedLabel = "2025-2026-2",
+            ),
+            todayProvider = { LocalDate(2026, 8, 29) },
+        )
+
+        model.initialize(refreshFromNetwork = false)
+        model.ensureCalendarLoaded()
+        model.initialize(refreshFromNetwork = true)
+
+        assertEquals(0, model.state.value.currentWeek)
+        assertEquals(0, model.state.value.selectedWeek)
+    }
+
+    @Test
     fun summerContinuationWeekStillFollowsCurrentWeek() = runBlocking {
         val repository = FakeRepository(
             loaded = CourseScheduleSnapshot(listOf(course(1, week = 26)), 26),

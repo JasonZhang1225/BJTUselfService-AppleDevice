@@ -2,6 +2,7 @@ package team.bjtuss.bjtuselfservice.shared.feature.mailbox
 
 import kotlinx.coroutines.runBlocking
 import team.bjtuss.bjtuselfservice.shared.data.mailbox.MailboxRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailComposeDraft
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailMessage
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailboxPage
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailSummary
@@ -146,6 +147,46 @@ class MailboxScreenModelTest {
     }
 
     @Test
+    fun startsReplyWithServerDraftAndClearsItAfterSuccessfulSend() {
+        runBlocking {
+            val summary = MailSummary(
+                id = "message-1",
+                folderId = 1,
+                sender = "teacher@example.test",
+                subject = "课程通知",
+                preview = "请查看安排",
+                sentAt = "2026-08-29 09:10:00",
+                receivedAt = "2026-08-29 09:10:00",
+                sizeBytes = 128,
+                isRead = true,
+                hasAttachments = false,
+            )
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 1, messages = listOf(summary)),
+                detail = emptyDetail(),
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+
+            model.initialize()
+            model.startCompose(replyToMessageId = summary.id)
+
+            val ready = assertIs<MailboxUiState.Ready>(model.state.value)
+            val draft = assertIs<MailComposeDraft>(ready.compose.draft)
+            assertTrue(draft.isReply)
+            assertEquals(summary.id, draft.replyToMessageId)
+
+            val edited = draft.copy(to = "student@example.test", subject = "Re: 课程通知", bodyText = "收到")
+            model.updateCompose(edited)
+            assertTrue(model.sendCompose())
+            assertEquals(edited, remote.sentDraft)
+            assertEquals(null, assertIs<MailboxUiState.Ready>(model.state.value).compose.draft)
+        }
+    }
+
+    @Test
     fun selectingSentFolderLoadsItsCoremailFolderId() {
         runBlocking {
             val summary = MailSummary(
@@ -200,6 +241,7 @@ private class FakeMailboxRemote(
     private val nextPage: MailboxPage? = null,
 ) : MailboxRemoteDataSource {
     val requestedFolderIds = mutableListOf<Int>()
+    var sentDraft: MailComposeDraft? = null
 
     override suspend fun listMessages(
         folderId: Int,
@@ -212,6 +254,19 @@ private class FakeMailboxRemote(
     }
 
     override suspend fun readMessage(messageId: String): MailMessage = detail
+
+    override suspend fun beginCompose(replyToMessageId: String?): MailComposeDraft =
+        MailComposeDraft(
+            id = "compose-1",
+            replyToMessageId = replyToMessageId,
+            isReply = replyToMessageId != null,
+        )
+
+    override suspend fun sendMessage(draft: MailComposeDraft) {
+        sentDraft = draft
+    }
+
+    override suspend fun cancelCompose(composeId: String) = Unit
 }
 
 private fun emptyDetail() = MailMessage(

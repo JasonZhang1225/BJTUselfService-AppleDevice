@@ -146,6 +146,8 @@ import team.bjtuss.bjtuselfservice.shared.feature.settings.SettingsWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxUiState
 import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxTopBarActions
+import team.bjtuss.bjtuselfservice.shared.feature.mailbox.MailboxComposeScreen
 import team.bjtuss.bjtuselfservice.shared.feature.phyvlab.PhyVlabDetailWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.phyvlab.PhyVlabWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.phyvlab.PhyVlabContentSource
@@ -153,6 +155,9 @@ import team.bjtuss.bjtuselfservice.shared.feature.scroll.desktopTouchScroll
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.home.HomeWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.home.homeIdleStatusText
+import team.bjtuss.bjtuselfservice.shared.feature.home.HomeSyncItem
+import team.bjtuss.bjtuselfservice.shared.feature.home.HomeSyncItemState
+import team.bjtuss.bjtuselfservice.shared.feature.home.homeSyncDialogTitle
 import team.bjtuss.bjtuselfservice.shared.webview.openExternalUrl
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommand
 import team.bjtuss.bjtuselfservice.shared.feature.shell.AppCommandBus
@@ -182,6 +187,100 @@ private fun classroomIdleStatusText(state: ClassroomUiState): String? = when (st
 }
 
 private val partialSyncFailureStatusTexts = setOf("部分同步失败", "同步失败")
+
+private fun buildHomeSyncItems(
+    isLoggingIn: Boolean,
+    homeBusy: Boolean,
+    homeFailed: Boolean,
+    homeReady: Boolean,
+    gradeBusy: Boolean,
+    gradeFailed: Boolean,
+    gradeReady: Boolean,
+    homeworkBusy: Boolean,
+    homeworkFailed: Boolean,
+    homeworkReady: Boolean,
+    examBusy: Boolean,
+    examFailed: Boolean,
+    examReady: Boolean,
+    courseBusy: Boolean,
+    courseFailed: Boolean,
+    courseReady: Boolean,
+    phyVlabBusy: Boolean,
+    phyVlabFailed: Boolean,
+    phyVlabReady: Boolean,
+): List<HomeSyncItem> = listOf(
+    homeSyncItem(
+        title = "统一身份认证",
+        busy = isLoggingIn,
+        failed = false,
+        ready = !isLoggingIn,
+        busyDetail = "正在检查登录状态",
+    ),
+    homeSyncItem(
+        title = "首页账户状态",
+        busy = homeBusy,
+        failed = homeFailed,
+        ready = homeReady,
+        busyDetail = "正在读取邮箱与校园账户状态",
+    ),
+    homeSyncItem(
+        title = "成绩",
+        busy = gradeBusy,
+        failed = gradeFailed,
+        ready = gradeReady,
+        busyDetail = "正在同步成绩",
+    ),
+    homeSyncItem(
+        title = "课程表与校历周数",
+        busy = courseBusy,
+        failed = courseFailed,
+        ready = courseReady,
+        busyDetail = "正在同步课表并校准教学周",
+    ),
+    homeSyncItem(
+        title = "作业",
+        busy = homeworkBusy,
+        failed = homeworkFailed,
+        ready = homeworkReady,
+        busyDetail = "正在同步作业",
+    ),
+    homeSyncItem(
+        title = "考试安排",
+        busy = examBusy,
+        failed = examFailed,
+        ready = examReady,
+        busyDetail = "正在同步考试安排",
+    ),
+    homeSyncItem(
+        title = "物理在线",
+        busy = phyVlabBusy,
+        failed = phyVlabFailed,
+        ready = phyVlabReady,
+        busyDetail = "正在同步物理在线安排",
+    ),
+)
+
+private fun homeSyncItem(
+    title: String,
+    busy: Boolean,
+    failed: Boolean,
+    ready: Boolean,
+    busyDetail: String,
+): HomeSyncItem {
+    val state = when {
+        failed -> HomeSyncItemState.FAILED
+        busy -> HomeSyncItemState.SYNCING
+        ready -> HomeSyncItemState.SUCCESS
+        else -> HomeSyncItemState.WAITING
+    }
+    val detail = when (state) {
+        HomeSyncItemState.FAILED -> "本轮同步失败"
+        HomeSyncItemState.SYNCING -> busyDetail
+        HomeSyncItemState.SUCCESS -> "已完成"
+        HomeSyncItemState.WAITING -> "等待同步"
+    }
+    return HomeSyncItem(title = title, detail = detail, state = state)
+}
 
 private sealed interface AppRoute : NavKey
 
@@ -249,6 +348,10 @@ const val PHYVLAB_DETAIL_ROUTE_ID = "PHYVLAB_DETAIL"
 private data object MailboxDetailRoute : AppRoute
 const val MAILBOX_DETAIL_ROUTE_ID = "MAILBOX_DETAIL"
 
+/** 邮箱写信/回复二级路由：紧凑端使用平台原生 push，宽屏在当前邮箱内容区编辑。 */
+private data object MailboxComposeRoute : AppRoute
+const val MAILBOX_COMPOSE_ROUTE_ID = "MAILBOX_COMPOSE"
+
 /** Google predictive-back full-screen surface 的 SystemUI 插值。 */
 private val androidPredictiveEasing = CubicBezierEasing(0.1f, 0.1f, 0f, 1f)
 
@@ -287,6 +390,7 @@ fun AuthenticatedAppShell(
     val coursewareDirectoryGateway = coursewareDirectoryGatewayOverride ?: session.coursewareDirectoryGateway
     val systemCalendarGateway = session.systemCalendarGateway
     val onLogout = session.onLogout
+    val reauthenticateSession = session.reauthenticateSession
     val gradeState by gradeModel.state.collectAsState()
     val courseState by courseScheduleModel.state.collectAsState()
     val examState by examScheduleModel.state.collectAsState()
@@ -300,15 +404,34 @@ fun AuthenticatedAppShell(
     val homeState by homeModel.state.collectAsState()
     val settingsState by settingsModel.state.collectAsState()
     val homeChanges by homeChangeFeed.records.collectAsState()
-    val homeSyncFailureItems = buildList {
-        if (homeState.failure != null) add("首页账户状态")
-        if (homeworkState.failure != null) add("作业")
-        if (examState.failure != null) add("考试安排")
-        if (courseState.failure != null) add("课程表")
-        if (phyVlabState.failure != null || phyVlabState.casLoginRequired) {
-            add("物理在线（仅校园网下同步）")
-        }
+    val homeSyncItems = buildHomeSyncItems(
+        isLoggingIn = entryLoggingIn,
+        homeBusy = homeState.isRefreshing,
+        homeFailed = homeState.failure != null,
+        homeReady = homeState.status != null,
+        gradeBusy = gradeState.isLoading || gradeState.isRefreshing,
+        gradeFailed = gradeState.failure != null,
+        gradeReady = gradeState.source != null,
+        homeworkBusy = homeworkState.isLoading || homeworkState.isRefreshing,
+        homeworkFailed = homeworkState.failure != null,
+        homeworkReady = homeworkState.source != null,
+        examBusy = examState.isLoading || examState.isRefreshing,
+        examFailed = examState.failure != null,
+        examReady = examState.source != null,
+        courseBusy = courseState.isLoading || courseState.isRefreshing || courseState.isCalendarLoading,
+        courseFailed = courseState.failure != null,
+        courseReady = courseState.source != null,
+        phyVlabBusy = phyVlabState.isLoading,
+        phyVlabFailed = phyVlabState.failure != null || phyVlabState.casLoginRequired,
+        phyVlabReady = phyVlabState.courses.isNotEmpty() || phyVlabState.agendaEvents.isNotEmpty(),
+    )
+    val homeSyncFailureItems = homeSyncItems
+        .filter { it.state == HomeSyncItemState.FAILED }
+        .map(HomeSyncItem::title)
+    val homeSyncInProgress = entryLoggingIn || homeSyncItems.any {
+        it.state == HomeSyncItemState.SYNCING
     }
+    var homeSyncDialogVisible by remember { mutableStateOf(false) }
     var partialSyncFailureDialogItems by remember { mutableStateOf<List<String>?>(null) }
     // 挂 session：原生二级页重建 Compose 时仍记住本登录态是否关过提示。
     // 同时必须有本地 mutableState，否则只写 session 字段不会触发重组，Banner 点了不关。
@@ -341,16 +464,20 @@ fun AuthenticatedAppShell(
     val useNativeSecondaryRoutes =
         nativeNavigationEnabled && windowClass != WindowClass.Expanded
 
-    // 紧凑端未启用原生二级路由时，邮件详情暂时留在邮箱目的地内。
-    // 此时详情页自己的「邮件列表」返回已经承担了这一层返回，顶栏不能再显示
-    // 「退出邮箱功能」的返回箭头，否则用户会同时看到两个不同层级的返回入口。
+    // 紧凑端未启用原生二级路由时，邮件详情留在邮箱目的地内；
+    // 启用原生二级路由时，邮箱列表、邮件详情和写信/回复均由平台页面承载。
+    // 邮箱页的唯一返回入口固定在左上角，详情正文不再另放「返回邮件列表」按钮。
     val mailboxReadyState = mailboxState as? MailboxUiState.Ready
-    val mailboxInlineDetail = !shouldShowMailboxRootBack(
+    val mailboxInlineDetail = mailboxBackTarget(
         expanded = windowClass == WindowClass.Expanded,
         useNativeSecondaryRoutes = useNativeSecondaryRoutes,
         hasSelectedMessage = mailboxReadyState?.selectedMessage != null,
         isMessageLoading = mailboxReadyState?.isMessageLoading == true,
-    )
+    ) == MailboxBackTarget.LIST
+    val mailboxInlineCompose = !useNativeSecondaryRoutes &&
+        (mailboxReadyState?.compose?.isLoading == true ||
+            mailboxReadyState?.compose?.draft != null ||
+            mailboxReadyState?.compose?.failure != null)
 
     // Navigation 3：应用直接拥有返回栈。一级 tab 总是以 HOME 为根，二/三级页继续压栈；
     // NavDisplay 负责 Android predictive back 与 iOS start-edge back 的连续手势进度。
@@ -365,12 +492,26 @@ fun AuthenticatedAppShell(
         HomeworkDetailRoute -> AppSection.HOMEWORK
         PhyVlabDetailRoute -> AppSection.PHYVLAB
         MailboxDetailRoute -> AppSection.MAILBOX
+        MailboxComposeRoute -> AppSection.MAILBOX
         is AppSection -> currentRoute
     }
     val popBackStack: () -> Unit = if (forcedRouteId != null) {
         onCloseNativeRoute
     } else {
         { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) }
+    }
+    val mailboxBack: () -> Unit = when {
+        mailboxInlineCompose -> {
+            { scope.launch { mailboxModel.cancelCompose() } }
+        }
+        mailboxInlineDetail -> mailboxModel::clearSelectedMessage
+        else -> popBackStack
+    }
+    val startMailboxComposeFromTopBar: () -> Unit = {
+        if (useNativeSecondaryRoutes) {
+            onOpenNativeRoute(MAILBOX_COMPOSE_ROUTE_ID)
+        }
+        scope.launch { mailboxModel.startCompose() }
     }
     val navigateToSection: (AppSection) -> Unit = { target ->
         if (backStack.lastOrNull() != target) {
@@ -379,11 +520,7 @@ fun AuthenticatedAppShell(
             scope.launch {
                 yield()
                 if (backStack.lastOrNull() == target) return@launch
-                if (
-                    useNativeSecondaryRoutes &&
-                    target in MoreGroupSections &&
-                    target != AppSection.MORE
-                ) {
+                if (shouldOpenNativeSectionRoute(target.name, useNativeSecondaryRoutes)) {
                     onOpenNativeRoute(target.name)
                 } else if (target in MoreGroupSections && target != AppSection.MORE) {
                     // 「更多」子页：固定为 [更多, 子页]，返回一定回到更多目录。
@@ -494,9 +631,14 @@ fun AuthenticatedAppShell(
             }
             launch {
                 // 课表：登录成功后才网络同步；失败重试在 ScreenModel 内（最多 3 次）。
-                courseScheduleModel.initialize(loginSyncPreferences.autoSyncSchedule)
+                // 先灌入缓存，再加载校历校准当前周，最后才允许网络快照进入 UI；
+                // 否则 getTimeList/room_view 短暂返回第 1 周时会覆盖缓存的第 26 周。
+                courseScheduleModel.initialize(refreshFromNetwork = false)
                 // M12 校历映射独立于“自动同步课表”偏好，但同样必须等登录完成后再取学期。
                 courseScheduleModel.ensureCalendarLoaded()
+                if (loginSyncPreferences.autoSyncSchedule) {
+                    courseScheduleModel.initialize(refreshFromNetwork = true)
+                }
             }
             launch {
                 // 物理在线先从本地快照恢复首页安排；开启自动同步时再建立 Moodle 会话并拉取最新数据。
@@ -523,7 +665,27 @@ fun AuthenticatedAppShell(
     partialSyncFailureDialogItems?.let { items ->
         PartialSyncFailureDialog(
             failedItems = items,
+            onRetry = {
+                partialSyncFailureDialogItems = null
+                refresh()
+            },
             onDismiss = { partialSyncFailureDialogItems = null },
+        )
+    }
+    if (homeSyncDialogVisible) {
+        HomeSyncDetailsDialog(
+            title = homeSyncDialogTitle(
+                isLoggingIn = entryLoggingIn,
+                isSyncing = homeSyncInProgress,
+                hasFailures = homeSyncFailureItems.isNotEmpty(),
+            ),
+            items = homeSyncItems,
+            canRetry = !entryLoggingIn && homeSyncFailureItems.isNotEmpty() && !homeSyncInProgress,
+            onRetry = {
+                homeSyncDialogVisible = false
+                refresh()
+            },
+            onDismiss = { homeSyncDialogVisible = false },
         )
     }
     gradeState.pendingChangeNotice?.let { notice ->
@@ -551,11 +713,14 @@ fun AuthenticatedAppShell(
         isRefreshing: Boolean,
         showBack: Boolean,
         modifier: Modifier,
+        onBack: (() -> Unit)? = null,
         /** 空闲时右上角状态文案（如课表「已同步/未同步」）；登录中/同步中优先覆盖。 */
         idleStatusText: String? = null,
         /** 页面级动作，显示在同步状态胶囊旁（M12 课程表加入日历）。 */
         topBarAction: (@Composable () -> Unit)? = null,
-        /** 首页聚合同步失败时，点击状态胶囊查看失败模块；同时仍触发刷新。 */
+        /** 状态胶囊点击动作；首页用于查看同步详情，失败时不在点击瞬间触发重试。 */
+        onStatusClick: (() -> Unit)? = null,
+        /** 未显式提供 [onStatusClick] 时，首页聚合同步失败可由此生成失败详情弹窗。 */
         syncFailureItems: List<String> = emptyList(),
         content: @Composable () -> Unit,
     ) {
@@ -568,23 +733,24 @@ fun AuthenticatedAppShell(
                 ),
             ) {
                 // 紧凑/宽屏统一：标题 + 右上同步胶囊。宽屏不再在页内重复「同步××」按钮。
+                val failureStatusClick = if (
+                    idleStatusText in partialSyncFailureStatusTexts && syncFailureItems.isNotEmpty()
+                ) {
+                    { partialSyncFailureDialogItems = syncFailureItems }
+                } else {
+                    null
+                }
                 CompactAppTopBar(
                     title = title,
                     isRefreshing = isRefreshing,
                     isLoggingIn = entryLoggingIn,
                     idleStatusText = idleStatusText,
                     action = topBarAction,
-                    // 可刷新页：右上角「已同步」旁放刷新按钮；不再下拉刷新（保平台原生过滚）。
+                    // 可刷新页：右上角状态胶囊旁放刷新按钮；不再下拉刷新（保平台原生过滚）。
                     onRefresh = if (refreshable) refresh else null,
-                    onStatusClick = if (
-                        idleStatusText in partialSyncFailureStatusTexts && syncFailureItems.isNotEmpty()
-                    ) {
-                        { partialSyncFailureDialogItems = syncFailureItems }
-                    } else {
-                        null
-                    },
+                    onStatusClick = onStatusClick ?: failureStatusClick,
                     onBack = if (showBack) {
-                        popBackStack
+                        onBack ?: popBackStack
                     } else {
                         null
                     },
@@ -615,8 +781,7 @@ fun AuthenticatedAppShell(
                 title = AppSection.HOME.title,
                 expanded = expanded,
                 refreshable = true,
-                isRefreshing = homeState.isRefreshing || homeworkState.isRefreshing ||
-                    examState.isRefreshing || courseState.isRefreshing || phyVlabState.isLoading,
+                isRefreshing = homeSyncInProgress,
                 showBack = false,
                 modifier = modifier,
                 // 与成绩/课表一致：同步态并入顶栏右上胶囊，勿只留孤图标。
@@ -633,8 +798,9 @@ fun AuthenticatedAppShell(
                         courseState.source != null ||
                         homeState.status != null ||
                         phyVlabState.courses.isNotEmpty() ||
-                        phyVlabState.agendaEvents.isNotEmpty(),
+                    phyVlabState.agendaEvents.isNotEmpty(),
                 ),
+                onStatusClick = { homeSyncDialogVisible = true },
                 syncFailureItems = homeSyncFailureItems,
             ) {
                 HomeWorkspace(
@@ -650,8 +816,7 @@ fun AuthenticatedAppShell(
                     timeZone = homeworkState.timeZone,
                     isAgendaLoading = homeworkState.isLoading || examState.isLoading ||
                         courseState.isLoading || phyVlabState.isLoading,
-                    isRefreshing = homeState.isRefreshing || homeworkState.isRefreshing ||
-                        examState.isRefreshing || courseState.isRefreshing || phyVlabState.isLoading,
+                    isRefreshing = homeSyncInProgress,
                     onRefresh = refresh,
                     onOpenMailbox = { navigateToSection(AppSection.MAILBOX) },
                     onOpenHomework = { navigateToSection(AppSection.HOMEWORK) },
@@ -948,16 +1113,33 @@ fun AuthenticatedAppShell(
             AppSection.MAILBOX -> DestinationPage(
                 title = AppSection.MAILBOX.title,
                 expanded = expanded,
-                refreshable = false,
-                isRefreshing = mailboxState == MailboxUiState.Preparing,
-                showBack = !mailboxInlineDetail,
+                refreshable = true,
+                isRefreshing = mailboxState == MailboxUiState.Preparing ||
+                    mailboxReadyState?.isListLoading == true,
+                showBack = true,
+                onBack = mailboxBack,
+                // 邮箱右上角是直接可执行的列表刷新，不显示「已同步」状态文案。
+                idleStatusText = "刷新",
+                topBarAction = mailboxReadyState?.let {
+                    {
+                        MailboxTopBarActions(
+                            onStartCompose = startMailboxComposeFromTopBar,
+                        )
+                    }
+                },
                 modifier = modifier,
             ) {
                 MailboxWorkspace(
                     model = mailboxModel,
                     expanded = expanded,
+                    onReauthenticate = reauthenticateSession,
                     onOpenNativeDetail = if (useNativeSecondaryRoutes) {
                         { onOpenNativeRoute(MAILBOX_DETAIL_ROUTE_ID) }
+                    } else {
+                        null
+                    },
+                    onOpenNativeCompose = if (useNativeSecondaryRoutes) {
+                        { onOpenNativeRoute(MAILBOX_COMPOSE_ROUTE_ID) }
                     } else {
                         null
                     },
@@ -976,6 +1158,28 @@ fun AuthenticatedAppShell(
                     model = mailboxModel,
                     expanded = false,
                     nativeDetail = true,
+                    onReauthenticate = reauthenticateSession,
+                    onOpenNativeCompose = { onOpenNativeRoute(MAILBOX_COMPOSE_ROUTE_ID) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            MailboxComposeRoute -> DestinationPage(
+                title = if (mailboxReadyState?.compose?.draft?.isReply == true) "回复邮件" else "写信",
+                expanded = expanded,
+                refreshable = false,
+                isRefreshing = false,
+                showBack = true,
+                onBack = {
+                    scope.launch {
+                        mailboxModel.cancelCompose()
+                        popBackStack()
+                    }
+                },
+                modifier = modifier,
+            ) {
+                MailboxComposeScreen(
+                    model = mailboxModel,
+                    onSent = popBackStack,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1119,6 +1323,14 @@ fun AuthenticatedAppShell(
                     entry<MailboxDetailRoute> {
                         SectionDestination(
                             route = MailboxDetailRoute,
+                            expanded = true,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+                        )
+                    }
+                    entry<MailboxComposeRoute> {
+                        SectionDestination(
+                            route = MailboxComposeRoute,
                             expanded = true,
                             modifier = Modifier.fillMaxSize(),
                             usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
@@ -1305,6 +1517,14 @@ fun AuthenticatedAppShell(
                             usesLegacySmartTransport = false,
                         )
                     }
+                    entry<MailboxComposeRoute> {
+                        SectionDestination(
+                            route = MailboxComposeRoute,
+                            expanded = false,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = false,
+                        )
+                    }
                 },
             )
             if (showsCompactBottomBar && compactBottomBarOverlayPadding > 0.dp) {
@@ -1329,20 +1549,43 @@ private fun String.toAppRoute(): AppRoute? =
         PhyVlabDetailRoute
     } else if (this == MAILBOX_DETAIL_ROUTE_ID) {
         MailboxDetailRoute
+    } else if (this == MAILBOX_COMPOSE_ROUTE_ID) {
+        MailboxComposeRoute
     } else {
         AppSection.entries.firstOrNull { it.name == this }
     }
 
-/**
- * 紧凑端内嵌详情时，详情自己的返回入口负责回到列表；其它状态由邮箱页顶栏负责退出。
- * 独立成纯函数，避免导航层级修复再次被平台条件悄悄覆盖。
- */
-internal fun shouldShowMailboxRootBack(
+/** 邮箱页顶栏返回的目标；紧凑内嵌详情回列表，其余情况回邮箱上级页面。 */
+internal enum class MailboxBackTarget {
+    PARENT,
+    LIST,
+}
+
+internal fun mailboxBackTarget(
     expanded: Boolean,
     useNativeSecondaryRoutes: Boolean,
     hasSelectedMessage: Boolean,
     isMessageLoading: Boolean,
-): Boolean = expanded || useNativeSecondaryRoutes || !(hasSelectedMessage || isMessageLoading)
+): MailboxBackTarget = if (
+    !expanded &&
+        !useNativeSecondaryRoutes &&
+        (hasSelectedMessage || isMessageLoading)
+) {
+    MailboxBackTarget.LIST
+} else {
+    MailboxBackTarget.PARENT
+}
+
+/**
+ * 紧凑端「更多」里的独立页面都走平台原生 push；邮箱列表、邮件详情和写信/回复
+ * 分别对应 MAILBOX、MAILBOX_DETAIL、MAILBOX_COMPOSE，形成连续的原生页面层级。
+ */
+internal fun shouldOpenNativeSectionRoute(
+    targetRouteId: String,
+    useNativeSecondaryRoutes: Boolean,
+): Boolean = useNativeSecondaryRoutes &&
+    MoreGroupSections.any { it.name == targetRouteId } &&
+    targetRouteId != AppSection.MORE.name
 
 private fun HomeChangeDomain.toAppSection(): AppSection = when (this) {
     HomeChangeDomain.GRADES -> AppSection.GRADES
@@ -1522,44 +1765,34 @@ private fun CompactAppTopBar(
             }
             when {
                 busyText != null -> {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        shape = RoundedCornerShape(999.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(13.dp),
-                                strokeWidth = 1.8.dp,
-                                color = LocalContentColor.current,
-                            )
-                            Text(
-                                busyText,
-                                style = MaterialTheme.typography.labelMedium,
+                    TopBarBusyStatusCapsule(
+                        text = busyText,
+                        onClick = onStatusClick,
+                    )
+                }
+                idleStatusText != null && onStatusClick != null -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TopBarStatusCapsule(
+                            text = idleStatusText,
+                            onClick = onStatusClick,
+                        )
+                        onRefresh?.let { refresh ->
+                            TopBarRefreshCapsule(
+                                onClick = refresh,
+                                enabled = !isRefreshing && !isLoggingIn,
                             )
                         }
                     }
                 }
                 onRefresh != null -> {
                     Surface(
-                        onClick = {
-                            onRefresh()
-                            onStatusClick?.invoke()
-                        },
+                        onClick = onRefresh,
                         color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         shape = RoundedCornerShape(999.dp),
                         modifier = Modifier.semantics {
                             contentDescription = if (idleStatusText != null) {
-                                if (onStatusClick != null) {
-                                    "$idleStatusText，点按查看失败项目并刷新"
-                                } else {
-                                    "$idleStatusText，点按刷新"
-                                }
+                                "$idleStatusText，点按刷新"
                             } else {
                                 "刷新"
                             }
@@ -1600,8 +1833,101 @@ private fun CompactAppTopBar(
 }
 
 @Composable
+private fun TopBarBusyStatusCapsule(
+    text: String,
+    onClick: (() -> Unit)?,
+) {
+    val content: @Composable () -> Unit = {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(13.dp),
+                strokeWidth = 1.8.dp,
+                color = LocalContentColor.current,
+            )
+            Text(text, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+    val modifier = Modifier.semantics {
+        contentDescription = "$text，点按查看同步详情"
+    }
+    if (onClick == null) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(999.dp),
+            modifier = modifier,
+            content = content,
+        )
+    } else {
+        Surface(
+            onClick = onClick,
+            color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(999.dp),
+            modifier = modifier,
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun TopBarStatusCapsule(
+    text: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(999.dp),
+        modifier = Modifier.semantics {
+            contentDescription = "$text，点按查看同步详情"
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(text, style = MaterialTheme.typography.labelMedium)
+            if (text == "已同步") {
+                TopBarSyncedIcon(modifier = Modifier.size(15.dp))
+            } else {
+                TopBarRefreshIcon(modifier = Modifier.size(15.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopBarRefreshCapsule(
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = MaterialTheme.colorScheme.surfaceVariant.accessibleAlpha(0.55f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(999.dp),
+        modifier = Modifier.semantics { contentDescription = "刷新" },
+    ) {
+        Text(
+            "刷新",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+@Composable
 private fun PartialSyncFailureDialog(
     failedItems: List<String>,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -1609,14 +1935,109 @@ private fun PartialSyncFailureDialog(
         title = { Text("部分同步失败") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("已自动开始重新同步。以下内容本轮同步失败：")
+                Text("以下内容本轮同步失败。可以稍后手动重试：")
                 failedItems.forEach { item ->
                     Text("• $item", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
+        confirmButton = { Button(onClick = onRetry) { Text("重试") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
     )
+}
+
+@Composable
+private fun HomeSyncDetailsDialog(
+    title: String,
+    items: List<HomeSyncItem>,
+    canRetry: Boolean,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 430.dp)
+                    .verticalScroll(scrollState)
+                    .desktopTouchScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    when {
+                        canRetry -> "本次同步有失败项目，点击“重试”后才会重新请求。"
+                        title == "登录中" -> "正在完成统一身份认证，页面数据会在登录完成后开始同步。"
+                        title == "同步中" -> "各模块正在并行同步，完成项会显示勾选。"
+                        else -> "当前登录会话与各模块的同步状态如下。"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                items.forEach { item -> HomeSyncDetailRow(item) }
+            }
+        },
+        confirmButton = {
+            if (canRetry) {
+                Button(onClick = onRetry) { Text("重试") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("关闭") }
+            }
+        },
+        dismissButton = if (canRetry) {
+            { TextButton(onClick = onDismiss) { Text("关闭") } }
+        } else {
+            null
+        },
+    )
+}
+
+@Composable
+private fun HomeSyncDetailRow(item: HomeSyncItem) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier.size(20.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (item.state) {
+                    HomeSyncItemState.SYNCING -> CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 1.8.dp,
+                    )
+                    HomeSyncItemState.SUCCESS -> TopBarSyncedIcon(Modifier.size(16.dp))
+                    HomeSyncItemState.FAILED -> Text(
+                        "!",
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    HomeSyncItemState.WAITING -> Text(
+                        "·",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    item.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable

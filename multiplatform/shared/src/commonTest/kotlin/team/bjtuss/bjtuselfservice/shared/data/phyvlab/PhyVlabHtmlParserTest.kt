@@ -102,6 +102,7 @@ class PhyVlabHtmlParserTest {
         assertEquals("实验报告：完成第一章测量误差分析。", result.value.detail.description)
         assertEquals("已提交", result.value.detail.submissionStatus)
         assertEquals("2026年03月18日 21:30", result.value.detail.submissionDateText)
+        assertEquals(1773840600L, result.value.detail.submissionDateTimestamp)
         assertEquals(null, result.value.detail.gradingStatus)
         assertEquals("88.0", result.value.detail.gradeText)
         assertEquals("数据处理规范，结论部分还可以更清晰。", result.value.detail.feedbackText)

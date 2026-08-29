@@ -3,9 +3,13 @@ package team.bjtuss.bjtuselfservice.shared.data.mailbox
 import io.ktor.http.Url
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonPrimitive
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailboxPage
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailComposeDraft
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailMessage
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpMethod
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
@@ -17,6 +21,7 @@ private const val COREMAIL_ORIGIN = "https://mail.bjtu.edu.cn"
 private const val COREMAIL_HOST = "mail.bjtu.edu.cn"
 private const val COREMAIL_JSON_PATH = "/coremail/s/json"
 private const val COREMAIL_READ_MESSAGE_URL = "$COREMAIL_ORIGIN/coremail/XT/jsp/readMessage.jsp"
+private const val COREMAIL_COMPOSE_URL = "$COREMAIL_ORIGIN/coremail/XT/jsp/compose.jsp"
 private const val COREMAIL_INDEX_URL = "$COREMAIL_ORIGIN/coremail/XT/index.jsp"
 
 enum class MailboxRemoteFailure {
@@ -32,6 +37,9 @@ class MailboxRemoteException(
 interface MailboxRemoteDataSource {
     suspend fun listMessages(folderId: Int, start: Int, limit: Int, descending: Boolean): MailboxPage
     suspend fun readMessage(messageId: String): MailMessage
+    suspend fun beginCompose(replyToMessageId: String? = null): MailComposeDraft
+    suspend fun sendMessage(draft: MailComposeDraft)
+    suspend fun cancelCompose(composeId: String)
 }
 
 /**
@@ -107,6 +115,96 @@ class SchoolMailboxRemoteDataSource(
         }
     }
 
+    override suspend fun beginCompose(replyToMessageId: String?): MailComposeDraft {
+        val sid = ensureCoremailSession()
+        val fields = buildMap {
+            put("ctype", if (replyToMessageId == null) "normal" else "reply")
+            replyToMessageId?.let { put("mid", it) }
+            put("mboxa", "")
+        }
+        val response = execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.POST,
+                url = "$COREMAIL_COMPOSE_URL?sid=${sid.encodeURLParameter()}",
+                headers = coremailFormHeaders,
+                formFields = fields,
+            ),
+        )
+        return when (val parsed = parseMailboxComposeDraft(response.bodyText(), replyToMessageId)) {
+            is MailboxJsonParseResult.Success -> parsed.value
+            is MailboxJsonParseResult.Failure -> {
+                if (parsed.field == "code") sessionExpired()
+                parse(parsed.field)
+            }
+        }
+    }
+
+    override suspend fun sendMessage(draft: MailComposeDraft) {
+        require(draft.id.isNotBlank()) { "compose id must not be blank" }
+        val sid = ensureCoremailSession()
+        val attrs = buildJsonObject {
+            put("to", draft.to.mailRecipientsJson())
+            put("cc", draft.cc.mailRecipientsJson())
+            put("bcc", draft.bcc.mailRecipientsJson())
+            put("subject", draft.subject.trim())
+            put("isHtml", true)
+            put("content", draft.bodyText.toComposeHtml())
+            put("attachments", buildJsonArray { })
+            put("priority", 1)
+            put("requestReadReceipt", false)
+            put("saveSentCopy", true)
+        }
+        val body = buildJsonObject {
+            put("id", draft.id)
+            put("attrs", attrs)
+            put("returnInfo", true)
+            put("action", "deliver")
+            if (draft.isReply) {
+                put("ctype", "reply")
+                put("mid", draft.replyToMessageId.orEmpty())
+                put("mboxa", "")
+            }
+        }.toString()
+        val response = execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.POST,
+                url = buildJsonEndpoint(sid, "mbox:compose"),
+                headers = coremailJsonHeaders,
+                rawBody = body.encodeToByteArray(),
+                rawBodyContentType = "text/x-json; tz=\"Asia/Shanghai\"",
+            ),
+        )
+        when (val parsed = parseMailboxCommandSuccess(response.bodyText())) {
+            is MailboxJsonParseResult.Success -> Unit
+            is MailboxJsonParseResult.Failure -> {
+                if (parsed.field == "code") sessionExpired()
+                parse(parsed.field)
+            }
+        }
+    }
+
+    override suspend fun cancelCompose(composeId: String) {
+        if (composeId.isBlank()) return
+        val sid = ensureCoremailSession()
+        val body = buildJsonObject { put("ids", composeId) }.toString()
+        val response = execute(
+            SchoolHttpRequest(
+                method = SchoolHttpMethod.POST,
+                url = buildJsonEndpoint(sid, "mbox:cancelComposes"),
+                headers = coremailJsonHeaders,
+                rawBody = body.encodeToByteArray(),
+                rawBodyContentType = "text/x-json; tz=\"Asia/Shanghai\"",
+            ),
+        )
+        when (val parsed = parseMailboxCommandSuccess(response.bodyText())) {
+            is MailboxJsonParseResult.Success -> Unit
+            is MailboxJsonParseResult.Failure -> {
+                if (parsed.field == "code") sessionExpired()
+                parse(parsed.field)
+            }
+        }
+    }
+
     private suspend fun ensureCoremailSession(): String {
         coremailSessionId?.let { return it }
         val response = executeRaw(
@@ -152,6 +250,22 @@ class SchoolMailboxRemoteDataSource(
         coremailSessionId = null
         throw MailboxRemoteException(MailboxRemoteFailure.SESSION_EXPIRED)
     }
+
+    private fun String.mailRecipientsJson(): JsonArray = buildJsonArray {
+        split(Regex("[,;，；\\n]"))
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .forEach { add(JsonPrimitive(it)) }
+    }
+
+    private fun String.toComposeHtml(): String = replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", "<br>")
 
     private companion object {
         val coremailJsonHeaders = mapOf(

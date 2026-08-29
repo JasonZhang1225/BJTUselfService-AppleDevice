@@ -127,6 +127,7 @@ class SchoolPhyVlabRemoteDataSource(
         description = secondary.description.ifBlank { original.description },
         submissionStatus = secondary.submissionStatus.ifBlank { original.submissionStatus },
         submissionDateText = secondary.submissionDateText ?: original.submissionDateText,
+        submissionDateTimestamp = secondary.submissionDateTimestamp ?: original.submissionDateTimestamp,
         gradingStatus = secondary.gradingStatus ?: original.gradingStatus,
         gradeText = secondary.gradeText ?: original.gradeText,
         feedbackText = secondary.feedbackText ?: original.feedbackText,

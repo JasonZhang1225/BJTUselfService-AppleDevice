@@ -10,6 +10,7 @@ import team.bjtuss.bjtuselfservice.shared.data.mailbox.MailboxRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.data.mailbox.MailboxRemoteFailure
 import team.bjtuss.bjtuselfservice.shared.data.mailbox.MailboxRemoteException
 import team.bjtuss.bjtuselfservice.shared.data.mailbox.SchoolMailboxRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailComposeDraft
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailMessage
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailSummary
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpTransport
@@ -36,6 +37,7 @@ sealed interface MailboxUiState {
         val hasMoreMessages: Boolean = false,
         val isMessageLoading: Boolean = false,
         val failure: MailboxFailure? = null,
+        val compose: MailboxComposeState = MailboxComposeState(),
     ) : MailboxUiState
     data object SessionUnavailable : MailboxUiState
 }
@@ -46,6 +48,13 @@ data class MailboxFolderUi(
     val kind: MailboxFolderKind = MailboxFolderKind.CUSTOM,
     val section: MailboxFolderSection = MailboxFolderSection.PRIMARY,
     val unreadCount: Int? = null,
+)
+
+data class MailboxComposeState(
+    val draft: MailComposeDraft? = null,
+    val isLoading: Boolean = false,
+    val isSending: Boolean = false,
+    val failure: MailboxFailure? = null,
 )
 
 /** Coremail 内置文件夹的语义，用于图标和发件箱中的对方字段展示。 */
@@ -236,6 +245,90 @@ class MailboxScreenModel(
                     isMessageLoading = false,
                     failure = MailboxFailure.NETWORK,
                 ) ?: return
+            }
+        }
+    }
+
+    suspend fun startCompose(replyToMessageId: String? = null) {
+        operationMutex.withLock {
+            val current = mutableState.value as? MailboxUiState.Ready ?: return
+            mutableState.value = current.copy(
+                compose = MailboxComposeState(isLoading = true),
+            )
+            try {
+                val draft = remote.beginCompose(replyToMessageId)
+                mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
+                    compose = MailboxComposeState(draft = draft),
+                ) ?: return
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: MailboxRemoteException) {
+                mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
+                    compose = MailboxComposeState(failure = error.reason.toUiFailure()),
+                ) ?: return
+            } catch (_: Exception) {
+                mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
+                    compose = MailboxComposeState(failure = MailboxFailure.NETWORK),
+                ) ?: return
+            }
+        }
+    }
+
+    fun updateCompose(draft: MailComposeDraft) {
+        val current = mutableState.value as? MailboxUiState.Ready ?: return
+        mutableState.value = current.copy(
+            compose = current.compose.copy(draft = draft, failure = null),
+        )
+    }
+
+    suspend fun sendCompose(): Boolean {
+        operationMutex.withLock {
+            val current = mutableState.value as? MailboxUiState.Ready ?: return false
+            val draft = current.compose.draft ?: return false
+            mutableState.value = current.copy(
+                compose = current.compose.copy(isSending = true, failure = null),
+            )
+            return try {
+                remote.sendMessage(draft)
+                (mutableState.value as? MailboxUiState.Ready)?.let { latest ->
+                    mutableState.value = latest.copy(compose = MailboxComposeState())
+                }
+                true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: MailboxRemoteException) {
+                (mutableState.value as? MailboxUiState.Ready)?.let { latest ->
+                    mutableState.value = latest.copy(
+                        compose = MailboxComposeState(
+                            draft = draft,
+                            failure = error.reason.toUiFailure(),
+                        ),
+                    )
+                }
+                false
+            } catch (_: Exception) {
+                (mutableState.value as? MailboxUiState.Ready)?.let { latest ->
+                    mutableState.value = latest.copy(
+                        compose = MailboxComposeState(
+                            draft = draft,
+                            failure = MailboxFailure.NETWORK,
+                        ),
+                    )
+                }
+                false
+            }
+        }
+    }
+
+    suspend fun cancelCompose() {
+        operationMutex.withLock {
+            val current = mutableState.value as? MailboxUiState.Ready ?: return
+            val composeId = current.compose.draft?.id
+            // 先清掉本地编辑态，系统返回/Activity 销毁时不会短暂把编辑器留在根页；
+            // 服务器临时草稿再尽力取消。
+            mutableState.value = current.copy(compose = MailboxComposeState())
+            if (!composeId.isNullOrBlank()) {
+                runCatching { remote.cancelCompose(composeId) }
             }
         }
     }

@@ -204,6 +204,8 @@ class CourseScheduleScreenModel(
     private var refreshInFlight = false
     private val calendarMutex = Mutex()
     private var calendarLoaded = false
+    /** App 提供校历源时，远端当前周必须先经过日期校准才能覆盖缓存。 */
+    private val calendarValidationEnabled = calendarRepository != null
     private var calendarMappings: Map<CourseScheduleType, CourseScheduleCalendarMapping> = emptyMap()
 
     /**
@@ -403,18 +405,25 @@ class CourseScheduleScreenModel(
                 )
                 val selectedCalendar = calendarMappings[current.scheduleType]
                 val weeks = selectedCalendar?.weeks.orEmpty()
-                // 1.7.3B 的 getTimeList/room_view 仍是首选远端来源；但在学期切换边界，
-                // 两个接口可能都返回下一学期的第 1 周。当前学期校历带有真实日期，
-                // 若今天落在其中，以它校正当前周，避免首页和课表回到第 1 周。
+                // getTimeList/room_view 只作为刷新快照中的附带字段，不参与当前周展示；
+                // 当前学期校历带有真实日期，当前周统一由它命中今天的日期决定，
+                // 避免接口在学期切换边界返回第 1 周时污染首页和课表。
                 val calendarCurrentWeek = calendarWeekForDate(
                     mapping = calendarMappings[CourseScheduleType.CURRENT],
                     date = today,
                 )
+                val currentCalendarAvailable = calendarMappings.containsKey(CourseScheduleType.CURRENT)
                 val followCalendarCurrentWeek = current.scheduleType == CourseScheduleType.CURRENT &&
-                    current.followCurrentWeek && calendarCurrentWeek != null
-                val effectiveCurrentWeek = calendarCurrentWeek ?: current.currentWeek
+                    current.followCurrentWeek
+                val effectiveCurrentWeek = if (currentCalendarAvailable) {
+                    // 校历有当前学期映射时，当天不在教学周就明确为 0，不沿用旧周数。
+                    calendarCurrentWeek ?: 0
+                } else {
+                    // 校历暂时不可用时保留已经显示过的缓存周数；不接受任何远端猜测值。
+                    current.currentWeek.takeIf { it in 1..COURSE_MAX_WEEK } ?: 0
+                }
                 val effectiveSelectedWeek = if (followCalendarCurrentWeek) {
-                    calendarCurrentWeek
+                    calendarCurrentWeek ?: 0
                 } else {
                     current.selectedWeek
                 }
@@ -470,12 +479,27 @@ class CourseScheduleScreenModel(
             mapping = calendarMappings[CourseScheduleType.CURRENT],
             date = today,
         )
-        val effectiveCurrentWeek = calendarCurrentWeek ?: snapshot.currentWeek
+        // getTimeList/room_view 在学期切换边界可能短暂返回“第 1 周”。
+        // App 有校历源时，当前周只能由“当前日期命中的当前学期校历”决定；
+        // 校历还没验证或当天不是教学周，就保持 0（UI 不显示猜测周数）。
+        val effectiveCurrentWeek = if (calendarValidationEnabled) {
+            when {
+                calendarCurrentWeek != null -> calendarCurrentWeek
+                source == CourseScheduleContentSource.CACHE ->
+                    snapshot.currentWeek.takeIf { it in 1..COURSE_MAX_WEEK } ?: 0
+                else -> current.currentWeek.takeIf { it in 1..COURSE_MAX_WEEK } ?: 0
+            }
+        } else {
+            snapshot.currentWeek.takeIf { it in 1..COURSE_MAX_WEEK } ?: 0
+        }
         val shouldApplyCurrentWeek = current.scheduleType == CourseScheduleType.CURRENT &&
-            current.followCurrentWeek && effectiveCurrentWeek in 1..COURSE_MAX_WEEK
+            current.followCurrentWeek &&
+            (calendarValidationEnabled || effectiveCurrentWeek in 1..COURSE_MAX_WEEK)
         val selectedWeek = if (shouldApplyCurrentWeek) effectiveCurrentWeek else current.selectedWeek
-        if (calendarCurrentWeek != null && calendarCurrentWeek != snapshot.currentWeek) {
-            repository.reconcileCurrentWeek(calendarCurrentWeek)
+        if (
+            calendarValidationEnabled && effectiveCurrentWeek != snapshot.currentWeek
+        ) {
+            repository.reconcileCurrentWeek(effectiveCurrentWeek)
         }
         val visibleIds = snapshot.courses.mapTo(mutableSetOf(), Course::id)
         mutableState.value = current.copy(

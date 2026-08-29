@@ -10,9 +10,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailAttachment
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailComposeDraft
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailMessage
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailSummary
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailboxPage
+import team.bjtuss.bjtuselfservice.shared.util.schoolRichTextToPlainMultiline
 
 private val coremailJson = Json {
     ignoreUnknownKeys = true
@@ -88,6 +90,47 @@ fun parseMailboxMessage(
             attachments = attachments,
         ),
     )
+} catch (_: Exception) {
+    MailboxJsonParseResult.Failure("json")
+}
+
+/** 解析 Coremail compose.jsp 返回的写信/回复草稿。 */
+fun parseMailboxComposeDraft(
+    body: String,
+    replyToMessageId: String?,
+): MailboxJsonParseResult<MailComposeDraft> = try {
+    val root = coremailJson.parseToJsonElement(body) as? JsonObject
+        ?: return MailboxJsonParseResult.Failure("root")
+    if (root.string("code") != "S_OK") return MailboxJsonParseResult.Failure("code")
+    val payload = root["var"] as? JsonObject
+        ?: return MailboxJsonParseResult.Failure("var")
+    val id = payload.string("id")?.takeIf(String::isNotBlank)
+        ?: return MailboxJsonParseResult.Failure("id")
+    MailboxJsonParseResult.Success(
+        MailComposeDraft(
+            id = id,
+            to = payload.strings("to").joinToString(", "),
+            cc = payload.strings("cc").joinToString(", "),
+            bcc = payload.strings("bcc").joinToString(", "),
+            subject = payload.string("subject").orEmpty(),
+            bodyText = schoolRichTextToPlainMultiline(payload.string("content")).trim(),
+            replyToMessageId = replyToMessageId,
+            isReply = replyToMessageId != null,
+        ),
+    )
+} catch (_: Exception) {
+    MailboxJsonParseResult.Failure("json")
+}
+
+/** 解析仅需确认成功/失败的 Coremail 写操作响应。 */
+fun parseMailboxCommandSuccess(body: String): MailboxJsonParseResult<Unit> = try {
+    val root = coremailJson.parseToJsonElement(body) as? JsonObject
+        ?: return MailboxJsonParseResult.Failure("root")
+    if (root.string("code") != "S_OK") {
+        MailboxJsonParseResult.Failure("code")
+    } else {
+        MailboxJsonParseResult.Success(Unit)
+    }
 } catch (_: Exception) {
     MailboxJsonParseResult.Failure("json")
 }

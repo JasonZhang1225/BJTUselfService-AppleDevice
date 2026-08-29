@@ -1,22 +1,35 @@
 package team.bjtuss.bjtuselfservice.shared.feature.grade
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class GradeScreenNavigationTest {
     @Test
-    fun inlineMailboxDetailOwnsTheOnlyBackAction() {
-        assertFalse(
-            shouldShowMailboxRootBack(
+    fun mailboxAndClassroomRootsPushNativelyFromMore() {
+        assertTrue(shouldOpenNativeSectionRoute("MAILBOX", useNativeSecondaryRoutes = true))
+        assertTrue(shouldOpenNativeSectionRoute("CLASSROOMS", useNativeSecondaryRoutes = true))
+        assertTrue(shouldOpenNativeSectionRoute("CLASSROOM_OCCUPANCY", useNativeSecondaryRoutes = true))
+        assertTrue(shouldOpenNativeSectionRoute("EXAMS", useNativeSecondaryRoutes = true))
+        assertFalse(shouldOpenNativeSectionRoute("MAILBOX", useNativeSecondaryRoutes = false))
+        assertFalse(shouldOpenNativeSectionRoute("EXAMS", useNativeSecondaryRoutes = false))
+    }
+
+    @Test
+    fun inlineMailboxDetailUsesTheTopBarBackAction() {
+        assertEquals(
+            MailboxBackTarget.LIST,
+            mailboxBackTarget(
                 expanded = false,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = true,
                 isMessageLoading = false,
             ),
         )
-        assertFalse(
-            shouldShowMailboxRootBack(
+        assertEquals(
+            MailboxBackTarget.LIST,
+            mailboxBackTarget(
                 expanded = false,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = false,
@@ -26,25 +39,28 @@ class GradeScreenNavigationTest {
     }
 
     @Test
-    fun mailboxRootAndNativeDetailKeepThePlatformBackAction() {
-        assertTrue(
-            shouldShowMailboxRootBack(
+    fun mailboxRootAndNativeDetailKeepTheParentBackAction() {
+        assertEquals(
+            MailboxBackTarget.PARENT,
+            mailboxBackTarget(
                 expanded = false,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = false,
                 isMessageLoading = false,
             ),
         )
-        assertTrue(
-            shouldShowMailboxRootBack(
+        assertEquals(
+            MailboxBackTarget.PARENT,
+            mailboxBackTarget(
                 expanded = false,
                 useNativeSecondaryRoutes = true,
                 hasSelectedMessage = true,
                 isMessageLoading = false,
             ),
         )
-        assertTrue(
-            shouldShowMailboxRootBack(
+        assertEquals(
+            MailboxBackTarget.PARENT,
+            mailboxBackTarget(
                 expanded = true,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = true,

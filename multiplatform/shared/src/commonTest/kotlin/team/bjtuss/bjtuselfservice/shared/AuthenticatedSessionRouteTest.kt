@@ -6,9 +6,11 @@ import kotlin.test.assertTrue
 
 class AuthenticatedSessionRouteTest {
     @Test
-    fun mailboxDetailIsAPlatformNativeRoute() {
-        assertTrue(isNativeDetailRoute("MAILBOX_DETAIL"))
+    fun mailboxRootAndDetailsArePlatformNativeRoutes() {
         assertTrue(isNativeDetailRoute("MAILBOX"))
+        assertTrue(isNativeDetailRoute("MAILBOX_DETAIL"))
+        assertTrue(isNativeDetailRoute("MAILBOX_COMPOSE"))
+        assertTrue(isNativeDetailRoute("PHYVLAB_DETAIL"))
         assertFalse(isNativeDetailRoute("UNKNOWN_ROUTE"))
     }
 }

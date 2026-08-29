@@ -707,7 +707,7 @@ fun LoginRoute(
                 coursewareDirectoryGateway = coursewareDirectoryGateway,
                 systemCalendarGateway = systemCalendarGateway,
                 onLogout = { logout(shellProfile.studentId) },
-                reauthenticatePhyVlab = phyVlabSessionRecovery::attempt,
+                reauthenticateSession = phyVlabSessionRecovery::attempt,
             )
         }
         SideEffect {

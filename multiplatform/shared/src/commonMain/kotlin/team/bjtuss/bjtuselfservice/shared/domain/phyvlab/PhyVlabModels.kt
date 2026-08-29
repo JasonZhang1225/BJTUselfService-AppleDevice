@@ -34,6 +34,7 @@ data class PhyVlabAssignmentDetail(
     val description: String = "",
     val submissionStatus: String = "",
     val submissionDateText: String? = null,
+    val submissionDateTimestamp: Long? = null,
     val gradingStatus: String? = null,
     val gradeText: String? = null,
     val feedbackText: String? = null,
