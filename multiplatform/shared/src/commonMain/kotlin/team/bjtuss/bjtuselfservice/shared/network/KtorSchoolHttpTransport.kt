@@ -13,11 +13,13 @@ import io.ktor.client.request.headers
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsBytes
+import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.Headers as KtorHeaders
 import io.ktor.http.HttpHeaders
 import io.ktor.http.Parameters
 import io.ktor.http.Url
+import io.ktor.http.content.ByteArrayContent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -89,9 +91,22 @@ class KtorSchoolHttpTransport(
                     SchoolHttpMethod.POST -> HttpMethod.Post
                 }
                 headers {
-                    request.headers.forEach { (name, value) -> append(name, value) }
+                    request.headers.forEach { (name, value) ->
+                        // ByteArrayContent 会根据 rawBodyContentType 写入 Content-Type；
+                        // 跳过调用方重复提供的同名头，避免 Ktor 合并出两个 Content-Type。
+                        if (request.rawBody == null || !name.equals(HttpHeaders.ContentType, ignoreCase = true)) {
+                            append(name, value)
+                        }
+                    }
                 }
-                if (request.multipartFiles.isNotEmpty()) {
+                if (request.rawBody != null) {
+                    setBody(
+                        ByteArrayContent(
+                            bytes = request.rawBody,
+                            contentType = ContentType.parse(request.rawBodyContentType),
+                        ),
+                    )
+                } else if (request.multipartFiles.isNotEmpty()) {
                     setBody(
                         MultiPartFormDataContent(
                             formData {

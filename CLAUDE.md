@@ -30,7 +30,7 @@
 
 ## 当前事实
 
-- 当前迁移工作在本地 main 分支进行；分支创建点是 `9d8da18`。不要擅自切换、合并、rebase 或从 Release 标签重新开工。
+- `main` 是长期集成基线；本轮邮箱开发按用户要求在 `maildev` 分支承接，未经明确要求不得把本轮改动提交、合并或推送到 `main`。分支创建点是 `9d8da18`；不要擅自 rebase 或从 Release 标签重新开工。
 - 当前仓库根部是单模块 Android 项目，入口模块为 `:app`。该现有工程现在是冻结的只读参考。
 - 主要语言是 Kotlin，登录、HTML 解析和模型相关仍有部分 Java。
 - UI 使用 Jetpack Compose/Material 3。
@@ -39,7 +39,7 @@
 - 验证码使用 `pytorch_android` 加载 `app/src/main/assets/model.pt`。
 - 目标架构是 Kotlin Multiplatform + Compose Multiplatform，支持 Android、iOS、macOS。
 - 新实现必须放在独立 `multiplatform/` Gradle 工程中；不要修改 `app/`、现有根 `build.gradle.kts`、`settings.gradle.kts`、`gradle/`、Android Manifest、资源或现有测试。
-- 当前 KMP 三端发布基线为 pre-release `1.7.1-KMP`（本地构建上传 GitHub Release，无 git tag）；上游 Android 对照基线保留 `v1.7.0@419313d`；`ZJG@9d8da18` 只是迁移分支创建点。
+- 当前 KMP 三端发布基线为 pre-release `1.7.4-KMP`（git tag `v1.7.4-KMP`）；当前功能源代码基线为 `v1.7.3-KMP-B@a342615`，上游 Android 对照基线保留 `v1.7.0@419313d`；`ZJG@9d8da18` 只是迁移分支创建点。
 - 当前冻结 Android 工作树不是完整的 1.7.0 源码参考。需要查看 1.7.0 时使用隔离的只读参考目录或独立工作树，不把发布提交混入冻结根工程或 `multiplatform/`。
 
 > 动态进度（当前做到哪一步、近期计划）见 `memory.md`；历史验收与验证证据见 `history_full.md`；本文件只讲原则与边界。
@@ -212,6 +212,14 @@
 - 上述授权不包含修改密码、创建新账号、扩大权限或接受协议。遇到意外权限、证书、签名、安装、协议或不同登录目标，仍须在动作发生前请求确认。
 - 在本机原 Android App，以及本机 iOS/macOS 移植版所复现的同一北交大登录流程中，后续获取、识别、填写和提交 CAPTCHA 自动进行。
 
+### macOS 源码运行与多窗口隔离
+
+- `multiplatform/desktopApp/src/main/kotlin/team/bjtuss/bjtuselfservice/desktop/Main.kt` 当前只有一个 `Window`；`AppReopenedListener` 只负责显示并聚焦已有窗口，不得改成在重开事件中创建新窗口。涉及窗口生命周期的改动必须补 `DesktopWindowLifecycle` 测试。
+- `./gradlew :desktopApp:run` 会启动独立的源码 JVM。终端 `Ctrl-C` 可能只结束 Gradle 前台进程，子 JVM 仍会留在后台；禁止并行或连续启动多个 `:desktopApp:run`，也不能把多个源码实例误判为应用内重复窗口。
+- 启动前先用 `ps -axo pid,ppid,command` 检查精确的源码可执行路径；验证期间最多保留一个源码实例。源码路径是 `multiplatform/desktopApp/build/compose/binaries/main/app/BJTUselfServiceKMP.app`，`/Applications/交大自由行 KMP.app` 属于用户已打开的安装版，不得为了排查而关闭或结束它。
+- Computer Use/`sky.get_app_state` 能在目标未运行时自动启动应用，因此必须在“Gradle 启动源码实例”和“Computer Use 自动启动应用”之间二选一，不能两套启动方式叠加。操作前先读取状态，操作后重新读取状态；源码版与安装版同名/同 Bundle ID 同时存在时，优先做状态/截图验证，交互验证前先解决实例歧义。
+- 验证结束时先结束 Gradle，再检查精确源码路径是否仍有子进程；必要时只结束经过路径核验的源码 PID。禁止 `killall`、宽匹配 `pkill` 或任何可能命中安装版的批量结束命令。交付前必须确认没有遗留源码实例。
+
 ### 强制视觉与行为盘点
 
 - 原 Android App 盘点必须在成功登录后进行，覆盖所有一级导航、核心二级页、设置项、弹窗和可安全进入的 WebView/文件流程。
@@ -232,4 +240,4 @@
 
 ## 当前首要任务
 
-当前最优先任务是 **M12 课程表体验整合**（a 日期跳转 / b 手机一周视图 / c 课程表与考试导出）与 **M13 物理在线（phyvlab）接入**，范围与验收见 `goal.md` 对应节及 `docs/migration/` 规划文档。M5.5/M5.6 已完成。所有新实现只写入 `multiplatform/` 和迁移文档，不修改冻结根 Android 工程。联网下载、签名、提交、推送和发布等继续遵守各自权限边界。每次交付前更新 `goal.md` 与 `memory.md`。
+当前最优先任务是 **M15 邮箱原生前端的只读验收**；M16 仅保留校园 VPN 的官方路径调研，暂不开发。M12–M14 已完成或已进入回归维护，M13 物理在线仍保留移动端和真实上传等明确未验收边界，范围与证据见 `goal.md` 及 `docs/migration/`。所有新实现只写入 `multiplatform/` 和迁移文档，不修改冻结根 Android 工程。联网下载、签名、提交、推送和发布等继续遵守各自权限边界。每次交付前更新 `goal.md` 与 `memory.md`。

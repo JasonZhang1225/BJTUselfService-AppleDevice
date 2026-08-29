@@ -84,7 +84,9 @@ class CourseScheduleHtmlParserTest {
     @Test
     fun parsesOnlySafeCurrentWeekRange() {
         assertEquals(14, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/?zc=14&x=1"))
-        assertEquals(0, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/?zc=27"))
+        assertEquals(27, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/?zc=27"))
+        assertEquals(30, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/?zc=30"))
+        assertEquals(0, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/?zc=31"))
         assertEquals(0, parseCurrentWeekFromUrl("https://aa.bjtu.edu.cn/path/"))
     }
 
@@ -93,7 +95,9 @@ class CourseScheduleHtmlParserTest {
         assertEquals(25, parseCurrentWeekFromTimeList("""{"weekCode":"25"}"""))
         assertEquals(14, parseCurrentWeekFromTimeList("""{"weekCode":14}"""))
         assertEquals(8, parseCurrentWeekFromTimeList("""{"week_code":"8"}"""))
-        assertEquals(0, parseCurrentWeekFromTimeList("""{"weekCode":"27"}"""))
+        assertEquals(27, parseCurrentWeekFromTimeList("""{"weekCode":"27"}"""))
+        assertEquals(30, parseCurrentWeekFromTimeList("""{"weekCode":30}"""))
+        assertEquals(0, parseCurrentWeekFromTimeList("""{"weekCode":"31"}"""))
         assertEquals(0, parseCurrentWeekFromTimeList("""{"weekCode":"0"}"""))
         assertEquals(0, parseCurrentWeekFromTimeList("<html>login</html>"))
         assertEquals(0, parseCurrentWeekFromTimeList("""{"STATUS":"0"}"""))

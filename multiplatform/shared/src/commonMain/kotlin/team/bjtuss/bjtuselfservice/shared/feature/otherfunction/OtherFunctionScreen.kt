@@ -21,7 +21,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -38,44 +37,46 @@ import team.bjtuss.bjtuselfservice.shared.domain.otherfunction.OtherFunctionTask
 import team.bjtuss.bjtuselfservice.shared.domain.otherfunction.OtherFunctionTaskState
 import team.bjtuss.bjtuselfservice.shared.domain.otherfunction.ReportCardLanguage
 
-/**
- * 校历下载：独立页面，点进后才出现下载按钮。
- * 保存取消不会显示为红色失败。
- */
+const val SCHOOL_CALENDAR_ARTICLE_URL = "https://mp.weixin.qq.com/s/_O3Jwni5D2ZB93fmczCYmQ"
+
+/** 校历由公众号文章维护，入口只负责打开文章，不再请求已经失效的校历下载接口。 */
 @Composable
-fun CalendarDownloadWorkspace(
-    model: OtherFunctionScreenModel,
+fun SchoolCalendarArticleWorkspace(
     expanded: Boolean,
+    onOpenArticle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val state by model.state.collectAsState()
-    val scope = rememberCoroutineScope()
-
-    // 进入页面即拉取最新校历文件名展示；失败静默，下载按钮不受影响。
-    LaunchedEffect(Unit) {
-        model.refreshCalendarFileName()
-    }
-
-    DownloadPageScaffold(
-        title = "校历下载",
-        subtitle = "查看并下载学校最新的校历信息",
+    OtherFunctionPageScaffold(
+        title = "校历",
+        subtitle = "校历内容由公众号文章维护，打开后查看最新安排",
         expanded = expanded,
         modifier = modifier,
     ) {
-        OtherFunctionCard(
-            title = "校历下载",
-            description = "查看并下载学校最新的校历信息",
-            actionLabel = "下载",
-            taskState = state.calendarState,
-            enabled = !state.isAnyTaskRunning,
-            onAction = { scope.launch { model.downloadCalendar() } },
-            onDismiss = { model.clearTaskState(OtherFunctionTask.CALENDAR) },
-            infoText = when {
-                state.calendarFileNameLoading && state.calendarFileName == null -> "正在获取最新校历…"
-                state.calendarFileName != null -> "当前最新：${state.calendarFileName}"
-                else -> null
-            },
-        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "校历信息",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "校历由公众号文章持续更新，应用不再下载旧接口提供的文件。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(onClick = onOpenArticle) {
+                    Text("打开公众号文章")
+                }
+            }
+        }
     }
 }
 
@@ -91,7 +92,7 @@ fun ReportCardDownloadWorkspace(
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
 
-    DownloadPageScaffold(
+    OtherFunctionPageScaffold(
         title = "成绩单下载",
         subtitle = "下载个人学习成绩单，支持中英文版本",
         expanded = expanded,
@@ -121,7 +122,7 @@ fun ReportCardDownloadWorkspace(
 }
 
 @Composable
-private fun DownloadPageScaffold(
+private fun OtherFunctionPageScaffold(
     title: String,
     subtitle: String,
     expanded: Boolean,

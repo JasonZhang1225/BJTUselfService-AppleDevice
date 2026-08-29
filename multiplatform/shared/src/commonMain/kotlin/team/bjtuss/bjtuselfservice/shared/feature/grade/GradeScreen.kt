@@ -130,7 +130,8 @@ import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareContentSo
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareScreenModel
 import team.bjtuss.bjtuselfservice.shared.feature.courseware.CoursewareWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.OtherFunctionScreenModel
-import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.CalendarDownloadWorkspace
+import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.SCHOOL_CALENDAR_ARTICLE_URL
+import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.SchoolCalendarArticleWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.otherfunction.ReportCardDownloadWorkspace
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomBuildingState
 import team.bjtuss.bjtuselfservice.shared.feature.classroom.ClassroomScreenModel
@@ -198,7 +199,7 @@ private enum class AppSection(
     CLASSROOMS("教室人数估计"),
     MAILBOX("邮箱"),
     PHYVLAB("物理在线", "物理在线（仅能在校园网下访问）"),
-    CALENDAR_DOWNLOAD("校历下载"),
+    CALENDAR("校历"),
     REPORT_CARD_DOWNLOAD("成绩单下载"),
     SETTINGS("设置"),
     MORE("更多"),
@@ -221,7 +222,7 @@ private val MoreGroupSections = setOf(
     AppSection.CLASSROOM_OCCUPANCY,
     AppSection.MAILBOX,
     AppSection.PHYVLAB,
-    AppSection.CALENDAR_DOWNLOAD,
+    AppSection.CALENDAR,
     AppSection.REPORT_CARD_DOWNLOAD,
     AppSection.SETTINGS,
     AppSection.MORE,
@@ -243,6 +244,10 @@ const val HOMEWORK_DETAIL_ROUTE_ID = "HOMEWORK_DETAIL"
 /** 物理在线作业详情的二级路由：紧凑端仿作业详情，宽屏仍使用底部弹窗。 */
 private data object PhyVlabDetailRoute : AppRoute
 const val PHYVLAB_DETAIL_ROUTE_ID = "PHYVLAB_DETAIL"
+
+/** 邮箱详情的二级路由：紧凑端使用平台原生 push，宽屏留在三栏阅读区。 */
+private data object MailboxDetailRoute : AppRoute
+const val MAILBOX_DETAIL_ROUTE_ID = "MAILBOX_DETAIL"
 
 /** Google predictive-back full-screen surface 的 SystemUI 插值。 */
 private val androidPredictiveEasing = CubicBezierEasing(0.1f, 0.1f, 0f, 1f)
@@ -290,6 +295,7 @@ fun AuthenticatedAppShell(
     val classroomState by classroomModel.state.collectAsState()
     val classroomOccupancyState by classroomOccupancyModel.state.collectAsState()
     val mailboxState by mailboxModel.state.collectAsState()
+    val mailboxMessageLoading = (mailboxState as? MailboxUiState.Ready)?.isMessageLoading == true
     val phyVlabState by phyVlabModel.state.collectAsState()
     val homeState by homeModel.state.collectAsState()
     val settingsState by settingsModel.state.collectAsState()
@@ -335,6 +341,17 @@ fun AuthenticatedAppShell(
     val useNativeSecondaryRoutes =
         nativeNavigationEnabled && windowClass != WindowClass.Expanded
 
+    // 紧凑端未启用原生二级路由时，邮件详情暂时留在邮箱目的地内。
+    // 此时详情页自己的「邮件列表」返回已经承担了这一层返回，顶栏不能再显示
+    // 「退出邮箱功能」的返回箭头，否则用户会同时看到两个不同层级的返回入口。
+    val mailboxReadyState = mailboxState as? MailboxUiState.Ready
+    val mailboxInlineDetail = !shouldShowMailboxRootBack(
+        expanded = windowClass == WindowClass.Expanded,
+        useNativeSecondaryRoutes = useNativeSecondaryRoutes,
+        hasSelectedMessage = mailboxReadyState?.selectedMessage != null,
+        isMessageLoading = mailboxReadyState?.isMessageLoading == true,
+    )
+
     // Navigation 3：应用直接拥有返回栈。一级 tab 总是以 HOME 为根，二/三级页继续压栈；
     // NavDisplay 负责 Android predictive back 与 iOS start-edge back 的连续手势进度。
     val initialRoute = remember(forcedRouteId) {
@@ -347,6 +364,7 @@ fun AuthenticatedAppShell(
         ClassroomOccupancyDetailRoute -> AppSection.CLASSROOM_OCCUPANCY
         HomeworkDetailRoute -> AppSection.HOMEWORK
         PhyVlabDetailRoute -> AppSection.PHYVLAB
+        MailboxDetailRoute -> AppSection.MAILBOX
         is AppSection -> currentRoute
     }
     val popBackStack: () -> Unit = if (forcedRouteId != null) {
@@ -413,7 +431,7 @@ fun AuthenticatedAppShell(
                 AppSection.CLASSROOM_OCCUPANCY -> classroomOccupancyModel.refresh()
                 AppSection.MAILBOX -> mailboxModel.refresh()
                 AppSection.PHYVLAB -> phyVlabModel.refresh()
-                AppSection.CALENDAR_DOWNLOAD -> Unit
+                AppSection.CALENDAR -> Unit
                 AppSection.REPORT_CARD_DOWNLOAD -> Unit
                 AppSection.SETTINGS -> Unit
                 AppSection.MORE -> Unit
@@ -791,17 +809,17 @@ fun AuthenticatedAppShell(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            AppSection.CALENDAR_DOWNLOAD -> DestinationPage(
-                title = AppSection.CALENDAR_DOWNLOAD.title,
+            AppSection.CALENDAR -> DestinationPage(
+                title = AppSection.CALENDAR.title,
                 expanded = expanded,
                 refreshable = false,
                 isRefreshing = false,
                 showBack = true,
                 modifier = modifier,
             ) {
-                CalendarDownloadWorkspace(
-                    model = otherFunctionModel,
+                SchoolCalendarArticleWorkspace(
                     expanded = expanded,
+                    onOpenArticle = { onOpenExternalUrl(SCHOOL_CALENDAR_ARTICLE_URL) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -932,13 +950,32 @@ fun AuthenticatedAppShell(
                 expanded = expanded,
                 refreshable = false,
                 isRefreshing = mailboxState == MailboxUiState.Preparing,
+                showBack = !mailboxInlineDetail,
+                modifier = modifier,
+            ) {
+                MailboxWorkspace(
+                    model = mailboxModel,
+                    expanded = expanded,
+                    onOpenNativeDetail = if (useNativeSecondaryRoutes) {
+                        { onOpenNativeRoute(MAILBOX_DETAIL_ROUTE_ID) }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            MailboxDetailRoute -> DestinationPage(
+                title = "邮件详情",
+                expanded = expanded,
+                refreshable = false,
+                isRefreshing = mailboxMessageLoading,
                 showBack = true,
                 modifier = modifier,
             ) {
                 MailboxWorkspace(
                     model = mailboxModel,
-                    platform = platform,
-                    expanded = expanded,
+                    expanded = false,
+                    nativeDetail = true,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -1074,6 +1111,14 @@ fun AuthenticatedAppShell(
                     entry<PhyVlabDetailRoute> {
                         SectionDestination(
                             route = PhyVlabDetailRoute,
+                            expanded = true,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
+                        )
+                    }
+                    entry<MailboxDetailRoute> {
+                        SectionDestination(
+                            route = MailboxDetailRoute,
                             expanded = true,
                             modifier = Modifier.fillMaxSize(),
                             usesLegacySmartTransport = usesLegacySmartTransportFor(platform.family),
@@ -1252,6 +1297,14 @@ fun AuthenticatedAppShell(
                             usesLegacySmartTransport = false,
                         )
                     }
+                    entry<MailboxDetailRoute> {
+                        SectionDestination(
+                            route = MailboxDetailRoute,
+                            expanded = false,
+                            modifier = Modifier.fillMaxSize(),
+                            usesLegacySmartTransport = false,
+                        )
+                    }
                 },
             )
             if (showsCompactBottomBar && compactBottomBarOverlayPadding > 0.dp) {
@@ -1274,9 +1327,22 @@ private fun String.toAppRoute(): AppRoute? =
         HomeworkDetailRoute
     } else if (this == PHYVLAB_DETAIL_ROUTE_ID) {
         PhyVlabDetailRoute
+    } else if (this == MAILBOX_DETAIL_ROUTE_ID) {
+        MailboxDetailRoute
     } else {
         AppSection.entries.firstOrNull { it.name == this }
     }
+
+/**
+ * 紧凑端内嵌详情时，详情自己的返回入口负责回到列表；其它状态由邮箱页顶栏负责退出。
+ * 独立成纯函数，避免导航层级修复再次被平台条件悄悄覆盖。
+ */
+internal fun shouldShowMailboxRootBack(
+    expanded: Boolean,
+    useNativeSecondaryRoutes: Boolean,
+    hasSelectedMessage: Boolean,
+    isMessageLoading: Boolean,
+): Boolean = expanded || useNativeSecondaryRoutes || !(hasSelectedMessage || isMessageLoading)
 
 private fun HomeChangeDomain.toAppSection(): AppSection = when (this) {
     HomeChangeDomain.GRADES -> AppSection.GRADES
@@ -1859,7 +1925,7 @@ private fun CompactTabIcon(section: AppSection) {
  * 「更多」页：iOS 设置式分块列表。
  * - 学业：物理在线、考试、课件
  * - 校园：教室占用查询、教室人数估计、邮箱
- * - 下载：校历、成绩单
+ * - 信息与下载：校历文章、成绩单
  * - 设置单独一块垫底
  */
 @Composable
@@ -1878,8 +1944,8 @@ private fun MoreWorkspace(
             items = listOf(AppSection.CLASSROOM_OCCUPANCY, AppSection.CLASSROOMS, AppSection.MAILBOX),
         ),
         MoreListSection(
-            header = "下载",
-            items = listOf(AppSection.CALENDAR_DOWNLOAD, AppSection.REPORT_CARD_DOWNLOAD),
+            header = "信息与下载",
+            items = listOf(AppSection.CALENDAR, AppSection.REPORT_CARD_DOWNLOAD),
         ),
         MoreListSection(
             header = null,

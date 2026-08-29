@@ -80,8 +80,8 @@
 
 当前版本：`1.7.4-KMP`（Android/iOS build 15；macOS build 15；Windows/desktop 数值版本 1.7.4；保留 Windows UpgradeCode 支持覆盖安装）。本次重新打包后源包与桌面副本逐字节一致：
 
-- `/Users/zjg/Downloads/BJTUselfServiceKMP-1.7.4.dmg`（115,711,567 bytes；SHA-256 `014421911c50f80738f12dfe488bfba4594bb59a8edc4060922cafa4ac6883cd`）
-- `/Users/zjg/Downloads/BJTUSelfService-KMP-1.7.4-KMP-iOS-unsigned.ipa`（41,232,224 bytes；SHA-256 `c6d7d6722ede48b7732fb8e3b10d60eaa582f568722274e8c8143086a6482a02`）
+- `/Users/zjg/Downloads/BJTUselfServiceKMP-1.7.4.dmg`（115,885,364 bytes；SHA-256 `0f2328f13f0d3b7c41e5362082150fce9ec4efb3ecffecd1ffa21b1e9e0b96af`）
+- `/Users/zjg/Downloads/BJTUSelfService-KMP-1.7.4-KMP-iOS-unsigned.ipa`（41,403,730 bytes；SHA-256 `9532a82795b9c858f503e9bc70a9e888e1a9bbff1ab365a6f12d4a0d29c0684e`；本次 M15 邮箱只读前端、分页和头像修正已包含）
 
 - `C:\Users\zjg\OneDrive\Desktop\交大自由行 KMP-1.7.4-KMP-DEV.msi`（113,213,258 bytes；SHA-256 `7AA795E592E5110909469173827ABFF371048E678FFF04C179A3FCFB9B909599`）
 - `C:\Users\zjg\OneDrive\Desktop\交大自由行 KMP-1.7.4-KMP-DEV.exe`（113,874,944 bytes；SHA-256 `8640F3A40D814197EA733257C6C88C2C7F565A76EAFF10AB5782CD181553D9EC`）

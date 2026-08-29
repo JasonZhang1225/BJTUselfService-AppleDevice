@@ -48,6 +48,22 @@ class CourseScheduleRepositoryTest {
         assertEquals(cached, second.snapshot)
     }
 
+    @Test
+    fun calendarReconciliationPersistsCorrectedCurrentWeek() {
+        val local = FakeLocal(CourseScheduleSnapshot(listOf(course(7, "旧课")), 1))
+        val repository = DefaultCourseScheduleRepository(
+            "student-a",
+            local,
+            FakeRemote(RemoteCourseScheduleSnapshot(emptyList(), 1)),
+        )
+
+        val corrected = repository.reconcileCurrentWeek(26)
+
+        assertEquals(26, corrected.currentWeek)
+        assertEquals(26, local.snapshot.currentWeek)
+        assertEquals(listOf("student-a"), local.replacedAccounts)
+    }
+
     private class FakeRemote(
         private val snapshot: RemoteCourseScheduleSnapshot? = null,
         private val error: Exception? = null,

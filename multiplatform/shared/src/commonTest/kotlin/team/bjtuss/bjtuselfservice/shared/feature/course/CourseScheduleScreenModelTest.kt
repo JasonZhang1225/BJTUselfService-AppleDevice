@@ -131,6 +131,50 @@ class CourseScheduleScreenModelTest {
     }
 
     @Test
+    fun calendarCorrectsWeekOneReturnedAtCurrentSemesterSummerBoundary() = runBlocking {
+        val snapshot = CourseScheduleSnapshot(listOf(course(1, week = 26)), 1)
+        val model = CourseScheduleScreenModel(
+            repository = FakeRepository(snapshot, snapshot),
+            calendarRepository = FakeCalendarRepository(
+                weeks = listOf(
+                    week(25, LocalDate(2026, 8, 17)),
+                    week(26, LocalDate(2026, 8, 24)),
+                    week(27, LocalDate(2026, 8, 31)),
+                ),
+                selectedLabel = "2025-2026-2",
+            ),
+            todayProvider = { LocalDate(2026, 8, 29) },
+        )
+
+        model.initialize()
+        model.ensureCalendarLoaded()
+
+        assertEquals(26, model.state.value.currentWeek)
+        assertEquals(26, model.state.value.selectedWeek)
+        assertTrue(model.state.value.followCurrentWeek)
+    }
+
+    @Test
+    fun laterNetworkRefreshDoesNotReintroduceWeekOneAfterCalendarCorrection() = runBlocking {
+        val snapshot = CourseScheduleSnapshot(listOf(course(1, week = 26)), 1)
+        val model = CourseScheduleScreenModel(
+            repository = FakeRepository(snapshot, snapshot),
+            calendarRepository = FakeCalendarRepository(
+                weeks = listOf(week(26, LocalDate(2026, 8, 24))),
+                selectedLabel = "2025-2026-2",
+            ),
+            todayProvider = { LocalDate(2026, 8, 29) },
+        )
+
+        model.initialize()
+        model.ensureCalendarLoaded()
+        model.refresh()
+
+        assertEquals(26, model.state.value.currentWeek)
+        assertEquals(26, model.state.value.selectedWeek)
+    }
+
+    @Test
     fun summerContinuationWeekStillFollowsCurrentWeek() = runBlocking {
         val repository = FakeRepository(
             loaded = CourseScheduleSnapshot(listOf(course(1, week = 26)), 26),

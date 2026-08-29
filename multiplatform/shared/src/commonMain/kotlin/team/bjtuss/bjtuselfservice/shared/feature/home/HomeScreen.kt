@@ -440,7 +440,7 @@ private fun HomeAgendaSection(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (currentWeek in 1..26) "第 $currentWeek 教学周" else "本周日程",
+                        if (currentWeek in 1..30) "第 $currentWeek 教学周" else "本周日程",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                     )

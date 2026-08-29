@@ -6,8 +6,11 @@ import team.bjtuss.bjtuselfservice.shared.data.homework.parseStrictJsonObject
 import team.bjtuss.bjtuselfservice.shared.data.homework.string
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 
-/** 与原 1.7.0 DataStore / KMP 课表缓存一致：超出此范围当作未取到当前周。 */
-internal val TEACHING_WEEK_RANGE = 1..26
+/**
+ * 与当前 KMP 课表/校历一致：春季学期后半段可能继续编号到第 30 周。
+ * 超出此范围才当作未取到当前周；不能把学期末的续编周截断后回退成第 1 周。
+ */
+internal val TEACHING_WEEK_RANGE = 1..30
 
 enum class CourseScheduleParseFailure {
     TABLE_MISSING,

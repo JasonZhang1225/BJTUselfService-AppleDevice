@@ -73,8 +73,9 @@ fun isNativeDetailRoute(routeId: String): Boolean =
         routeId == "CLASSROOM_DETAIL" ||
         routeId == "CLASSROOM_OCCUPANCY_DETAIL" ||
         routeId == "HOMEWORK_DETAIL" ||
+        routeId == "MAILBOX_DETAIL" ||
         routeId == "MAILBOX" ||
-        routeId == "CALENDAR_DOWNLOAD" ||
+        routeId == "CALENDAR" ||
         routeId == "REPORT_CARD_DOWNLOAD" ||
         routeId == "PHYVLAB" ||
         routeId == "SETTINGS"

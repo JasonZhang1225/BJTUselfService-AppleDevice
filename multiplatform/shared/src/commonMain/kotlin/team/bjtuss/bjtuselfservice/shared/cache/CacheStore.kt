@@ -126,13 +126,13 @@ class CacheStore(
     fun courseCurrentWeek(accountScope: String): Int =
         metadata(accountScope, COURSE_CURRENT_WEEK_KEY)
             ?.toIntOrNull()
-            ?.takeIf { it in 0..26 }
+            ?.takeIf { it in 0..COURSE_MAX_WEEK }
             ?: 0
 
     /** 课程行与它们对应的当前周提示属于同一个账号快照。 */
     fun replaceCourseSnapshot(accountScope: String, courses: List<Course>, currentWeek: Int) {
         val scope = requireAccountScope(accountScope)
-        val safeWeek = currentWeek.takeIf { it in 1..26 } ?: 0
+        val safeWeek = currentWeek.takeIf { it in 1..COURSE_MAX_WEEK } ?: 0
         queries.transaction {
             replaceCoursesInTransaction(scope, courses)
             queries.putMetadata(scope, COURSE_CURRENT_WEEK_KEY, safeWeek.toString())
@@ -462,6 +462,7 @@ private object SettingKey {
 }
 
 private const val COURSE_CURRENT_WEEK_KEY = "course_current_week"
+private const val COURSE_MAX_WEEK = 30
 private const val PROFILE_NAME_KEY = "profile_name"
 private const val PROFILE_IDENTITY_KEY = "profile_identity"
 private const val PROFILE_DEPARTMENT_KEY = "profile_department"

@@ -74,7 +74,7 @@
 
 ### 已实施
 
-- 共享层：新增 `AuthenticatedSession`（集中登录后 profile、各 ScreenModel、偏好、文件网关、退出能力），`LoginRoute` 唯一发布与撤销会话；`AuthenticatedDestinationApp(routeId)` 渲染单个二级目的地；`isNativeDetailRoute` 白名单仅含 EXAMS/COURSEWARE/CLASSROOMS/CLASSROOM_DETAIL/MAILBOX/CALENDAR_DOWNLOAD/REPORT_CARD_DOWNLOAD/SETTINGS。`nativeNavigationEnabled` 时紧凑端二级页不再压共享 `NavDisplay`（转场 None）；底栏五个一级 tab 只清栈即时切换，永不触发原生 push（底栏集合与 MoreGroupSections 除 MORE 外不相交，`navigateToSection` 已核对）。
+- 共享层：新增 `AuthenticatedSession`（集中登录后 profile、各 ScreenModel、偏好、文件网关、退出能力），`LoginRoute` 唯一发布与撤销会话；`AuthenticatedDestinationApp(routeId)` 渲染单个二级目的地；`isNativeDetailRoute` 白名单仅含 EXAMS/COURSEWARE/CLASSROOMS/CLASSROOM_DETAIL/MAILBOX/CALENDAR/REPORT_CARD_DOWNLOAD/SETTINGS。`nativeNavigationEnabled` 时紧凑端二级页不再压共享 `NavDisplay`（转场 None）；底栏五个一级 tab 只清栈即时切换，永不触发原生 push（底栏集合与 MoreGroupSections 除 MORE 外不相交，`navigateToSection` 已核对）。
 - Android：新增 `NativeDetailActivity`（`enableOnBackInvokedCallback=true`，系统 cross-activity 与 predictive-back 动画，不拦截系统返回；`onStart/onStop` 观察会话，会话撤销即 finish）与进程内 `AndroidAuthenticatedSessionRegistry`（不落盘；registry 缺失时 detail 立即 finish 回根，不伪造会话）。`MainActivity` 发布会话、对二级路由 `startActivity`，`isFinishing` 时清空 registry，并预热 WebView 内核。
 - iOS：Swift 新增 `NativeNavigationController`（隐藏导航栏，`UINavigationControllerDelegate` 暂无自定义方法）。登录态经 `onAuthenticatedSessionChanged` 传入、登出 `popToRootViewController(animated: false)`；二级入口由 `MainViewControllerKt.NativeDestinationViewController` 创建 Kotlin Compose 控制器并系统 push，`restorationIdentifier` 去重防连点；Compose 返回箭头接 `onCloseNativeRoute` → `popViewController(animated: true)`；leading-edge 返回由 UIKit `interactivePopGestureRecognizer` 提供。
 - macOS：维持 JVM `desktopApp` 侧栏即时切换；SwiftUI 宿主未开始。

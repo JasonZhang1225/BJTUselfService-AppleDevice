@@ -45,6 +45,11 @@ class CacheStoreCourseScheduleLocalDataSource(
 interface CourseScheduleRepository {
     fun load(): CourseScheduleSnapshot
     suspend fun refresh(): CourseScheduleRefreshResult
+
+    /**
+     * 用按日期校准后的教学周更新缓存。旧的测试/替代仓库无需实现时保留原快照。
+     */
+    fun reconcileCurrentWeek(currentWeek: Int): CourseScheduleSnapshot = load()
 }
 
 class DefaultCourseScheduleRepository(
@@ -57,6 +62,15 @@ class DefaultCourseScheduleRepository(
     }
 
     override fun load(): CourseScheduleSnapshot = local.load(accountScope)
+
+    override fun reconcileCurrentWeek(currentWeek: Int): CourseScheduleSnapshot {
+        val fallback = runCatching(::load).getOrElse { CourseScheduleSnapshot(emptyList(), 0) }
+        val corrected = fallback.copy(currentWeek = currentWeek)
+        return runCatching {
+            local.replace(accountScope, corrected)
+            local.load(accountScope)
+        }.getOrElse { fallback }
+    }
 
     override suspend fun refresh(): CourseScheduleRefreshResult {
         val fallback = runCatching(::load).getOrElse { CourseScheduleSnapshot(emptyList(), 0) }

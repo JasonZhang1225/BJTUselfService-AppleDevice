@@ -324,6 +324,18 @@ class CacheStoreTest {
     }
 
     @Test
+    fun courseSnapshotKeepsSummerContinuationWeekThirty() {
+        val store = inMemoryStore()
+        try {
+            store.replaceCourseSnapshot("student-a", listOf(sampleCourse("A")), 30)
+
+            assertEquals(30, store.courseCurrentWeek("student-a"))
+        } finally {
+            store.close()
+        }
+    }
+
+    @Test
     fun programMappingDataSourceIsNullUntilRowsExist() {
         val store = inMemoryStore()
         try {

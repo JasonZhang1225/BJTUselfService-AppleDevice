@@ -1,6 +1,10 @@
 package team.bjtuss.bjtuselfservice.shared.feature.mailbox
 
 import kotlinx.coroutines.runBlocking
+import team.bjtuss.bjtuselfservice.shared.data.mailbox.MailboxRemoteDataSource
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailMessage
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailboxPage
+import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailSummary
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpResponse
 import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpTransport
@@ -9,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class MailboxScreenModelTest {
     @Test
@@ -23,6 +28,11 @@ class MailboxScreenModelTest {
             assertEquals("mis.bjtu.edu.cn", ready.request.cookies.single().domain)
             assertEquals("/module/", ready.request.cookies.single().path)
             assertFalse(ready.request.toString().contains("secret"))
+            assertEquals(
+                listOf(1, -5, 2, 3, 4, 5, 6),
+                ready.folders.map { it.id },
+            )
+            assertEquals("已发送", ready.folders[3].name)
         }
     }
 
@@ -43,6 +53,131 @@ class MailboxScreenModelTest {
             assertIs<MailboxUiState.SessionUnavailable>(model.state.value)
         }
     }
+
+    @Test
+    fun loadsListOpensDetailAndReturnsToList() {
+        runBlocking {
+            val summary = MailSummary(
+                id = "message-1",
+                folderId = 1,
+                sender = "teacher@example.test",
+                subject = "课程通知",
+                preview = "请查看安排",
+                sentAt = "2026-08-29 09:10:00",
+                receivedAt = "2026-08-29 09:10:00",
+                sizeBytes = 128,
+                isRead = true,
+                hasAttachments = false,
+            )
+            val detail = MailMessage(
+                id = summary.id,
+                folderId = summary.folderId,
+                from = listOf(summary.sender),
+                to = listOf("student@example.test"),
+                cc = emptyList(),
+                bcc = emptyList(),
+                subject = summary.subject,
+                bodyHtml = "<p>正文</p>",
+                sentAt = summary.sentAt,
+                attachments = emptyList(),
+            )
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 1, messages = listOf(summary)),
+                detail = detail,
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+
+            model.initialize()
+            val listState = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(listOf(summary), listState.messages)
+            assertEquals(1, listState.totalCount)
+
+            model.openMessage(summary)
+            val detailState = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(detail, detailState.selectedMessage)
+            assertFalse(detailState.isMessageLoading)
+
+            model.clearSelectedMessage()
+            val returnedState = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(null, returnedState.selectedMessage)
+            assertEquals(listOf(summary), returnedState.messages)
+        }
+    }
+
+    @Test
+    fun loadsNextMailboxPageWithoutDuplicatingMessages() {
+        runBlocking {
+            val first = MailSummary(
+                id = "message-1",
+                folderId = 1,
+                sender = "first@example.test",
+                subject = "第一页",
+                preview = "摘要",
+                sentAt = "2026-08-29 09:10:00",
+                receivedAt = "2026-08-29 09:10:00",
+                sizeBytes = 128,
+                isRead = true,
+                hasAttachments = false,
+            )
+            val second = first.copy(id = "message-2", subject = "第二页")
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 2, messages = listOf(first)),
+                detail = emptyDetail(),
+                nextPage = MailboxPage(totalCount = 2, messages = listOf(first, second)),
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+
+            model.initialize()
+            assertTrue(assertIs<MailboxUiState.Ready>(model.state.value).hasMoreMessages)
+
+            model.loadMore()
+
+            val ready = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(listOf(first, second), ready.messages)
+            assertFalse(ready.hasMoreMessages)
+            assertFalse(ready.isLoadingMore)
+        }
+    }
+
+    @Test
+    fun selectingSentFolderLoadsItsCoremailFolderId() {
+        runBlocking {
+            val summary = MailSummary(
+                id = "sent-1",
+                folderId = 3,
+                sender = "student@example.test",
+                subject = "已发送资料",
+                preview = "",
+                sentAt = "2026-08-29 10:00:00",
+                receivedAt = "",
+                sizeBytes = 32,
+                isRead = true,
+                hasAttachments = false,
+            )
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 1, messages = listOf(summary)),
+                detail = emptyDetail(),
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+
+            model.initialize()
+            model.selectFolder(3)
+
+            assertEquals(listOf(1, 3), remote.requestedFolderIds)
+            val ready = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(3, ready.selectedFolderId)
+            assertEquals(listOf(summary), ready.messages)
+        }
+    }
 }
 
 private class CookieTransport(
@@ -58,3 +193,36 @@ private class CookieTransport(
 
     override fun clearSession() = Unit
 }
+
+private class FakeMailboxRemote(
+    private val page: MailboxPage,
+    private val detail: MailMessage,
+    private val nextPage: MailboxPage? = null,
+) : MailboxRemoteDataSource {
+    val requestedFolderIds = mutableListOf<Int>()
+
+    override suspend fun listMessages(
+        folderId: Int,
+        start: Int,
+        limit: Int,
+        descending: Boolean,
+    ): MailboxPage {
+        requestedFolderIds += folderId
+        return if (start > 0 && nextPage != null) nextPage else page
+    }
+
+    override suspend fun readMessage(messageId: String): MailMessage = detail
+}
+
+private fun emptyDetail() = MailMessage(
+    id = "detail",
+    folderId = 1,
+    from = emptyList(),
+    to = emptyList(),
+    cc = emptyList(),
+    bcc = emptyList(),
+    subject = "",
+    bodyHtml = "",
+    sentAt = "",
+    attachments = emptyList(),
+)

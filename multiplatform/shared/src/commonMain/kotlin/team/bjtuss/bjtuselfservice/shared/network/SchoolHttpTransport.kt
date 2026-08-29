@@ -11,10 +11,26 @@ data class SchoolHttpRequest(
     val headers: Map<String, String> = emptyMap(),
     val formFields: Map<String, String> = emptyMap(),
     val multipartFiles: List<SchoolMultipartFile> = emptyList(),
+    /**
+     * 可选的原始请求体；用于少数学校接口要求的 JSON POST。
+     * 与表单/多段文件体互斥，日志只记录字节数，不记录内容。
+     */
+    val rawBody: ByteArray? = null,
+    val rawBodyContentType: String = "application/octet-stream",
 ) {
+    init {
+        require(rawBody == null || (formFields.isEmpty() && multipartFiles.isEmpty())) {
+            "rawBody cannot be combined with formFields or multipartFiles"
+        }
+        require(rawBodyContentType.isNotBlank() && '\r' !in rawBodyContentType && '\n' !in rawBodyContentType) {
+            "rawBodyContentType must be a single non-empty header value"
+        }
+    }
+
     override fun toString(): String =
         "SchoolHttpRequest(method=$method, url=${url.redactedUrl()}, headers=${headers.redactedHeaders()}, " +
-            "formFields=${formFields.redactedFormFields()}, multipartFiles=${multipartFiles.redactedMultipartFiles()})"
+            "formFields=${formFields.redactedFormFields()}, multipartFiles=${multipartFiles.redactedMultipartFiles()}, " +
+            "rawBody=${rawBody?.let { "<redacted>(${it.size} bytes)" } ?: "none"})"
 }
 
 data class SchoolMultipartFile(

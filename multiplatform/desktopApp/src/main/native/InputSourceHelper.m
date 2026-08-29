@@ -160,6 +160,15 @@ static const CGFloat BJTUCredentialHorizontalInset = 14.0;
     _usernameShell.field = _usernameField;
     _passwordShell.field = _passwordField;
 
+    // 自定义宿主视图本身不承载可操作控件；显式把两个真实输入框
+    // 暴露为无障碍子元素，避免 VoiceOver/Computer Use 只看到 Compose
+    // 上方的占位文本而无法把焦点交给 NSTextField。
+    self.accessibilityElement = NO;
+    self.accessibilityChildren = @[_usernameField, _passwordField];
+    self.accessibilityChildrenInNavigationOrder = @[_usernameField, _passwordField];
+    _usernameShell.accessibilityElement = NO;
+    _passwordShell.accessibilityElement = NO;
+
     [self configureShell:_usernameShell];
     [self configureShell:_passwordShell];
     [self configureField:_usernameField placeholder:@"学号"];
@@ -190,6 +199,13 @@ static const CGFloat BJTUCredentialHorizontalInset = 14.0;
 - (void)configureField:(NSTextField *)field placeholder:(NSString *)placeholder {
     field.delegate = self;
     field.placeholderString = placeholder;
+    // Compose 的宿主树看不到这个 AppKit overlay；明确声明原生字段为可访问元素，
+    // 让 VoiceOver、键盘导航和 Computer Use 都能找到真实的编辑控件，而不是只看到
+    // 外层 Compose 的占位文本。
+    field.accessibilityElement = YES;
+    field.accessibilityRole = NSAccessibilityTextFieldRole;
+    field.accessibilityLabel = placeholder;
+    field.accessibilityIdentifier = placeholder;
     field.font = [NSFont systemFontOfSize:15.0 weight:NSFontWeightRegular];
     // 文本框保持系统自然高度；视觉大圆角由 shell 提供。
     field.bordered = NO;

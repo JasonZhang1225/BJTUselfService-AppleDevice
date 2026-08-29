@@ -80,6 +80,21 @@ class SchoolHttpTransportTest {
     }
 
     @Test
+    fun rawBodyRequestToStringRedactsJsonBody() {
+        val request = SchoolHttpRequest(
+            method = SchoolHttpMethod.POST,
+            url = "https://mail.example.test/coremail/s/json",
+            headers = mapOf("Content-Type" to "text/x-json"),
+            rawBody = "{\"subject\":\"private subject\",\"body\":\"private body\"}".encodeToByteArray(),
+            rawBodyContentType = "text/x-json; tz=\"Asia/Shanghai\"",
+        ).toString()
+
+        assertFalse("private subject" in request)
+        assertFalse("private body" in request)
+        assertTrue("rawBody=<redacted>" in request)
+    }
+
+    @Test
     fun bodyTextGbkDecodesGbkBytesAndFallsBackForUtf8() {
         // GB18030 编码的“小组全部成员一起协作的照片”字节序列
         val gbkBytes = byteArrayOf(

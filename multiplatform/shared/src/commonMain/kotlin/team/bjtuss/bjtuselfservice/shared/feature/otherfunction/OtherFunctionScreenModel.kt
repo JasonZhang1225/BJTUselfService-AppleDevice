@@ -17,15 +17,10 @@ import team.bjtuss.bjtuselfservice.shared.files.HomeworkFileSaveResult
 
 data class OtherFunctionUiState(
     val reportCardLanguage: ReportCardLanguage = ReportCardLanguage.CHINESE,
-    val calendarState: OtherFunctionTaskState = OtherFunctionTaskState.Idle,
     val reportCardState: OtherFunctionTaskState = OtherFunctionTaskState.Idle,
-    /** 校历页上的最新文件名，进入页面时拉取；失败保持 null。 */
-    val calendarFileName: String? = null,
-    val calendarFileNameLoading: Boolean = false,
 ) {
     val isAnyTaskRunning: Boolean
-        get() = calendarState == OtherFunctionTaskState.Downloading ||
-            reportCardState == OtherFunctionTaskState.Downloading
+        get() = reportCardState == OtherFunctionTaskState.Downloading
 }
 
 class OtherFunctionScreenModel(
@@ -39,51 +34,6 @@ class OtherFunctionScreenModel(
 
     fun setReportCardLanguage(language: ReportCardLanguage) {
         mutableState.value = mutableState.value.copy(reportCardLanguage = language)
-    }
-
-    /** 进入校历页时拉取最新文件名用于展示；失败保持 null，不打扰用户。 */
-    suspend fun refreshCalendarFileName() {
-        if (mutableState.value.calendarFileNameLoading) return
-        mutableState.value = mutableState.value.copy(calendarFileNameLoading = true)
-        try {
-            mutableState.value = mutableState.value.copy(
-                calendarFileName = repository.fetchCalendarFileName(),
-            )
-        } finally {
-            mutableState.value = mutableState.value.copy(calendarFileNameLoading = false)
-        }
-    }
-
-    suspend fun downloadCalendar() {
-        if (!taskMutex.tryLock()) return
-        try {
-            mutableState.value = mutableState.value.copy(
-                calendarState = OtherFunctionTaskState.Downloading,
-            )
-            when (val result = repository.downloadCalendar()) {
-                is OtherFunctionDownloadResult.Failure ->
-                    mutableState.value = mutableState.value.copy(
-                        calendarState = OtherFunctionTaskState.Failed(result.reason.toUiFailure()),
-                    )
-                is OtherFunctionDownloadResult.Success -> {
-                    val next = when (val save = fileGateway.saveFile(result.file)) {
-                        HomeworkFileSaveResult.Saved -> OtherFunctionTaskState.Saved(result.file.fileName)
-                        HomeworkFileSaveResult.Cancelled -> OtherFunctionTaskState.SaveCancelled
-                        is HomeworkFileSaveResult.Failed ->
-                            OtherFunctionTaskState.Failed(
-                                if (save.reason == team.bjtuss.bjtuselfservice.shared.files.HomeworkFileGatewayFailure.UNAVAILABLE) {
-                                    OtherFunctionFailure.SAVE_UNAVAILABLE
-                                } else {
-                                    OtherFunctionFailure.SAVE_FAILED
-                                },
-                            )
-                    }
-                    mutableState.value = mutableState.value.copy(calendarState = next)
-                }
-            }
-        } finally {
-            taskMutex.unlock()
-        }
     }
 
     suspend fun downloadReportCard() {
@@ -121,8 +71,6 @@ class OtherFunctionScreenModel(
 
     fun clearTaskState(task: OtherFunctionTask) {
         mutableState.value = when (task) {
-            OtherFunctionTask.CALENDAR ->
-                mutableState.value.copy(calendarState = OtherFunctionTaskState.Idle)
             OtherFunctionTask.REPORT_CARD ->
                 mutableState.value.copy(reportCardState = OtherFunctionTaskState.Idle)
         }

@@ -1,0 +1,103 @@
+package team.bjtuss.bjtuselfservice.shared.data.mailbox
+
+import kotlinx.coroutines.runBlocking
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpRequest
+import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpResponse
+import team.bjtuss.bjtuselfservice.shared.network.SchoolHttpTransport
+
+class MailboxRemoteDataSourceTest {
+    @Test
+    fun bootstrapsCoremailAndUsesRawJsonForListThenReadsDetail() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/XT/index.jsp?sid=fixture-sid",
+            ),
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/s/json",
+                body = listResponse().encodeToByteArray(),
+            ),
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/XT/jsp/readMessage.jsp",
+                body = detailResponse().encodeToByteArray(),
+            ),
+        )
+        val remote = SchoolMailboxRemoteDataSource(transport)
+
+        val page = remote.listMessages(folderId = 1, start = 0, limit = 20, descending = true)
+        val message = remote.readMessage("message-1")
+
+        assertEquals("message-1", page.messages.single().id)
+        assertEquals("课程通知", message.subject)
+        assertEquals(3, transport.requests.size)
+        val listRequest = transport.requests[1]
+        val rawBody = assertNotNull(listRequest.rawBody).decodeToString()
+        assertTrue(rawBody.contains("\"func\"") == false)
+        assertTrue(rawBody.contains("\"fid\":1"))
+        assertEquals("text/x-json; tz=\"Asia/Shanghai\"", listRequest.rawBodyContentType)
+        assertEquals("text/x-json", listRequest.headers["Accept"])
+        assertEquals("message-1", transport.requests[2].formFields["mid"])
+    }
+
+    @Test
+    fun rejectsRedirectToNonCoremailHostAsExpiredSession() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://example.test/login",
+            ),
+        )
+        val remote = SchoolMailboxRemoteDataSource(transport)
+
+        val error = assertFailsWith<MailboxRemoteException> {
+            remote.listMessages(folderId = 1, start = 0, limit = 20, descending = true)
+        }
+        assertEquals(MailboxRemoteFailure.SESSION_EXPIRED, error.reason)
+    }
+
+    @Test
+    fun sendsCoremailSpecialFolderFidForTodoMail() = runBlocking {
+        val transport = QueueTransport(
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/XT/index.jsp?sid=fixture-sid",
+            ),
+            SchoolHttpResponse(
+                statusCode = 200,
+                finalUrl = "https://mail.bjtu.edu.cn/coremail/s/json",
+                body = "{\"code\":\"S_OK\",\"total\":0,\"var\":[]}".encodeToByteArray(),
+            ),
+        )
+        val remote = SchoolMailboxRemoteDataSource(transport)
+
+        remote.listMessages(folderId = -5, start = 0, limit = 20, descending = true)
+
+        val rawBody = assertNotNull(transport.requests[1].rawBody).decodeToString()
+        assertTrue(rawBody.contains("\"fid\":-5"))
+    }
+
+    private fun listResponse(): String =
+        """{"code":"S_OK","total":1,"var":[{"id":"message-1","fid":1,"from":"teacher@example.test","subject":"课程通知","summary":"请查看安排","sentDate":"2026-08-29 09:10:00","receivedDate":"2026-08-29 09:10:00","size":128,"flags":{"read":true}}]}"""
+
+    private fun detailResponse(): String =
+        """{"code":"S_OK","var":{"mail":{"from":["teacher@example.test"],"to":["student@example.test"],"subject":"课程通知","mainPartData":{"content":"<p>正文</p>"},"attachments":[]},"mailInfo":{"id":"message-1","fid":1,"sentDate":"2026-08-29 09:10:00"}}}"""
+
+    private class QueueTransport(vararg responses: SchoolHttpResponse) : SchoolHttpTransport {
+        private val queue = responses.toMutableList()
+        val requests = mutableListOf<SchoolHttpRequest>()
+
+        override suspend fun execute(request: SchoolHttpRequest): SchoolHttpResponse {
+            requests += request
+            return queue.removeFirst()
+        }
+
+        override fun clearSession() = Unit
+    }
+}

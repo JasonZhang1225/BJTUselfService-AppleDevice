@@ -47,6 +47,18 @@ internal data class CourseScheduleCalendarMapping(
 )
 
 /**
+ * 返回校历中覆盖 [date] 的教学周。校历是按学期编号的，不能拿全局接口返回的
+ * “第 1 周”直接覆盖一个已经处于续编周的当前学期。
+ */
+internal fun calendarWeekForDate(
+    mapping: CourseScheduleCalendarMapping?,
+    date: LocalDate,
+): Int? = mapping?.weeks?.firstOrNull { week ->
+    val start = week.startDate ?: return@firstOrNull false
+    date >= start && date <= start.plus(6, DateTimeUnit.DAY)
+}?.week?.takeIf { it in 1..COURSE_MAX_WEEK }
+
+/**
  * 本学期课表使用教务当前学期；选课课表使用紧随其后的学期。
  * 若服务器已经把“当前学期”预切到尚未开学的学期，选课课表就使用该学期本身。
  * 找不到精确下一学期时返回空映射，宁可禁用导出，也不能复用旧学期日期。
@@ -391,16 +403,36 @@ class CourseScheduleScreenModel(
                 )
                 val selectedCalendar = calendarMappings[current.scheduleType]
                 val weeks = selectedCalendar?.weeks.orEmpty()
+                // 1.7.3B 的 getTimeList/room_view 仍是首选远端来源；但在学期切换边界，
+                // 两个接口可能都返回下一学期的第 1 周。当前学期校历带有真实日期，
+                // 若今天落在其中，以它校正当前周，避免首页和课表回到第 1 周。
+                val calendarCurrentWeek = calendarWeekForDate(
+                    mapping = calendarMappings[CourseScheduleType.CURRENT],
+                    date = today,
+                )
+                val followCalendarCurrentWeek = current.scheduleType == CourseScheduleType.CURRENT &&
+                    current.followCurrentWeek && calendarCurrentWeek != null
+                val effectiveCurrentWeek = calendarCurrentWeek ?: current.currentWeek
+                val effectiveSelectedWeek = if (followCalendarCurrentWeek) {
+                    calendarCurrentWeek
+                } else {
+                    current.selectedWeek
+                }
+                if (calendarCurrentWeek != null && calendarCurrentWeek != current.currentWeek) {
+                    repository.reconcileCurrentWeek(calendarCurrentWeek)
+                }
                 val selectedDate = current.selectedDate
                     ?.takeIf { date -> weeks.any { week ->
                         val start = week.startDate ?: return@any false
                         date >= start && date <= start.plus(6, DateTimeUnit.DAY)
                     } }
-                    ?: weeks.firstOrNull { it.week == current.selectedWeek }?.startDate
+                    ?: weeks.firstOrNull { it.week == effectiveSelectedWeek }?.startDate
                         ?.plus(current.selectedDay, DateTimeUnit.DAY)
                 mutableState.value = current.copy(
                     calendarSemesterLabel = selectedCalendar?.semesterLabel,
                     academicWeeks = weeks,
+                    currentWeek = effectiveCurrentWeek,
+                    selectedWeek = effectiveSelectedWeek,
                     isCalendarLoading = false,
                     todayDate = today,
                     selectedDate = selectedDate,
@@ -434,13 +466,21 @@ class CourseScheduleScreenModel(
     ) {
         val current = mutableState.value
         val today = todayProvider()
+        val calendarCurrentWeek = calendarWeekForDate(
+            mapping = calendarMappings[CourseScheduleType.CURRENT],
+            date = today,
+        )
+        val effectiveCurrentWeek = calendarCurrentWeek ?: snapshot.currentWeek
         val shouldApplyCurrentWeek = current.scheduleType == CourseScheduleType.CURRENT &&
-            current.followCurrentWeek && snapshot.currentWeek in 1..COURSE_MAX_WEEK
-        val selectedWeek = if (shouldApplyCurrentWeek) snapshot.currentWeek else current.selectedWeek
+            current.followCurrentWeek && effectiveCurrentWeek in 1..COURSE_MAX_WEEK
+        val selectedWeek = if (shouldApplyCurrentWeek) effectiveCurrentWeek else current.selectedWeek
+        if (calendarCurrentWeek != null && calendarCurrentWeek != snapshot.currentWeek) {
+            repository.reconcileCurrentWeek(calendarCurrentWeek)
+        }
         val visibleIds = snapshot.courses.mapTo(mutableSetOf(), Course::id)
         mutableState.value = current.copy(
             courses = snapshot.courses,
-            currentWeek = snapshot.currentWeek,
+            currentWeek = effectiveCurrentWeek,
             selectedWeek = selectedWeek,
             // 缓存/网络快照都属于自动结果，不能把“跟随当前周”误关掉；
             // selectWeek/selectDate 才代表用户明确选择并会把它置 false。
@@ -452,7 +492,7 @@ class CourseScheduleScreenModel(
             failure = failure,
             todayDate = today,
             selectedDate = if (shouldApplyCurrentWeek) {
-                current.dateFor(snapshot.currentWeek, current.selectedDay)
+                current.dateFor(effectiveCurrentWeek, current.selectedDay)
             } else {
                 current.selectedDate
             },

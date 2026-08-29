@@ -48,14 +48,19 @@ class DesktopSystemCalendarGateway : SystemCalendarGateway {
             } finally {
                 input.delete()
             }
-        }
+    }
 
     private fun locateHelper(): File? {
-        val configured = System.getProperty(HELPER_PROPERTY)?.let(::File)
-        if (configured?.canExecute() == true) return configured
         val executable = ProcessHandle.current().info().command().orElse(null)?.let(::File) ?: return null
         val contents = executable.parentFile?.parentFile ?: return null
-        return File(contents, "Resources/Calendar/BJTUCalendarHelper").takeIf(File::canExecute)
+        // 发布包优先使用自身 Resources，不能加载开发机 build/generated 下的 helper。
+        File(contents, "Resources/Calendar/BJTUCalendarHelper")
+            .takeIf(File::canExecute)
+            ?.let { return it }
+        // `desktopApp:run` 没有 bundle Resources，开发运行才回退到 Gradle 注入路径。
+        return System.getProperty(HELPER_PROPERTY)
+            ?.let(::File)
+            ?.takeIf(File::canExecute)
     }
 }
 

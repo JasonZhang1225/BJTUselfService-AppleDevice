@@ -40,22 +40,27 @@ class DesktopCoreMlCaptchaRecognizer(
             }.getOrElse {
                 CaptchaRecognitionResult.Failed(CaptchaRecognitionFailure.INFERENCE_FAILED)
             }
-        }
+    }
 
     private fun locateRuntime(): RuntimePaths? {
-        val configuredHelper = System.getProperty(HELPER_PROPERTY)?.let(::File)
-        val configuredModel = System.getProperty(MODEL_PROPERTY)?.let(::File)
-        if (configuredHelper?.canExecute() == true && configuredModel?.isDirectory == true) {
-            return RuntimePaths(configuredHelper, configuredModel)
+        val executable = ProcessHandle.current().info().command().orElse(null)?.let(::File)
+        val contents = executable?.parentFile?.parentFile
+        val captchaResources = File(contents, "Resources/Captcha")
+        val bundledHelper = File(captchaResources, "BJTUCaptchaHelper")
+        val bundledModel = File(captchaResources, "BJTUCaptcha.mlmodelc")
+        // 安装包优先使用自己的资源，避免开发机构建目录被打包配置带进发布运行时。
+        if (bundledHelper.canExecute() && bundledModel.isDirectory) {
+            return RuntimePaths(bundledHelper, bundledModel)
         }
 
-        val executable = ProcessHandle.current().info().command().orElse(null)?.let(::File)
-            ?: return null
-        val contents = executable.parentFile?.parentFile ?: return null
-        val captchaResources = File(contents, "Resources/Captcha")
-        val helper = File(captchaResources, "BJTUCaptchaHelper")
-        val model = File(captchaResources, "BJTUCaptcha.mlmodelc")
-        return if (helper.canExecute() && model.isDirectory) RuntimePaths(helper, model) else null
+        // `desktopApp:run` 没有 bundle Resources，开发运行才使用注入路径。
+        val configuredHelper = System.getProperty(HELPER_PROPERTY)?.let(::File)
+        val configuredModel = System.getProperty(MODEL_PROPERTY)?.let(::File)
+        return if (configuredHelper?.canExecute() == true && configuredModel?.isDirectory == true) {
+            RuntimePaths(configuredHelper, configuredModel)
+        } else {
+            null
+        }
     }
 
     private data class RuntimePaths(val helper: File, val model: File)

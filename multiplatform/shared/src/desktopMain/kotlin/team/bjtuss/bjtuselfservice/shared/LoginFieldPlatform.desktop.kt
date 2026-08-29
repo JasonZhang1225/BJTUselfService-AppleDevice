@@ -6,11 +6,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
@@ -28,6 +31,8 @@ import java.awt.KeyboardFocusManager
 import java.awt.Window
 import java.beans.PropertyChangeListener
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 actual fun usernameKeyboardOptions(): KeyboardOptions = KeyboardOptions(
     keyboardType = KeyboardType.Number,
@@ -58,46 +63,65 @@ actual fun PlatformCredentialFields(
     val latestUsernameChange = rememberUpdatedState(onUsernameChange)
     val latestPasswordChange = rememberUpdatedState(onPasswordChange)
     val latestPasswordImeAction = rememberUpdatedState(onPasswordImeAction)
-    val nativeHost = remember(windowHandle, bridge) {
-        if (windowHandle == 0L || bridge == null) {
-            null
-        } else {
-            NativeCredentialFieldsHost.create(
-                bridge = bridge,
-                windowHandle = windowHandle,
-                onEvent = { event, value ->
-                    EventQueue.invokeLater {
-                        when (event) {
-                            NATIVE_EVENT_USERNAME_CHANGED -> latestUsernameChange.value(
-                                value.sanitizeDesktopCredentialInput(),
-                            )
-                            NATIVE_EVENT_PASSWORD_CHANGED -> latestPasswordChange.value(
-                                value.sanitizeDesktopCredentialInput(),
-                            )
-                            NATIVE_EVENT_PASSWORD_SUBMIT -> latestPasswordImeAction.value()
+    var nativeHost by remember(windowHandle, bridge) { mutableStateOf<NativeCredentialFieldsHost?>(null) }
+    var nativeHostAttempted by remember(windowHandle, bridge) { mutableStateOf(bridge == null) }
+
+    /**
+     * Compose Desktop 在 AWT EventQueue 上执行组合，而 AppKit 的主线程又会通过
+     * LWCToolkit 回到 AWT。原来的同步 JNA 创建会形成 AWT -> AppKit -> AWT 的环路，
+     * 表现为登录窗口空白且无障碍树无法返回。把“创建”放到协程工作线程，完成后再
+     * 将 host 交给 Compose；后续 update/frame 本来就是 native 侧异步派发。
+     */
+    LaunchedEffect(windowHandle, bridge) {
+        nativeHostAttempted = bridge == null || windowHandle == 0L
+        nativeHost?.close()
+        nativeHost = null
+        if (bridge != null && windowHandle != 0L) {
+            val created = withContext(Dispatchers.Default) {
+                NativeCredentialFieldsHost.create(
+                    bridge = bridge,
+                    windowHandle = windowHandle,
+                    onEvent = { event, value ->
+                        EventQueue.invokeLater {
+                            when (event) {
+                                NATIVE_EVENT_USERNAME_CHANGED -> latestUsernameChange.value(
+                                    value.sanitizeDesktopCredentialInput(),
+                                )
+                                NATIVE_EVENT_PASSWORD_CHANGED -> latestPasswordChange.value(
+                                    value.sanitizeDesktopCredentialInput(),
+                                )
+                                NATIVE_EVENT_PASSWORD_SUBMIT -> latestPasswordImeAction.value()
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
+            nativeHost = created
+            nativeHostAttempted = true
         }
     }
 
-    if (nativeHost != null) {
+    DisposableEffect(windowHandle, bridge) {
+        onDispose {
+            nativeHost?.close()
+            nativeHost = null
+        }
+    }
+
+    val activeNativeHost = nativeHost
+    if (activeNativeHost != null) {
         val density = LocalDensity.current.density
         SideEffect {
-            nativeHost.updateValues(username, password, enabled)
-        }
-        DisposableEffect(nativeHost) {
-            onDispose { nativeHost.close() }
+            activeNativeHost.updateValues(username, password, enabled)
         }
         Spacer(
             modifier = modifier
                 .height(NATIVE_CREDENTIAL_FIELDS_HEIGHT.dp)
                 .onGloballyPositioned { coordinates ->
-                    nativeHost.updateFrame(coordinates.boundsInWindow(), density)
+                    activeNativeHost.updateFrame(coordinates.boundsInWindow(), density)
                 },
         )
-    } else {
+    } else if (nativeHostAttempted) {
         val inputSourceGate = remember { MacOsCredentialInputContextGate(bridge) }
         DisposableEffect(inputSourceGate) {
             onDispose { inputSourceGate.setRestricted(false) }
@@ -113,6 +137,10 @@ actual fun PlatformCredentialFields(
                 .onFocusChanged { inputSourceGate.setRestricted(it.hasFocus) }
                 .focusGroup(),
         )
+    } else {
+        // 原生输入框创建期间不放置可聚焦的 Compose 输入框，避免输入源 gate 在
+        // AWT 线程上同步进入 AppKit；创建失败后 nativeHostAttempted 会切换到回退实现。
+        Spacer(modifier = modifier.height(NATIVE_CREDENTIAL_FIELDS_HEIGHT.dp))
     }
 }
 
@@ -239,14 +267,17 @@ fun registerDesktopCredentialWindowHandle(windowHandle: Long) {
 internal val desktopCredentialWindowHandle = mutableLongStateOf(0L)
 
 internal fun locateInputSourceHelper(): File? {
-    System.getProperty(INPUT_SOURCE_HELPER_PROPERTY)?.let(::File)?.takeIf(File::isFile)?.let {
-        return it
-    }
     val executable = ProcessHandle.current().info().command().orElse(null)?.let(::File)
-        ?: return null
-    val contents = executable.parentFile?.parentFile ?: return null
-    return File(contents, "Resources/InputSource/libBJTUInputSourceHelper.dylib")
+    val contents = executable?.parentFile?.parentFile
+    // 安装包优先使用自身 Resources，不能因为打包配置残留开发机绝对路径
+    // 而偷偷加载源码构建目录里的 helper。
+    File(contents, "Resources/InputSource/libBJTUInputSourceHelper.dylib")
         .takeIf(File::isFile)
+        ?.let { return it }
+    // `desktopApp:run` 没有 bundle Resources，开发运行才回退到 Gradle 注入的路径。
+    return System.getProperty(INPUT_SOURCE_HELPER_PROPERTY)
+        ?.let(::File)
+        ?.takeIf(File::isFile)
 }
 
 private const val INPUT_SOURCE_HELPER_PROPERTY = "bjtu.input-source.helper"

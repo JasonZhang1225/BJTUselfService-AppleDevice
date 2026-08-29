@@ -1,7 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.domain.otherfunction
 
 /**
- * “其他功能”切片的共享领域对象：校历下载与中英文成绩单下载。
+ * “其他功能”切片的共享领域对象：公众号校历入口与中英文成绩单下载。
  * 行为基线来自冻结 Android 工程的 OtherFunctionNetworkRepository。
  */
 
@@ -13,7 +13,6 @@ enum class ReportCardLanguage {
 
 /** 下载任务的稳定标识，用于状态归属，避免并发点击串状态。 */
 enum class OtherFunctionTask {
-    CALENDAR,
     REPORT_CARD,
 }
 

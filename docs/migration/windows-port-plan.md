@@ -101,7 +101,7 @@
 - [x] `shared` desktop 目标编译通过；`windowsApp` 可运行，登录页/共享页面正常显示（截图验证深色主题配色精确匹配）。
 - [x] 验证码推理与 Android 语义完全对齐：Python torch 参考 vs Windows DJL logits 三图 max abs diff ≤0.000012、argmax 逐时间步一致（策略第 4/5/6 层）。
 - [x] DPAPI 凭据保险库测试通过（往返/清除/篡改防护）。
-- [x] 功能入口清点：全部 14 个共享页面（首页/成绩/课程表/考试/作业/课件/教室占用/教室人数/邮箱/校历下载/成绩单下载/设置/更多）走同一 `AppSection` 路由，Windows 与 macOS 共享代码路径；关键屏模型测试（课程表 28/成绩/设置）通过；`shared:desktopTest` 384/385 通过（唯一失败为 macOS Keychain 平台边界）。
+- [x] 功能入口清点：全部 14 个共享页面（首页/成绩/课程表/考试/作业/课件/教室占用/教室人数/邮箱/校历文章/成绩单下载/设置/更多）走同一 `AppSection` 路由，Windows 与 macOS 共享代码路径；关键屏模型测试（课程表 28/成绩/设置）通过；`shared:desktopTest` 384/385 通过（唯一失败为 macOS Keychain 平台边界）。
 - [x] macOS `desktopApp` 构建配置未被改动（git diff 不含 desktopApp；shared desktop 编译通过）。
 - [x] 文档三件套更新完成（memory.md 已更新；history_full.md 已归档 M14 节；goal.md 已加 M14 节；本文件为规划与验收）。
 
