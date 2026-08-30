@@ -18,6 +18,8 @@ import team.bjtuss.bjtuselfservice.shared.domain.classroomoccupancy.OccupancySem
 import team.bjtuss.bjtuselfservice.shared.domain.classroomoccupancy.OccupancyWeekDate
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.change.DataChangeRecorder
+import team.bjtuss.bjtuselfservice.shared.PlatformFamily
+import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 
 class CourseScheduleScreenModelTest {
     @Test
@@ -81,12 +83,93 @@ class CourseScheduleScreenModelTest {
     }
 
     @Test
+    fun continuousInertiaAfterATurnDoesNotSkipExtraWeeks() {
+        val accumulator = CourseWeekScrollAccumulator(
+            threshold = 30f,
+            quietGapMillis = 80L,
+            minTurnIntervalMillis = 180L,
+        )
+
+        assertEquals(CourseWeekScrollDirection.NEXT, accumulator.add(31f, 0f, 1_000L))
+        var t = 1_016L
+        while (t <= 1_600L) {
+            assertEquals(
+                null,
+                accumulator.add(40f, 0f, t),
+                "inertia at $t should not turn another week",
+            )
+            t += 16L
+        }
+        assertEquals(CourseWeekScrollDirection.NEXT, accumulator.add(31f, 0f, 1_700L))
+    }
+
+    @Test
     fun verticalScrollDoesNotTurnWeekAndNegativeHorizontalScrollGoesBack() {
         val accumulator = CourseWeekScrollAccumulator(threshold = 30f)
 
         assertEquals(null, accumulator.add(deltaX = 20f, deltaY = 40f, eventTimeMillis = 1_000L))
         assertEquals(null, accumulator.add(deltaX = -16f, deltaY = 1f, eventTimeMillis = 1_300L))
         assertEquals(CourseWeekScrollDirection.PREVIOUS, accumulator.add(-16f, 1f, 1_316L))
+    }
+
+    @Test
+    fun fingerSwipeLeftTurnsToNextWeekWhenDistanceIsEnough() {
+        assertEquals(
+            CourseWeekScrollDirection.NEXT,
+            weekSwipeDirection(
+                displacementX = -80f,
+                displacementY = 8f,
+                velocityX = -10f,
+                distanceThreshold = 48f,
+                velocityThreshold = 700f,
+            ),
+        )
+    }
+
+    @Test
+    fun fingerSwipeRightTurnsToPreviousWeekWhenFlickIsFast() {
+        assertEquals(
+            CourseWeekScrollDirection.PREVIOUS,
+            weekSwipeDirection(
+                displacementX = 20f,
+                displacementY = 4f,
+                velocityX = 900f,
+                distanceThreshold = 48f,
+                velocityThreshold = 700f,
+            ),
+        )
+    }
+
+    @Test
+    fun fingerWeekPagerIsOnlyForTouchPlatforms() {
+        assertTrue(
+            shouldUseFingerWeekPager(PlatformInfo(PlatformFamily.Android, "Android")),
+        )
+        assertTrue(
+            shouldUseFingerWeekPager(PlatformInfo(PlatformFamily.IOS, "iOS")),
+        )
+        assertFalse(
+            shouldUseFingerWeekPager(PlatformInfo(PlatformFamily.MacOS, "macOS")),
+        )
+        assertFalse(
+            shouldUseFingerWeekPager(
+                PlatformInfo(PlatformFamily.MacOS, "Windows", isWindows = true),
+            ),
+        )
+    }
+
+    @Test
+    fun verticalDominantFingerSwipeDoesNotTurnWeek() {
+        assertEquals(
+            null,
+            weekSwipeDirection(
+                displacementX = -90f,
+                displacementY = -120f,
+                velocityX = -800f,
+                distanceThreshold = 48f,
+                velocityThreshold = 700f,
+            ),
+        )
     }
 
     @Test

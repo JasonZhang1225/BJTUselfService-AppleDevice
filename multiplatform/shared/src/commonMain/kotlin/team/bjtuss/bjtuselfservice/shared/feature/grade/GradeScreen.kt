@@ -49,10 +49,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -70,6 +68,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -107,6 +106,7 @@ import team.bjtuss.bjtuselfservice.shared.LocalReduceMotion
 import team.bjtuss.bjtuselfservice.shared.PlatformFamily
 import team.bjtuss.bjtuselfservice.shared.PlatformInfo
 import team.bjtuss.bjtuselfservice.shared.WindowClass
+import team.bjtuss.bjtuselfservice.shared.currentPlatform
 import kotlin.math.PI
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
 import team.bjtuss.bjtuselfservice.shared.data.grade.formatGradeDetailForDisplay
@@ -505,6 +505,21 @@ fun AuthenticatedAppShell(
         }
         mailboxInlineDetail -> mailboxModel::clearSelectedMessage
         else -> popBackStack
+    }
+    // 宽屏 Android/iPad 邮箱详情留在邮箱一级页内，没有额外 route 可供系统返回弹出；
+    // 系统侧滑/返回键必须和左上角返回共用同一目标，否则会直接弹回「更多」根目录。
+    val handleBack: () -> Unit = {
+        if (
+            shouldHandleInlineMailboxBack(
+                currentRouteIsMailbox = currentRoute == AppSection.MAILBOX,
+                mailboxInlineDetail = mailboxInlineDetail,
+                mailboxInlineCompose = mailboxInlineCompose,
+            )
+        ) {
+            mailboxBack()
+        } else {
+            popBackStack()
+        }
     }
     val startMailboxComposeFromTopBar: () -> Unit = {
         if (useNativeSecondaryRoutes) {
@@ -1271,7 +1286,7 @@ fun AuthenticatedAppShell(
             // 宽屏侧栏布局按 macOS/iPad 的并列工作区处理，不播放手机式 push/pop。
             NavDisplay(
                 backStack = backStack,
-                onBack = popBackStack,
+                onBack = handleBack,
                 modifier = Modifier.weight(0.78f).fillMaxHeight(),
                 transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
                 popTransitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
@@ -1368,7 +1383,7 @@ fun AuthenticatedAppShell(
             // macOS 的紧凑窗口仍遵守桌面习惯，不播放手机式整页滑动。
             NavDisplay(
                 backStack = backStack,
-                onBack = popBackStack,
+                onBack = handleBack,
                 modifier = Modifier.fillMaxSize(),
                 transitionSpec = {
                     when {
@@ -1559,6 +1574,12 @@ internal enum class MailboxBackTarget {
     PARENT,
     LIST,
 }
+
+internal fun shouldHandleInlineMailboxBack(
+    currentRouteIsMailbox: Boolean,
+    mailboxInlineDetail: Boolean,
+    mailboxInlineCompose: Boolean,
+): Boolean = currentRouteIsMailbox && (mailboxInlineDetail || mailboxInlineCompose)
 
 internal fun mailboxBackTarget(
     useNativeSecondaryRoutes: Boolean,
@@ -2481,6 +2502,36 @@ private fun GradeWorkspace(
     modifier: Modifier,
 ) {
     var showFilterSheet by remember { mutableStateOf(false) }
+    // 成绩页会和登录后的多路后台同步共用壳层；把昂贵的筛选/排序/加权计算
+    // 固定在成绩输入变化时，避免无关状态重组时反复创建列表。
+    val visibleGrades = remember(
+        state.grades,
+        state.selectedSemesters,
+        state.excludedCourseTypes,
+        state.courseTypesByCode,
+        state.sortOrder,
+    ) { state.visibleGrades }
+    val gradeInfo = remember(
+        state.grades,
+        state.selectedSemesters,
+        state.selectionMode,
+        state.selectedGradeIds,
+        state.courseTypesByCode,
+        state.excludedCourseTypes,
+    ) { state.gradeInfo }
+    val gradeRows = remember(visibleGrades, state.courseTypesByCode) {
+        visibleGrades.map { grade ->
+            GradeRowData(
+                id = grade.id,
+                courseName = grade.displayCourseName(),
+                semesterTeacher = "${grade.semester} · ${grade.courseTeacher.ifBlank { "教师信息未提供" }}",
+                credits = "学分 ${grade.courseCredits}",
+                score = grade.courseScore,
+                scoreValue = scoreForSorting(grade.courseScore),
+                courseType = state.courseTypeOf(grade),
+            )
+        }
+    }
 
     Column(
         modifier = if (expanded) {
@@ -2508,6 +2559,8 @@ private fun GradeWorkspace(
                 if (expanded) {
                     GradeSummaryCard(
                         state = state,
+                        gradeInfo = gradeInfo,
+                        visibleGradeCount = visibleGrades.size,
                         onOpenFilter = { showFilterSheet = true },
                     )
                     Row(
@@ -2516,6 +2569,7 @@ private fun GradeWorkspace(
                     ) {
                         GradeList(
                             state = state,
+                            rows = gradeRows,
                             model = model,
                             modifier = Modifier.weight(0.58f).fillMaxHeight(),
                         )
@@ -2529,6 +2583,8 @@ private fun GradeWorkspace(
                     // 固定在列表上方时，iOS 橡皮筋只拉卡片、Banner 不动，会出现大空档并与下拉刷新抢手势。
                     GradeScrollableContent(
                         state = state,
+                        rows = gradeRows,
+                        gradeInfo = gradeInfo,
                         model = model,
                         onOpenFilter = { showFilterSheet = true },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -2574,9 +2630,11 @@ private fun GradeWorkspace(
 @Composable
 private fun GradeSummaryCard(
     state: GradeUiState,
+    gradeInfo: GradeInfoResult,
+    visibleGradeCount: Int,
     onOpenFilter: () -> Unit,
 ) {
-    val title = when (val info = state.gradeInfo) {
+    val title = when (val info = gradeInfo) {
         GradeInfoResult.NoGrades -> if (state.selectionMode) {
             "请选择用于计算的课程"
         } else {
@@ -2587,8 +2645,8 @@ private fun GradeSummaryCard(
     val semesterFiltered =
         state.semesterFilterForQuery.isNotEmpty() || state.excludedCourseTypes.isNotEmpty()
     val subtitle = when {
-        state.selectionMode -> "自选 ${state.selectedGradeIds.size} 门 · 显示 ${state.visibleGrades.size} 门"
-        semesterFiltered -> "筛选后 ${state.visibleGrades.size} 门 · 共 ${state.grades.size} 门"
+        state.selectionMode -> "自选 ${state.selectedGradeIds.size} 门 · 显示 $visibleGradeCount 门"
+        semesterFiltered -> "筛选后 $visibleGradeCount 门 · 共 ${state.grades.size} 门"
         else -> "共 ${state.grades.size} 门课程"
     }
 
@@ -2977,6 +3035,8 @@ private fun GradeFilterSheet(
 @Composable
 private fun GradeScrollableContent(
     state: GradeUiState,
+    rows: List<GradeRowData>,
+    gradeInfo: GradeInfoResult,
     model: GradeScreenModel,
     onOpenFilter: () -> Unit,
     modifier: Modifier,
@@ -2995,10 +3055,12 @@ private fun GradeScrollableContent(
         item(key = "grade-summary") {
             GradeSummaryCard(
                 state = state,
+                gradeInfo = gradeInfo,
+                visibleGradeCount = rows.size,
                 onOpenFilter = onOpenFilter,
             )
         }
-        if (state.visibleGrades.isEmpty()) {
+        if (rows.isEmpty()) {
             item(key = "grade-empty") {
                 Box(
                     modifier = Modifier
@@ -3014,15 +3076,14 @@ private fun GradeScrollableContent(
                 }
             }
         } else {
-            items(state.visibleGrades, key = Grade::id) { grade ->
+            items(rows, key = GradeRowData::id) { row ->
                 GradeRow(
-                    grade = grade,
-                    courseType = state.courseTypeOf(grade),
+                    row = row,
                     selectionMode = state.selectionMode,
-                    selectedForCalculation = grade.id in state.selectedGradeIds,
-                    selectedForDetails = grade.id == state.selectedGradeId,
-                    onOpen = { model.showGradeDetails(grade.id) },
-                    onSelectionChange = { selected -> model.setGradeSelected(grade.id, selected) },
+                    selectedForCalculation = row.id in state.selectedGradeIds,
+                    selectedForDetails = row.id == state.selectedGradeId,
+                    onOpen = { model.showGradeDetails(row.id) },
+                    onSelectionChange = { selected -> model.setGradeSelected(row.id, selected) },
                 )
             }
         }
@@ -3032,10 +3093,11 @@ private fun GradeScrollableContent(
 @Composable
 private fun GradeList(
     state: GradeUiState,
+    rows: List<GradeRowData>,
     model: GradeScreenModel,
     modifier: Modifier,
 ) {
-    if (state.visibleGrades.isEmpty()) {
+    if (rows.isEmpty()) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
             Text(
                 "当前筛选条件下没有成绩",
@@ -3045,52 +3107,84 @@ private fun GradeList(
         }
         return
     }
-    val listState = rememberLazyListState()
-    LaunchedEffect(state.sortOrder) {
-        listState.scrollToItem(0)
-    }
-    LazyColumn(
-        state = listState,
-        modifier = modifier.desktopTouchScroll(listState),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(bottom = 20.dp),
-    ) {
-        items(state.visibleGrades, key = Grade::id) { grade ->
+    // 宽屏 Android 只有少量固定成绩项。整列预布局一次，避免 LazyColumn 在首次
+    // 触摸时批量创建下一组卡片；手机/桌面仍保留 LazyColumn 的按需布局。
+    if (currentPlatform().family == PlatformFamily.Android) {
+        val scrollState = rememberScrollState()
+        Column(
+            modifier = modifier
+                .verticalScroll(scrollState)
+                .desktopTouchScroll(scrollState)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            rows.forEach { row ->
+                GradeRow(
+                    row = row,
+                    selectionMode = state.selectionMode,
+                    selectedForCalculation = row.id in state.selectedGradeIds,
+                    selectedForDetails = row.id == state.selectedGradeId,
+                    onOpen = { model.showGradeDetails(row.id) },
+                    onSelectionChange = { selected -> model.setGradeSelected(row.id, selected) },
+                )
+            }
+        }
+    } else {
+        val listState = rememberLazyListState()
+        LaunchedEffect(state.sortOrder) {
+            listState.scrollToItem(0)
+        }
+        LazyColumn(
+            state = listState,
+            modifier = modifier.desktopTouchScroll(listState),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 20.dp),
+        ) {
+            items(rows, key = GradeRowData::id) { row ->
             GradeRow(
-                grade = grade,
-                courseType = state.courseTypeOf(grade),
+                row = row,
                 selectionMode = state.selectionMode,
-                selectedForCalculation = grade.id in state.selectedGradeIds,
-                selectedForDetails = grade.id == state.selectedGradeId,
-                onOpen = { model.showGradeDetails(grade.id) },
-                onSelectionChange = { selected -> model.setGradeSelected(grade.id, selected) },
-            )
+                selectedForCalculation = row.id in state.selectedGradeIds,
+                selectedForDetails = row.id == state.selectedGradeId,
+                onOpen = { model.showGradeDetails(row.id) },
+                onSelectionChange = { selected -> model.setGradeSelected(row.id, selected) },
+                )
+            }
         }
     }
 }
 
+@Immutable
+private data class GradeRowData(
+    val id: Int,
+    val courseName: String,
+    val semesterTeacher: String,
+    val credits: String,
+    val score: String,
+    val scoreValue: Int,
+    val courseType: CourseType?,
+)
+
 @Composable
 private fun GradeRow(
-    grade: Grade,
-    courseType: CourseType?,
+    row: GradeRowData,
     selectionMode: Boolean,
     selectedForCalculation: Boolean,
     selectedForDetails: Boolean,
     onOpen: () -> Unit,
     onSelectionChange: (Boolean) -> Unit,
 ) {
-    ElevatedCard(
+    Surface(
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (selectedForDetails) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp),
+        color = if (selectedForDetails) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -3103,7 +3197,7 @@ private fun GradeRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        grade.displayCourseName(),
+                        row.courseName,
                         modifier = Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -3111,46 +3205,43 @@ private fun GradeRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     // 性质未同步（null）或未知的课程不显示标签，避免把映射缺失误读成任选。
-                    if (courseType != null && courseType != CourseType.UNKNOWN) {
-                        val colors = courseTypeColors(courseType)
-                        Surface(
-                            color = colors.container,
-                            contentColor = colors.onContainer,
-                            shape = RoundedCornerShape(6.dp),
-                        ) {
-                            Text(
-                                courseType.displayName(),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
+                    if (row.courseType != null && row.courseType != CourseType.UNKNOWN) {
+                        val colors = courseTypeColors(row.courseType)
+                        Text(
+                            row.courseType.displayName(),
+                            color = colors.onContainer,
+                            modifier = Modifier
+                                .background(colors.container, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
                     }
                 }
                 Text(
-                    "${grade.semester} · ${grade.courseTeacher.ifBlank { "教师信息未提供" }}",
+                    row.semesterTeacher,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "学分 ${grade.courseCredits}",
+                    row.credits,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Text(
-                grade.courseScore,
+                row.score,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = gradeScoreColor(grade.courseScore),
+                color = gradeScoreColor(row.scoreValue),
             )
             if (selectionMode) {
                 Checkbox(
                     checked = selectedForCalculation,
                     onCheckedChange = onSelectionChange,
                     modifier = Modifier.size(48.dp).semantics {
-                        contentDescription = "选择${grade.displayCourseName()}用于计算"
+                        contentDescription = "选择${row.courseName}用于计算"
                     },
                 )
             }
@@ -3309,9 +3400,9 @@ private fun GradeEmptyState(onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun gradeScoreColor(score: String): Color = when (val numeric = scoreForSorting(score)) {
-    in 60..100 -> MaterialTheme.colorScheme.primary
-    in 0..59 -> MaterialTheme.colorScheme.error
+private fun gradeScoreColor(numeric: Int): Color = when {
+    numeric in 60..100 -> MaterialTheme.colorScheme.primary
+    numeric in 0..59 -> MaterialTheme.colorScheme.error
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 

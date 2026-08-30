@@ -63,4 +63,36 @@ class GradeScreenNavigationTest {
             ),
         )
     }
+
+    @Test
+    fun inlineMailboxSystemBackReturnsToTheListBeforePoppingMore() {
+        assertTrue(
+            shouldHandleInlineMailboxBack(
+                currentRouteIsMailbox = true,
+                mailboxInlineDetail = true,
+                mailboxInlineCompose = false,
+            ),
+        )
+        assertTrue(
+            shouldHandleInlineMailboxBack(
+                currentRouteIsMailbox = true,
+                mailboxInlineDetail = false,
+                mailboxInlineCompose = true,
+            ),
+        )
+        assertFalse(
+            shouldHandleInlineMailboxBack(
+                currentRouteIsMailbox = false,
+                mailboxInlineDetail = true,
+                mailboxInlineCompose = false,
+            ),
+        )
+        assertFalse(
+            shouldHandleInlineMailboxBack(
+                currentRouteIsMailbox = true,
+                mailboxInlineDetail = false,
+                mailboxInlineCompose = false,
+            ),
+        )
+    }
 }

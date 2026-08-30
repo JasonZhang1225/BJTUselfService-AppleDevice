@@ -1,5 +1,6 @@
 package team.bjtuss.bjtuselfservice.shared.feature.grade
 
+import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,7 @@ enum class GradeContentSource {
     NETWORK,
 }
 
+@Immutable
 data class GradeUiState(
     val grades: List<Grade> = emptyList(),
     val selectedGradeIds: Set<Int> = emptySet(),

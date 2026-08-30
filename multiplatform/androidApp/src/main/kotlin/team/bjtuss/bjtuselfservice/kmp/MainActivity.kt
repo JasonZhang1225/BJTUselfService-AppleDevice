@@ -3,7 +3,6 @@ package team.bjtuss.bjtuselfservice.kmp
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,12 +12,13 @@ import team.bjtuss.bjtuselfservice.shared.security.createAndroidAccountSecurityS
 import team.bjtuss.bjtuselfservice.shared.auth.AndroidTorchCaptchaRecognizer
 
 class MainActivity : ComponentActivity() {
+    private val refreshRate = AndroidRefreshRateController(this)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // 预热 WebView 内核：首次创建 WebView 要同步初始化 Chromium（秒级），
-        // 若等到进入邮箱页才初始化会卡住主线程和进页转场动画。
-        runCatching { WebView(this).destroy() }
+        // 不要在此处预热 WebView：Chromium 会让 HyperOS 把应用标成「跟随应用内设置」并锁 60Hz。
+        refreshRate.start()
         val accountSecurityStore = createAndroidAccountSecurityStore(this)
         val cacheStoreHandle = createAndroidCacheStore(this)
         val homeworkFileGateway = AndroidHomeworkFileGateway(this)
@@ -40,7 +40,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshRate.apply()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) refreshRate.apply()
+    }
+
     override fun onDestroy() {
+        refreshRate.stop()
         if (isFinishing) AndroidAuthenticatedSessionRegistry.update(null)
         super.onDestroy()
     }

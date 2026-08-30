@@ -1,9 +1,9 @@
 # BJTUselfService KMP 迁移工作记忆
 
-> 最后更新：2026-08-30
-> 当前分支：`maildev`（`579df8c` 已推送；本轮邮箱返回/详情竞态、作业空响应保护和首页 LazyColumn 修复已提交，待 Mac/小米平板用新包回归；本轮未改写或推送 `main`；含校历入口替换、M13/M15/M16 相关改动、PR #3 ABI 拆分、冻结 Android CI Maven 兜底和 KMP Android 共用签名配置）
-> 阶段状态：**173B 基座已同步；M13 代码层初步开发完成。校历入口已移除失效下载接口并改为公众号文章。M15 邮箱已完成 Coremail 只读文件夹/列表/详情扩展，宽屏三栏与紧凑端文件夹选择/二级阅读 UI 按 Apple Mail 方向重做；紧凑端邮箱主页、邮件详情和写信/回复现统一采用平台原生页面层级（Android Activity、iOS UIKit push），与两个教室查询入口保持一致；根页面转场期间不再先显示内嵌详情，避免重复视觉跳转。紧凑端当前文件夹 banner 负责文件夹切换，邮箱右上角胶囊显示“刷新”；HTML 表格正文已结构化渲染。当前已补上写信/回复首版和 `MAILBOX_COMPOSE` 原生编辑页，发送前确认但未实际发送，详情返回统一到左上角。Windows 与 Android x86_64 模拟器均已用真实登录态核对邮箱主页、当前文件夹 banner、刷新控件和编辑页，Android 另核对普通刷新、邮件详情、回复预填和发送确认。Mac 已有真实登录态列表/详情证据，真实发送/删除/附件下载和真实登录后的 iOS 邮箱验收未完成。M16 VPN 仅保留调研，当前不开发。PR #3 已合入。Android 已改为本地/CI 共用上传签名（证书 SHA-256 `5d0dabc3…c773`）。`v1.7.4-KMP` Release Android 包为仅 `arm64-v8a`、无 debug 文件名（142,270,345 字节）。本轮已在 `C:\Users\zjg\Android\Sdk` 恢复 Android SDK/`adb`/模拟器；Android x86_64 debug 构建、安装、登录和邮箱视觉回归均完成，实体 iPhone 仍缺 provisioning profile。当前版本为 `1.7.4-KMP`。**
-> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B` (`a342615`)**；当前发布 **`v1.7.4-KMP`**；上一发布 `v1.7.3-KMP-B@a342615` 保留。
+> 最后更新：2026-08-31
+> 当前分支：`main`；显示/打包版本已统一为 **`1.7.5-KMP`**（Android `versionCode` 16，iOS/macOS Build 16，Windows/macOS `packageVersion` 1.7.5）。Mac/iOS 最终验收与 GitHub Release 由用户进行；本轮已提交并合入 `main`，未打 tag、未发 Release。
+> 阶段状态：**173B 基座已同步；M13 代码层初步开发完成。校历入口已移除失效下载接口并改为公众号文章。M15 邮箱已完成 Coremail 只读文件夹/列表/详情扩展，宽屏三栏与紧凑端文件夹选择/二级阅读 UI 按 Apple Mail 方向重做；紧凑端邮箱主页、邮件详情和写信/回复现统一采用平台原生页面层级（Android Activity、iOS UIKit push），与两个教室查询入口保持一致；根页面转场期间不再先显示内嵌详情，避免重复视觉跳转。紧凑端当前文件夹 banner 负责文件夹切换，邮箱右上角胶囊显示“刷新”；HTML 表格正文已结构化渲染。当前已补上写信/回复首版和 `MAILBOX_COMPOSE` 原生编辑页，发送前确认但未实际发送，详情返回统一到左上角。Windows 与 Android x86_64 模拟器均已用真实登录态核对邮箱主页、当前文件夹 banner、刷新控件和编辑页，Android 另核对普通刷新、邮件详情、回复预填和发送确认。Mac 已有真实登录态列表/详情证据，真实发送/删除/附件下载和真实登录后的 iOS 邮箱验收未完成。M16 VPN 仅保留调研，当前不开发。PR #3 已合入。Android 已改为本地/CI 共用上传签名（证书 SHA-256 `5d0dabc3…c773`）。`v1.7.4-KMP` Release Android 包为仅 `arm64-v8a`、无 debug 文件名（142,270,345 字节）。本轮已在 `C:\Users\zjg\Android\Sdk` 恢复 Android SDK/`adb`/模拟器；Android x86_64 debug 构建、安装、登录和邮箱视觉回归均完成，实体 iPhone 仍缺 provisioning profile。当前版本为 `1.7.5-KMP`。**
+> 分支创建点：`9d8da18`；上游对照基线：`v1.7.0@419313d`；KMP 自身基线：**`v1.7.3-KMP-B` (`a342615`)**；当前版本 **`1.7.5-KMP`**（待 Mac/iOS 验收后打 tag）；上一发布 `v1.7.4-KMP` 保留。
 > 完整历史与已归档的验收细节：见 `history_full.md`（按里程碑归档，只读）
 > 本文件是实时工作记忆，不是只追加日志：任务开始读、结束改，只保留当前接续工作需要的状态。
 
@@ -36,7 +36,10 @@
 - **2026-08-29 M15 基本完成收口**：用户确认邮箱原生页面层级、邮件详情、写信/回复首版、HTML 表格正文、刷新/重试职责和右上角“刷新”胶囊均符合预期；M15 代码与首轮真实账号验收基本完成，真实发送/删除/移动/附件写操作及登录后的 iOS 页面仍明确保留为后续风险验收项。
 - **2026-08-29 Windows 触摸兼容层平台门禁**：`DesktopTouchScroll` 现在只允许 Windows 桌面目标安装 `draggable + dispatchRawDelta`，macOS、Android、iOS 即使调用方传入 `enabled = true` 也回到平台原生滚动；新增跨平台门禁回归测试。小米平板真实设备仍待用户用新包复测。
 - **2026-08-30 M15/M13 回归修复**：壳内邮箱详情（包括平板横屏）顶栏返回清选中邮件回列表，原生详情 push 前同步进入 loading；详情请求按消息 ID 丢弃过期结果，修复 iOS 返回后第二封邮件出现空态/上一封串入。普通作业成功响应缺字段、异常 STATUS、非 JSON 或单项列表解析失败时不再写入空快照，交由仓库保留旧缓存；Android debug 数据库核对仍有 4 条作业，未发现删除 API。首页外层长内容改用 `LazyColumn`，降低横屏滚动时整页测量开销；定向测试、Android 编译、Windows 编译均通过。
-- **2026-08-30 Android 真机边界**：当前可连接设备只有 `emulator-5554`，小米平板不在 ADB 列表。模拟器安装的是本轮构建的 `1.7.4-KMP` debug APK；一次冷启动因自动登录长期停留在“登录中”，不能把它写成真实移动端同步成功。模拟器本地 SQLDelight 计数为 homework 4、grades 27、courses 43、exams 9；这些缓存没有被本轮代码删除。
+- **2026-08-30 小米平板 HyperOS 刷新率**：`25091RP04C` / HyperOS 3 上 KMP 前台曾被 PowerKeeper 锁到 60Hz，设置页显示「跟随应用内设置」。根因是 `SWITCHING_TYPE_NONE` 会忽略窗口 `preferredRefreshRate`，启动预热 WebView 或声明 120Hz 反而会让小米按应用内 60Hz 投票。现已清掉窗口刷新率声明、关闭 ARR 省电降帧、去掉 `MainActivity` WebView 预热。实机 `dumpsys display`：KMP 前台 `mActiveRenderFrameRate=120.00001`，与原版切换往返后仍是 120。
+- **2026-08-30 平板宽屏课表横滑**：横屏走桌面课表布局。第一版自定义滑一下再播 `AnimatedContent`，不跟手、不能连滑、没有边缘拉伸。现 Android/iOS 宽屏表格改用和竖屏相同的 `HorizontalPager`（跟手、可连滑、边缘 Stretch）；Mac/Windows 仍是触摸板 + `AnimatedContent`。课表模型测试与 Android debug 构建通过，包已装到小米平板。
+- **2026-08-30 Windows 课表连滑**：精密触摸板惯性尾流在 180ms 节流结束后会被当成第二次翻页。累加器改为翻页后丢掉同方向惯性，直到滚动事件停顿才接受下一次滑动；反向立即解锁。Mac 原生 AppKit 路径未改。
+- **2026-08-30 `1.7.5-KMP` 版本统一**：显示版本 `1.7.5-KMP`，Android `versionCode` 16，iOS/macOS Build 16，Windows/macOS `packageVersion` 1.7.5。MSI 同版本覆盖表保留。待 Mac/iOS 验收后发 Release。
 - **2026-08-29 `maildev` 提交前状态**：在 `main@c181dbf` 基础上创建 `maildev`，本轮不修改 `main`；补充发件箱按收件人显示、特殊文件夹分组和会话失效重置，新增导航/FID/解析回归测试。`:shared:desktopTest` 与 `:shared:iosSimulatorArm64Test` 均通过，冻结根 Android 文件无差异；最终一次 Xcode Simulator 构建由用户中断，未把中断写成通过，当前没有残留构建进程。
 
 ## 2. 当前痛点（≤8 条）
@@ -49,13 +52,13 @@
 - **iOS 真机签名/连接**：generic iPhoneOS unsigned 构建通过，但当前 Bundle ID 没有匹配 provisioning profile；实体 iPhone 在 `devicectl` 中为 `unavailable`，合法签名、安装、Keychain 往返仍未取得证据。
 - **验证码发布级准确率仍待扩样**；课件深层变化仍缺自然样本；官方 1.7.0 / KMP PyTorch 2.1 在 API 37.1 有 16 KB page-size 提示。
 - **M13 现场解析差异与可选编辑页**：详情页状态标签是 `作业状态`（未交为“尚未批改”），不是 fixture 的 `提交状态`；filemanager 的 context/client/repo 在脚本 JSON 里，不在 DOM `data-*`。Mac 真实登录态课程/活动和主详情读取成功；已提交作业没有可用 filemanager，辅助 `action=editsubmission` 页返回 404 时按可选能力处理，不再覆盖主详情。真实上传仍未执行；Android/iOS 登录后 M13、REST token、Unity 外链仍待后续。arm64-only APK 不能装 x86_64 模拟器。
-- **M15 邮箱功能边界**：只读文件夹/列表/详情、分页加载与 Apple Mail 方向的响应式 UI 已完成首轮；紧凑端邮箱主页、邮件详情和写信/回复统一走平台原生页面层级，邮箱右上角胶囊明确显示“刷新”，普通刷新与会话失效后的“重试登录”已分工，详情接入 `MAILBOX_DETAIL` 平台原生二级路由，并修正列表→内嵌详情→原生详情的重复视觉跳转、详情返回层级、标题/刷新控件重复与破碎问题；写信/回复首版已接入但未实际发送。本地正文缓存、转发、删除、移动、附件上传/下载和真实登录后的 iOS 邮箱验收仍待单独切片，不能以当前构建通过代替真实邮箱验收。
+- **M15 邮箱功能边界**：只读文件夹/列表/详情、分页加载与 Apple Mail 方向的响应式 UI 已完成首轮；紧凑端邮箱主页、邮件详情和写信/回复统一走平台原生页面层级。为避免 HyperOS 再把应用标成「跟随应用内设置」，Android 启动不再预热 WebView；首次进入邮箱可能多一次 Chromium 初始化。本地正文缓存、转发、删除、移动、附件上传/下载和真实登录后的 iOS 邮箱验收仍待单独切片。
 
 ## 3. 接下来 1～3 个阶段
 
-1. **M15 邮箱读写验收与扩展**：Android/Windows 紧凑端的文件夹选择、主页导航、二级阅读页、写信/回复编辑和发送确认已完成首轮真实登录回归；后续评审动态字体、分页、本地缓存、真实发送和写操作失败恢复。
-2. **M13 Apple 端补验**：实体 iPhone 取得合法 provisioning profile 后安装；Android/iOS 登录后复测详情、会话续期和网页备用入口，真实上传仍需用户明确确认。
-3. **M16 官方 VPN 验证**：暂缓，待用户明确恢复后由用户自行安装官方 Mac/iOS 客户端并用 OTP 建立连接，再分层验证物理在线登录与只读业务；不做代理或访问控制绕过。
+1. **发布 `1.7.5-KMP`**：用户在 Mac/iOS 做最终验收后打 tag、建 GitHub Release 并上传四端产物。本轮只合入 `main`，不打 tag、不发 Release。
+2. **M15 邮箱读写验收与扩展**：Android/Windows 紧凑端的文件夹选择、主页导航、二级阅读页、写信/回复编辑和发送确认已完成首轮真实登录回归；后续评审动态字体、分页、本地缓存、真实发送和写操作失败恢复。
+3. **M13 Apple 端补验**：实体 iPhone 取得合法 provisioning profile 后安装；Android/iOS 登录后复测详情、会话续期和网页备用入口，真实上传仍需用户明确确认。
 
 ## 维护规则
 

@@ -80,6 +80,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import team.bjtuss.bjtuselfservice.shared.accessibleAlpha
+import team.bjtuss.bjtuselfservice.shared.currentPlatform
 import team.bjtuss.bjtuselfservice.shared.data.course.CourseScheduleSyncFailure
 import team.bjtuss.bjtuselfservice.shared.domain.course.Course
 import team.bjtuss.bjtuselfservice.shared.domain.course.coursesForWeek
@@ -142,6 +143,7 @@ fun CourseScheduleWorkspace(
     var showSchedulePicker by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     val weekScrollAccumulator = remember { CourseWeekScrollAccumulator() }
+    val useFingerWeekPager = shouldUseFingerWeekPager(currentPlatform())
 
     // 只灌缓存；网络自动同步由 AuthenticatedAppShell 在登录成功后触发（可重试）。
     LaunchedEffect(model) {
@@ -185,16 +187,20 @@ fun CourseScheduleWorkspace(
                             if (state.dateOutsideTeachingWeeks) {
                                 NonTeachingDateState(state.selectedDate, Modifier.weight(0.65f).fillMaxHeight())
                             } else {
+                                val weekPaneModifier = Modifier
+                                    .weight(0.65f)
+                                    .fillMaxHeight()
                                 Column(
-                                    modifier = Modifier
-                                        .weight(0.65f)
-                                        .fillMaxHeight()
-                                        .courseWeekScrollNavigation(weekScrollAccumulator) { direction ->
+                                    modifier = if (useFingerWeekPager) {
+                                        weekPaneModifier
+                                    } else {
+                                        weekPaneModifier.courseWeekScrollNavigation(weekScrollAccumulator) { direction ->
                                             when (direction) {
                                                 CourseWeekScrollDirection.PREVIOUS -> model.moveWeekBy(-1)
                                                 CourseWeekScrollDirection.NEXT -> model.moveWeekBy(1)
                                             }
-                                        },
+                                        }
+                                    },
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Row(
@@ -209,34 +215,43 @@ fun CourseScheduleWorkspace(
                                             onNext = { model.moveWeekBy(1) },
                                         )
                                     }
-                                    AnimatedContent(
-                                        targetState = state.selectedWeek,
-                                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        transitionSpec = {
-                                            val movingForward = targetState > initialState
-                                            val pagingSpring = spring<IntOffset>(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMediumLow,
-                                            )
-                                            (slideInHorizontally(
-                                                animationSpec = pagingSpring,
-                                                initialOffsetX = { width -> if (movingForward) width else -width },
-                                            ) + fadeIn(tween(180))) togetherWith
-                                                (slideOutHorizontally(
-                                                    animationSpec = pagingSpring,
-                                                    targetOffsetX = { width -> if (movingForward) -width else width },
-                                                ) + fadeOut(tween(140)))
-                                        },
-                                        label = "desktop-course-week",
-                                    ) { week ->
-                                        WeekGrid(
-                                            courses = coursesForWeek(state.scheduleCourses, week),
+                                    if (useFingerWeekPager) {
+                                        ExpandedWeekPager(
+                                            state = state,
                                             courseTypesByCode = courseTypesByCode,
-                                            weekStartDate = state.weekDate(week)?.startDate,
-                                            selectedCourseId = state.selectedCourseId,
-                                            onOpen = model::showCourseDetails,
-                                            modifier = Modifier.fillMaxSize(),
+                                            model = model,
+                                            modifier = Modifier.weight(1f).fillMaxWidth(),
                                         )
+                                    } else {
+                                        AnimatedContent(
+                                            targetState = state.selectedWeek,
+                                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                                            transitionSpec = {
+                                                val movingForward = targetState > initialState
+                                                val pagingSpring = spring<IntOffset>(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                )
+                                                (slideInHorizontally(
+                                                    animationSpec = pagingSpring,
+                                                    initialOffsetX = { width -> if (movingForward) width else -width },
+                                                ) + fadeIn(tween(180))) togetherWith
+                                                    (slideOutHorizontally(
+                                                        animationSpec = pagingSpring,
+                                                        targetOffsetX = { width -> if (movingForward) -width else width },
+                                                    ) + fadeOut(tween(140)))
+                                            },
+                                            label = "desktop-course-week",
+                                        ) { week ->
+                                            WeekGrid(
+                                                courses = coursesForWeek(state.scheduleCourses, week),
+                                                courseTypesByCode = courseTypesByCode,
+                                                weekStartDate = state.weekDate(week)?.startDate,
+                                                selectedCourseId = state.selectedCourseId,
+                                                onOpen = model::showCourseDetails,
+                                                modifier = Modifier.fillMaxSize(),
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1052,6 +1067,49 @@ private fun CompactDayPager(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ExpandedWeekPager(
+    state: CourseScheduleUiState,
+    courseTypesByCode: Map<String, CourseType>?,
+    model: CourseScheduleScreenModel,
+    modifier: Modifier,
+) {
+    val initialPage = state.selectedWeek.takeIf { it in 0..COURSE_MAX_WEEK }
+        ?: state.currentWeek.takeIf { it in 1..COURSE_MAX_WEEK }
+        ?: 0
+    val pagerState = rememberPagerState(initialPage = overviewPageForWeek(initialPage)) {
+        COURSE_OVERVIEW_PAGE_COUNT
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        val week = weekForOverviewPage(pagerState.currentPage)
+        if (state.selectedWeek != week) model.selectWeek(week)
+    }
+    LaunchedEffect(state.selectedWeek) {
+        val target = overviewPageForWeek(state.selectedWeek)
+        if (target in 0..COURSE_MAX_WEEK &&
+            target != pagerState.currentPage &&
+            !pagerState.isScrollInProgress
+        ) {
+            pagerState.animateScrollToPage(target)
+        }
+    }
+    HorizontalPager(
+        state = pagerState,
+        modifier = modifier,
+        beyondViewportPageCount = 1,
+        pageSpacing = 8.dp,
+    ) { page ->
+        WeekGrid(
+            courses = coursesForWeek(state.scheduleCourses, page),
+            courseTypesByCode = courseTypesByCode,
+            weekStartDate = state.weekDate(page)?.startDate,
+            selectedCourseId = state.selectedCourseId,
+            onOpen = model::showCourseDetails,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

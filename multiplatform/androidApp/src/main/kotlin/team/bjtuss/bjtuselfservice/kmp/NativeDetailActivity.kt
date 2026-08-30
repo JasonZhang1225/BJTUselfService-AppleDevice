@@ -12,11 +12,13 @@ import team.bjtuss.bjtuselfservice.shared.AuthenticatedDestinationApp
 import team.bjtuss.bjtuselfservice.shared.isNativeDetailRoute
 
 class NativeDetailActivity : ComponentActivity() {
+    private val refreshRate = AndroidRefreshRateController(this)
     private var removeSessionObserver: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        refreshRate.start()
         val routeId = intent.getStringExtra(EXTRA_ROUTE_ID)
         val session = AndroidAuthenticatedSessionRegistry.session
         if (routeId == null || !isNativeDetailRoute(routeId) || session == null) {
@@ -40,9 +42,20 @@ class NativeDetailActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        refreshRate.apply()
         removeSessionObserver = AndroidAuthenticatedSessionRegistry.observe { session ->
             if (session == null && !isFinishing) finish()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshRate.apply()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) refreshRate.apply()
     }
 
     override fun onStop() {
@@ -52,6 +65,7 @@ class NativeDetailActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        refreshRate.stop()
         if (isFinishing && intent.getStringExtra(EXTRA_ROUTE_ID) == MAILBOX_COMPOSE_ROUTE_ID) {
             AndroidAuthenticatedSessionRegistry.session?.mailboxModel?.let { mailboxModel ->
                 lifecycleScope.launch { mailboxModel.cancelCompose() }
