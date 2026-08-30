@@ -34,6 +34,7 @@
 - **2026-08-29 M15 写信/回复首版**：按直接 Chrome DevTools MCP 取证的 Coremail 协议，新增 `compose.jsp?ctype=normal/reply` 草稿初始化和 `mbox:compose` `action=deliver` 发送适配；新增 `MAILBOX_COMPOSE` 原生二级路由，写信/回复共用收件人、抄送、主题、正文编辑页，回复自动带入收件人、主题和原文引用，发送前必须确认，取消/系统返回尽力清理临时草稿。紧凑端详情已移除正文内单独的“返回邮件列表”，唯一返回固定在左上角；Android 已核对详情返回、写信、回复预填和发送确认，Windows 已核对写信页，未实际发送邮件。
 - **2026-08-29 M15 当前文件夹入口微调**：按用户反馈将“切换”从邮箱顶栏移入下方当前文件夹 banner；顶栏仅保留“写信”和同步/刷新状态，避免在窄屏中出现写信、切换、状态、刷新挤在一行。Android 与 Windows 源码版均已重新视觉核对，banner 内菜单可正常打开。
 - **2026-08-29 M15 基本完成收口**：用户确认邮箱原生页面层级、邮件详情、写信/回复首版、HTML 表格正文、刷新/重试职责和右上角“刷新”胶囊均符合预期；M15 代码与首轮真实账号验收基本完成，真实发送/删除/移动/附件写操作及登录后的 iOS 页面仍明确保留为后续风险验收项。
+- **2026-08-29 Windows 触摸兼容层平台门禁**：`DesktopTouchScroll` 现在只允许 Windows 桌面目标安装 `draggable + dispatchRawDelta`，macOS、Android、iOS 即使调用方传入 `enabled = true` 也回到平台原生滚动；新增跨平台门禁回归测试。小米平板真实设备仍待用户用新包复测。
 - **2026-08-29 `maildev` 提交前状态**：在 `main@c181dbf` 基础上创建 `maildev`，本轮不修改 `main`；补充发件箱按收件人显示、特殊文件夹分组和会话失效重置，新增导航/FID/解析回归测试。`:shared:desktopTest` 与 `:shared:iosSimulatorArm64Test` 均通过，冻结根 Android 文件无差异；最终一次 Xcode Simulator 构建由用户中断，未把中断写成通过，当前没有残留构建进程。
 
 ## 2. 当前痛点（≤8 条）

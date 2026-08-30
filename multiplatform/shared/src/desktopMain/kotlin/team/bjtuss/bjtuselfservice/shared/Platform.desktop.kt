@@ -9,5 +9,6 @@ actual fun currentPlatform(): PlatformInfo {
         } else {
             "macOS ${System.getProperty("os.version")}"
         },
+        isWindows = isWindows,
     )
 }

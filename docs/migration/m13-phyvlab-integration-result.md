@@ -42,7 +42,7 @@
 
 ### 触摸与平台实现
 
-- Windows/macOS 桌面主要纵向列表、详情页和横向筛选栏增加触摸拖动兼容层；滚轮保持原行为，Android/iOS 使用平台原生滚动。
+- 仅 Windows 桌面主要纵向列表、详情页和横向筛选栏增加触摸拖动兼容层；滚轮保持原行为，macOS、Android/iOS 使用平台原生滚动。平台门禁位于 `DesktopTouchScroll` 内部，调用方不能把该层误开到其他平台。
 - Android 使用系统文档选择器和 `Intent.ACTION_VIEW`；iOS 使用 `UIDocumentPicker`/WKWebView 相关平台实现；macOS 复用 desktopApp 的 JVM/CIO/文件网关路径。
 
 ## 1.1 `v1.7.3-KMP-B` 基线差异审计
@@ -51,7 +51,7 @@
 
 | 差异类别 | 受影响代码 | 结论 |
 | --- | --- | --- |
-| 桌面触摸/滚动 | 课程表、课件、考试、成绩、作业、教室、设置、首页和登录页 | 只是给既有 `verticalScroll`/`LazyColumn`/横向筛选栏增加 `desktopTouchScroll`；未替换业务数据源或旧页面逻辑 |
+| Windows 桌面触摸/滚动 | 课程表、课件、考试、成绩、作业、教室、设置、首页和登录页 | 只是给既有 `verticalScroll`/`LazyColumn`/横向筛选栏增加 `desktopTouchScroll`；平台门禁强制限制为 Windows，未替换业务数据源或旧页面逻辑 |
 | 物理在线接入 | `App`、登录会话、首页日程、设置、导航及新增 `phyvlab` 包 | M13 必需接线；不属于 B 的旧功能回退 |
 | 认证/公共传输 | `SchoolLoginProtocol`、`KtorSchoolHttpTransport`、`SchoolHttpTransport` | 为 Moodle CAS 恢复、无重定向握手和“表单字段+multipart 文件”上传增加能力；保留原普通登录调用入口 |
 | 平台桥接 | Android 网络权限、`ACTION_VIEW` 外链桥接、物理在线域名白名单 | 为 M13 的网页备用入口和网络访问所需；没有改动 B 的 Windows/macOS 原生安装逻辑 |

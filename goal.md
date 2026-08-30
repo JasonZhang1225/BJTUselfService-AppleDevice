@@ -335,7 +335,7 @@ Apple 端曾出现模型可以生成或加载、但实际验证码识别很差�
 - 入口：更多 → 学业 → 物理在线（第一项）。
 - 数据：复用 App 内 CAS/MIS 会话建立 MoodleSession；课程、作业、截止安排和首页日程采用登录态 HTML 解析，REST/Mobile token 尚未确认。
 - 交互：点击作业在 App 内显示提交状态、批改成绩、教师评语和已提交文件；课程作业按 Moodle 活动 ID 默认新的在上方并支持正/逆序切换；普通 Moodle 文件作业支持显式确认后的草稿上传与提交，Unity/WebGL/quiz/选课仍交给网页。
-- 兼容：桌面主要滚动容器加入触摸拖动兼容层；Android/iOS 复用平台文件选择器；MoodleSession 失效时先在 App 内强制 CAS challenge 恢复一次，失败才要求退出并重新登录。
+- 兼容：仅 Windows 桌面主要滚动容器加入触摸拖动兼容层，`DesktopTouchScroll` 内部强制平台门禁；macOS、Android/iOS 使用平台原生滚动；Android/iOS 复用平台文件选择器；MoodleSession 失效时先在 App 内强制 CAS challenge 恢复一次，失败才要求退出并重新登录。
 - 未完成：Android SDK、emulator、API 36 AVD 与 debug APK 已在当前 Windows 主机补齐，Android 已启动并进入 Compose 登录页，但尚未用真实账号进入物理在线页；Mac 已通过 macOS 分发构建并完成登录态列表与原生详情交互，可编辑提交页/真实上传仍待样本；iOS 模拟器仅到登录首屏，实体 iPhone 因 `unavailable` 与 provisioning profile 缺失尚未安装。真实上传和 UU 远程真实触摸仍未取得运行证据。
 
 ### M14：Windows 桌面端移植
