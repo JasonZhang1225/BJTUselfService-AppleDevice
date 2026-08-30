@@ -21,7 +21,6 @@ class GradeScreenNavigationTest {
         assertEquals(
             MailboxBackTarget.LIST,
             mailboxBackTarget(
-                expanded = false,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = true,
                 isMessageLoading = false,
@@ -30,7 +29,6 @@ class GradeScreenNavigationTest {
         assertEquals(
             MailboxBackTarget.LIST,
             mailboxBackTarget(
-                expanded = false,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = false,
                 isMessageLoading = true,
@@ -43,7 +41,6 @@ class GradeScreenNavigationTest {
         assertEquals(
             MailboxBackTarget.PARENT,
             mailboxBackTarget(
-                expanded = false,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = false,
                 isMessageLoading = false,
@@ -52,16 +49,14 @@ class GradeScreenNavigationTest {
         assertEquals(
             MailboxBackTarget.PARENT,
             mailboxBackTarget(
-                expanded = false,
                 useNativeSecondaryRoutes = true,
                 hasSelectedMessage = true,
                 isMessageLoading = false,
             ),
         )
         assertEquals(
-            MailboxBackTarget.PARENT,
+            MailboxBackTarget.LIST,
             mailboxBackTarget(
-                expanded = true,
                 useNativeSecondaryRoutes = false,
                 hasSelectedMessage = true,
                 isMessageLoading = false,

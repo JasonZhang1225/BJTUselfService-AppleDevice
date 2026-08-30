@@ -173,7 +173,10 @@ fun MailboxWorkspace(
             isSessionRetrying = isSessionRetrying,
             onLoadMore = { scope.launch { model.loadMore() } },
             onSelectFolder = { folderId -> scope.launch { model.selectFolder(folderId) } },
-            onOpenMessage = { message -> scope.launch { model.openMessage(message) } },
+            onOpenMessage = { message ->
+                model.prepareMessage(message)
+                scope.launch { model.openMessage(message) }
+            },
             onOpenWeb = { uriHandler.openUri(current.request.url) },
             modifier = modifier,
         )

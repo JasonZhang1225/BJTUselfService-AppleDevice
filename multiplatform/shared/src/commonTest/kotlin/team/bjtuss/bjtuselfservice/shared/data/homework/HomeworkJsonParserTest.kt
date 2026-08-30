@@ -111,11 +111,19 @@ class HomeworkJsonParserTest {
     }
 
     @Test
-    fun treatsOtherNonSuccessStatusAsEmptyListLikeOriginalApp() {
-        val result = assertIs<HomeworkJsonParseResult.Success<List<*>>>(
+    fun treatsOtherNonSuccessStatusAsMalformedInsteadOfEmpty() {
+        val result = assertIs<HomeworkJsonParseResult.Failure>(
             parseHomeworkList("""{"STATUS":"5","message":"系统异常"}""", 0),
         )
-        assertEquals(emptyList<Any?>(), result.value)
+        assertEquals("STATUS", result.field)
+    }
+
+    @Test
+    fun rejectsSuccessPayloadWithoutHomeworkList() {
+        val result = assertIs<HomeworkJsonParseResult.Failure>(
+            parseHomeworkList("""{"STATUS":"0","message":"暂时无法返回数据"}""", 0),
+        )
+        assertEquals("courseNoteList", result.field)
     }
 
     @Test

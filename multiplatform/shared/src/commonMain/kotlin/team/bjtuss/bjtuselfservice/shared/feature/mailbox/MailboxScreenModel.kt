@@ -107,6 +107,8 @@ class MailboxScreenModel(
     val state: StateFlow<MailboxUiState> = mutableState.asStateFlow()
 
     private val operationMutex = Mutex()
+    // 详情页可能在上一次读取尚未返回时被退出并重新打开；只允许当前消息的结果落地。
+    private var messageRequestId: String? = null
 
     suspend fun initialize() {
         if (mutableState.value == MailboxUiState.Idle) refresh()
@@ -115,6 +117,7 @@ class MailboxScreenModel(
     suspend fun refresh() {
         operationMutex.withLock {
             val previous = mutableState.value as? MailboxUiState.Ready
+            messageRequestId = null
             mutableState.value = MailboxUiState.Preparing
             val cookies = runCatching { transport.sessionCookiesFor(MAILBOX_URL) }
                 .getOrElse {
@@ -169,6 +172,7 @@ class MailboxScreenModel(
                 isMessageLoading = false,
                 failure = null,
             )
+            messageRequestId = null
             loadMessages(folderId)
         }
     }
@@ -219,32 +223,52 @@ class MailboxScreenModel(
         }
     }
 
+    /** 在原生详情页 push 前同步切到 loading，避免新页面先看到“选择一封邮件”。 */
+    fun prepareMessage(message: MailSummary) {
+        val current = mutableState.value as? MailboxUiState.Ready ?: return
+        messageRequestId = message.id
+        mutableState.value = current.copy(
+            selectedMessage = null,
+            isMessageLoading = true,
+            failure = null,
+        )
+    }
+
     suspend fun openMessage(message: MailSummary) {
         operationMutex.withLock {
             val current = mutableState.value as? MailboxUiState.Ready ?: return
+            messageRequestId = message.id
             mutableState.value = current.copy(
                 selectedMessage = null,
                 isMessageLoading = true,
                 failure = null,
             )
             try {
-                mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
-                    selectedMessage = remote.readMessage(message.id),
-                    isMessageLoading = false,
-                    failure = null,
-                ) ?: return
+                val detail = remote.readMessage(message.id)
+                val latest = mutableState.value as? MailboxUiState.Ready ?: return
+                if (messageRequestId == message.id) {
+                    mutableState.value = latest.copy(
+                        selectedMessage = detail,
+                        isMessageLoading = false,
+                        failure = null,
+                    )
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: MailboxRemoteException) {
-                mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
-                    isMessageLoading = false,
-                    failure = error.reason.toUiFailure(),
-                ) ?: return
+                if (messageRequestId == message.id) {
+                    mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
+                        isMessageLoading = false,
+                        failure = error.reason.toUiFailure(),
+                    ) ?: return
+                }
             } catch (_: Exception) {
-                mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
-                    isMessageLoading = false,
-                    failure = MailboxFailure.NETWORK,
-                ) ?: return
+                if (messageRequestId == message.id) {
+                    mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
+                        isMessageLoading = false,
+                        failure = MailboxFailure.NETWORK,
+                    ) ?: return
+                }
             }
         }
     }
@@ -335,6 +359,7 @@ class MailboxScreenModel(
 
     fun clearSelectedMessage() {
         val current = mutableState.value as? MailboxUiState.Ready ?: return
+        messageRequestId = null
         mutableState.value = current.copy(selectedMessage = null, isMessageLoading = false)
     }
 

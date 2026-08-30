@@ -96,6 +96,11 @@ class MailboxScreenModelTest {
             assertEquals(listOf(summary), listState.messages)
             assertEquals(1, listState.totalCount)
 
+            model.prepareMessage(summary)
+            val loadingState = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(null, loadingState.selectedMessage)
+            assertTrue(loadingState.isMessageLoading)
+
             model.openMessage(summary)
             val detailState = assertIs<MailboxUiState.Ready>(model.state.value)
             assertEquals(detail, detailState.selectedMessage)

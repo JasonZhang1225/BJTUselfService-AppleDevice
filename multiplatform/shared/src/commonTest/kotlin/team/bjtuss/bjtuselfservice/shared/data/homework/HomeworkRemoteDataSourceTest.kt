@@ -192,7 +192,7 @@ class HomeworkRemoteDataSourceTest {
     }
 
     @Test
-    fun skipsMalformedHomeworkListWithoutFailingTheBatch() = runBlocking {
+    fun reportsMalformedHomeworkListSoTheRepositoryCanKeepItsCache() = runBlocking {
         val transport = QueueTransport(
             smartResponse("<html></html>"),
             smartResponse("""{"sessionId":"session-value"}"""),
@@ -203,10 +203,11 @@ class HomeworkRemoteDataSourceTest {
             smartResponse("""{"STATUS":"5","message":"系统异常"}"""),
         )
 
-        val homework = SchoolHomeworkRemoteDataSource(transport, requestDelayMillis = 0).fetchHomework()
+        val error = assertFailsWith<HomeworkRemoteException> {
+            SchoolHomeworkRemoteDataSource(transport, requestDelayMillis = 0).fetchHomework()
+        }
 
-        assertEquals(listOf("课程设计"), homework.map(Homework::title))
-        assertEquals(listOf(1), homework.map(Homework::homeworkType))
+        assertEquals(HomeworkRemoteFailure.MALFORMED_RESPONSE, error.reason)
     }
 
     @Test

@@ -45,6 +45,12 @@
 - 仅 Windows 桌面主要纵向列表、详情页和横向筛选栏增加触摸拖动兼容层；滚轮保持原行为，macOS、Android/iOS 使用平台原生滚动。平台门禁位于 `DesktopTouchScroll` 内部，调用方不能把该层误开到其他平台。
 - Android 使用系统文档选择器和 `Intent.ACTION_VIEW`；iOS 使用 `UIDocumentPicker`/WKWebView 相关平台实现；macOS 复用 desktopApp 的 JVM/CIO/文件网关路径。
 
+## 1.2 2026-08-30 回归补丁
+
+- Android、iOS、macOS 不再叠加 `DesktopTouchScroll`；平台门禁继续位于兼容层内部，只有 Windows 桌面目标可以安装拖动映射。为降低横屏首页的整页测量开销，首页外层长内容改用 `LazyColumn`；小米平板真机尚未连接，不能把模拟器结果当作硬件流畅度证据。
+- 普通作业同步对远端响应增加数据完整性门禁：明确的无数据状态仍可写入空快照；成功响应缺 `courseList`/`courseNoteList`、异常状态、非 JSON 或批量请求中任一列表无法解析时返回 `MALFORMED_RESPONSE`，仓库沿用旧缓存，避免会话失效被误显示为“暂无作业”。
+- 本机 Android debug 数据库只读核对显示仍存在 4 条普通作业缓存；代码中没有删除远端作业的请求。当前连接的 `emulator-5554` 冷启动一次停留在“登录中”，Android 真机和 iOS 登录后页面仍待复测。
+
 ## 1.1 `v1.7.3-KMP-B` 基线差异审计
 
 本次按提交内容而不是只看分支名逐文件核对 `v1.7.3-KMP-B^{}` 与 M13 提交 `HEAD`：前者为 `a342615`，后者的直接父提交也是 `a342615`，两者之间只有一个 M13 提交。没有删除旧文件；`v1.7.3-KMP-B` 的 CI 打包修复、Windows ASCII 安装器修复、macOS 中文显示名/DMG 图标修复、课程表教学周修复和作业解析容错均仍在当前树中。

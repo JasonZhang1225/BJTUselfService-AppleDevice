@@ -5,6 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -92,7 +94,7 @@ fun HomeWorkspace(
     val state by model.state.collectAsState()
     val uriHandler = LocalUriHandler.current
     val campusDestination = campusCardDestination(platform.family)
-    val pageScrollState = rememberScrollState()
+    val pageListState = rememberLazyListState()
     var dialog by remember { mutableStateOf<HomeDialog?>(null) }
     var selectedChangeDomain by remember { mutableStateOf<HomeChangeDomain?>(null) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
@@ -169,87 +171,102 @@ fun HomeWorkspace(
         )
     }
 
-    Column(
-        modifier = modifier.fillMaxSize()
-            .verticalScroll(pageScrollState)
-            .desktopTouchScroll(pageScrollState)
-            .padding(
+    val status = state.status
+    LazyColumn(
+        modifier = modifier.fillMaxSize().desktopTouchScroll(pageListState),
+        contentPadding = PaddingValues(
             horizontal = if (expanded) 8.dp else 16.dp,
             vertical = 14.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (expanded) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("首页", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text(
-                        "邮件与校园账户状态来自当前 MIS 会话",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                OutlinedButton(onClick = onRefresh, enabled = !isRefreshing) {
-                    Text(if (isRefreshing) "同步中" else "刷新")
+            item(key = "home-header") {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("首页", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "邮件与校园账户状态来自当前 MIS 会话",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = onRefresh, enabled = !isRefreshing) {
+                        Text(if (isRefreshing) "同步中" else "刷新")
+                    }
                 }
             }
         }
-        // 同步进度条由 DestinationPage 钉在顶栏下，此处不再重复。
         state.failure?.let { failure ->
-            Text(
-                failure.message(state.status != null),
-                color = if (state.status == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            item(key = "home-failure") {
+                Text(
+                    failure.message(state.status != null),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
         actionMessage?.let { message ->
-            Text(message, color = MaterialTheme.colorScheme.error)
-        }
-        val status = state.status
-        if (expanded) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MailCard(status, onOpenMailbox, Modifier.weight(1f))
-                CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.weight(1f))
-                NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.weight(1f))
+            item(key = "home-action-message") {
+                Text(message, color = MaterialTheme.colorScheme.error)
             }
-            HomeAgendaSection(
-                homework = homework,
-                exams = exams,
-                phyVlabEvents = phyVlabEvents,
-                currentWeek = currentWeek,
-                now = now,
-                timeZone = timeZone,
-                isLoading = isAgendaLoading,
-                expanded = expanded,
-                onOpenHomework = onOpenHomework,
-                onOpenExams = onOpenExams,
-                onOpenPhyVlab = onOpenPhyVlab,
-            )
+        }
+        if (expanded) {
+            item(key = "home-status-cards") {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MailCard(status, onOpenMailbox, Modifier.weight(1f))
+                    CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.weight(1f))
+                    NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.weight(1f))
+                }
+            }
+            item(key = "home-agenda") {
+                HomeAgendaSection(
+                    homework = homework,
+                    exams = exams,
+                    phyVlabEvents = phyVlabEvents,
+                    currentWeek = currentWeek,
+                    now = now,
+                    timeZone = timeZone,
+                    isLoading = isAgendaLoading,
+                    expanded = expanded,
+                    onOpenHomework = onOpenHomework,
+                    onOpenExams = onOpenExams,
+                    onOpenPhyVlab = onOpenPhyVlab,
+                )
+            }
         } else {
             // 紧凑页：本周日程放第一栏，新邮件保持原尺寸，两张余额卡半宽并列，
             // 尽量不用滚动就能看全（2026-08-04 真机反馈）。
-            HomeAgendaSection(
-                homework = homework,
-                exams = exams,
-                phyVlabEvents = phyVlabEvents,
-                currentWeek = currentWeek,
-                now = now,
-                timeZone = timeZone,
-                isLoading = isAgendaLoading,
-                expanded = expanded,
-                onOpenHomework = onOpenHomework,
-                onOpenExams = onOpenExams,
-                onOpenPhyVlab = onOpenPhyVlab,
-            )
-            MailCard(status, onOpenMailbox, Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.weight(1f))
-                NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.weight(1f))
+            item(key = "home-agenda") {
+                HomeAgendaSection(
+                    homework = homework,
+                    exams = exams,
+                    phyVlabEvents = phyVlabEvents,
+                    currentWeek = currentWeek,
+                    now = now,
+                    timeZone = timeZone,
+                    isLoading = isAgendaLoading,
+                    expanded = expanded,
+                    onOpenHomework = onOpenHomework,
+                    onOpenExams = onOpenExams,
+                    onOpenPhyVlab = onOpenPhyVlab,
+                )
+            }
+            item(key = "home-mail-card") {
+                MailCard(status, onOpenMailbox, Modifier.fillMaxWidth())
+            }
+            item(key = "home-account-cards") {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CampusCard(status, { dialog = HomeDialog.CampusCard }, Modifier.weight(1f))
+                    NetworkCard(status, { dialog = HomeDialog.Network }, Modifier.weight(1f))
+                }
             }
         }
-        HomeChangeFeedSection(
-            changes = changes,
-            onSelectDomain = { selectedChangeDomain = it },
-            onClearAll = onClearAllChanges,
-        )
+        item(key = "home-change-feed") {
+            HomeChangeFeedSection(
+                changes = changes,
+                onSelectDomain = { selectedChangeDomain = it },
+                onClearAll = onClearAllChanges,
+            )
+        }
     }
 }
 

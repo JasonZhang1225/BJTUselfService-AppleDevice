@@ -35,17 +35,36 @@ fun parseSmartSessionId(body: String): HomeworkJsonParseResult<String> = parseOb
 }
 
 fun parseCurrentSemesterCode(body: String): HomeworkJsonParseResult<String> = parseObject(body) { root ->
-    // 对齐 1.7.0：Moshi 缺字段得到空学期，不把整页作业打成“结构变化”。
-    val first = root.array("result")?.firstOrNull().asObject()
+    val status = root.string("STATUS")
+    if (!isSuccessOrEmptyStatus(status)) {
+        return@parseObject HomeworkJsonParseResult.Failure("STATUS")
+    }
+    // 对齐 1.7.0：明确的空结果允许没有学期行；成功响应却缺字段不能当成空学期。
+    val elements = root.arrayOrBlank("result")
+    if (elements == null && status != "2") {
+        return@parseObject HomeworkJsonParseResult.Failure("result")
+    }
+    val first = elements?.firstOrNull().asObject()
     val semester = first?.string("xqCode") ?: first?.string("xq_code").orEmpty()
+    if (elements?.isNotEmpty() == true && semester.isBlank()) {
+        return@parseObject HomeworkJsonParseResult.Failure("result.xqCode")
+    }
     HomeworkJsonParseResult.Success(semester)
 }
 
 fun parseSmartCourses(body: String): HomeworkJsonParseResult<List<SmartCourse>> = parseObject(body) { root ->
-    // STATUS≠0 或缺少 courseList 视为本学期暂无课程，跳过坏行，不中断整批。
-    val elements = root.arrayOrBlank("courseList") ?: emptyList()
+    val status = root.string("STATUS")
+    if (!isSuccessOrEmptyStatus(status)) {
+        return@parseObject HomeworkJsonParseResult.Failure("STATUS")
+    }
+    // 明确的空结果允许没有 courseList；成功响应却缺字段必须视为异常，
+    // 否则一次登录页/网关 HTML 被包装成 JSON 就会把本地作业快照清空。
+    val elements = root.arrayOrBlank("courseList")
+    if (elements == null && status != "2") {
+        return@parseObject HomeworkJsonParseResult.Failure("courseList")
+    }
     val courses = mutableListOf<SmartCourse>()
-    for (element in elements) {
+    for (element in elements.orEmpty()) {
         val item = element.asObject() ?: continue
         val id = item.int("id") ?: continue
         val name = item.string("name").orEmpty()
@@ -59,6 +78,9 @@ fun parseSmartCourses(body: String): HomeworkJsonParseResult<List<SmartCourse>> 
             semesterCode = item.string("xq_code").orEmpty(),
         )
     }
+    if (elements?.isNotEmpty() == true && courses.isEmpty()) {
+        return@parseObject HomeworkJsonParseResult.Failure("courseList.identity")
+    }
     HomeworkJsonParseResult.Success(courses)
 }
 
@@ -66,10 +88,18 @@ fun parseHomeworkList(
     body: String,
     homeworkType: Int,
 ): HomeworkJsonParseResult<List<Homework>> = parseObject(body) { root ->
-    // 1.7.0 对任意 STATUS 用默认空列表容错；缺 identity 的单行跳过，不整表失败。
-    val elements = root.arrayOrBlank("courseNoteList") ?: emptyList()
+    val status = root.string("STATUS")
+    if (!isSuccessOrEmptyStatus(status)) {
+        return@parseObject HomeworkJsonParseResult.Failure("STATUS")
+    }
+    // 明确的无数据 STATUS 继续按旧客户端返回空列表；成功响应却缺字段必须保留为解析失败，
+    // 交由 repository 回退缓存，不能把临时登录页/网关异常当成“确实没有作业”。
+    val elements = root.arrayOrBlank("courseNoteList")
+    if (elements == null && status != "2") {
+        return@parseObject HomeworkJsonParseResult.Failure("courseNoteList")
+    }
     val homework = mutableListOf<Homework>()
-    for (element in elements) {
+    for (element in elements.orEmpty()) {
         val item = element.asObject() ?: continue
         val upId = item.int("id") ?: continue
         val courseId = item.int("course_id") ?: continue
@@ -95,6 +125,9 @@ fun parseHomeworkList(
             scoreId = item.int("scoreId") ?: 0,
             homeworkType = homeworkType,
         )
+    }
+    if (elements?.isNotEmpty() == true && homework.isEmpty()) {
+        return@parseObject HomeworkJsonParseResult.Failure("courseNoteList.identity")
     }
     HomeworkJsonParseResult.Success(homework)
 }
@@ -162,3 +195,6 @@ private inline fun <T> parseObject(
 } catch (_: Exception) {
     HomeworkJsonParseResult.Failure("json")
 }
+
+private fun isSuccessOrEmptyStatus(status: String?): Boolean =
+    status.isNullOrBlank() || status == "0" || status == "2"

@@ -464,12 +464,11 @@ fun AuthenticatedAppShell(
     val useNativeSecondaryRoutes =
         nativeNavigationEnabled && windowClass != WindowClass.Expanded
 
-    // 紧凑端未启用原生二级路由时，邮件详情留在邮箱目的地内；
+    // 未启用原生二级路由时，邮件详情留在邮箱目的地内；
     // 启用原生二级路由时，邮箱列表、邮件详情和写信/回复均由平台页面承载。
     // 邮箱页的唯一返回入口固定在左上角，详情正文不再另放「返回邮件列表」按钮。
     val mailboxReadyState = mailboxState as? MailboxUiState.Ready
     val mailboxInlineDetail = mailboxBackTarget(
-        expanded = windowClass == WindowClass.Expanded,
         useNativeSecondaryRoutes = useNativeSecondaryRoutes,
         hasSelectedMessage = mailboxReadyState?.selectedMessage != null,
         isMessageLoading = mailboxReadyState?.isMessageLoading == true,
@@ -1555,20 +1554,18 @@ private fun String.toAppRoute(): AppRoute? =
         AppSection.entries.firstOrNull { it.name == this }
     }
 
-/** 邮箱页顶栏返回的目标；紧凑内嵌详情回列表，其余情况回邮箱上级页面。 */
+/** 邮箱页顶栏返回的目标；壳内详情回列表，原生详情页回邮箱上级页面。 */
 internal enum class MailboxBackTarget {
     PARENT,
     LIST,
 }
 
 internal fun mailboxBackTarget(
-    expanded: Boolean,
     useNativeSecondaryRoutes: Boolean,
     hasSelectedMessage: Boolean,
     isMessageLoading: Boolean,
 ): MailboxBackTarget = if (
-    !expanded &&
-        !useNativeSecondaryRoutes &&
+    !useNativeSecondaryRoutes &&
         (hasSelectedMessage || isMessageLoading)
 ) {
     MailboxBackTarget.LIST

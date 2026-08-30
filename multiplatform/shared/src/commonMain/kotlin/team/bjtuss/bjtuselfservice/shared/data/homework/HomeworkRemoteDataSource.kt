@@ -86,7 +86,7 @@ class SchoolHomeworkRemoteDataSource(
             }
         }
         val listSlots = Semaphore(MAX_CONCURRENT_HOMEWORK_REQUESTS)
-        val collected = coroutineScope {
+        val responses = coroutineScope {
             listRequests.map { request ->
                 async {
                     listSlots.withPermit {
@@ -101,14 +101,21 @@ class SchoolHomeworkRemoteDataSource(
                             ),
                         )
                         when (val parsed = parseHomeworkList(response.bodyText(), request.homeworkType)) {
-                            is HomeworkJsonParseResult.Failure -> emptyList()
-                            is HomeworkJsonParseResult.Success -> parsed.value
+                            is HomeworkJsonParseResult.Failure -> HomeworkListResponse(
+                                homework = emptyList(),
+                                malformed = true,
+                            )
+                            is HomeworkJsonParseResult.Success -> HomeworkListResponse(
+                                homework = parsed.value,
+                                malformed = false,
+                            )
                         }
                     }
                 }
-            }.awaitAll().flatten()
+            }.awaitAll()
         }
-        val unique = collected.distinctBy(Homework::stableKey)
+        if (responses.any(HomeworkListResponse::malformed)) malformed()
+        val unique = responses.flatMap(HomeworkListResponse::homework).distinctBy(Homework::stableKey)
         val scoreSlots = Semaphore(MAX_CONCURRENT_HOMEWORK_REQUESTS)
         return coroutineScope {
             unique.map { item ->
@@ -434,6 +441,11 @@ class SchoolHomeworkRemoteDataSource(
 private data class HomeworkListRequest(
     val course: SmartCourse,
     val homeworkType: Int,
+)
+
+private data class HomeworkListResponse(
+    val homework: List<Homework>,
+    val malformed: Boolean,
 )
 
 private fun String.queryParameters(): LinkedHashMap<String, String> {
