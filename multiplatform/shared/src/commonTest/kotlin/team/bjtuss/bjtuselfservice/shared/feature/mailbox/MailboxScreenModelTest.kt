@@ -102,6 +102,7 @@ class MailboxScreenModelTest {
             model.prepareMessage(summary)
             val loadingState = assertIs<MailboxUiState.Ready>(model.state.value)
             assertEquals(null, loadingState.selectedMessage)
+            assertEquals(summary.id, loadingState.pendingMessageId)
             assertTrue(loadingState.isMessageLoading)
 
             model.openMessage(summary)
@@ -112,6 +113,7 @@ class MailboxScreenModelTest {
             model.clearSelectedMessage()
             val returnedState = assertIs<MailboxUiState.Ready>(model.state.value)
             assertEquals(null, returnedState.selectedMessage)
+            assertEquals(summary.id, returnedState.pendingMessageId)
             assertEquals(listOf(summary), returnedState.messages)
         }
     }
@@ -343,7 +345,38 @@ class MailboxScreenModelTest {
 
             val ready = assertIs<MailboxUiState.Ready>(model.state.value)
             assertNull(ready.selectedMessage)
+            assertEquals(summary.id, ready.pendingMessageId)
             assertFalse(ready.isMessageLoading)
+        }
+    }
+
+    @Test
+    fun reloadsPendingMessageAfterOverlappingDetailPageClearsLoading() {
+        runBlocking {
+            val summary = sampleSummary("message-1", "课程通知")
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 1, messages = listOf(summary)),
+                detail = summary.toDetail(),
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+            model.initialize()
+            model.prepareMessage(summary)
+            model.openMessage(summary)
+
+            // 上一封详情 Activity 改绑到当前代次后 dispose，相当于清掉当前 loading。
+            model.clearSelectedMessage()
+            val cleared = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertNull(cleared.selectedMessage)
+            assertEquals(summary.id, cleared.pendingMessageId)
+            assertFalse(cleared.isMessageLoading)
+
+            model.openMessage(summary)
+            val reloaded = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(summary.id, reloaded.selectedMessage?.id)
+            assertFalse(reloaded.isMessageLoading)
         }
     }
 }

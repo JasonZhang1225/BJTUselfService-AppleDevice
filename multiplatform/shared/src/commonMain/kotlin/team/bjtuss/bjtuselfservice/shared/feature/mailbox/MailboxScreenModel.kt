@@ -32,6 +32,7 @@ sealed interface MailboxUiState {
         val messages: List<MailSummary> = emptyList(),
         val totalCount: Int = 0,
         val selectedMessage: MailMessage? = null,
+        val pendingMessageId: String? = null,
         val isListLoading: Boolean = false,
         val isLoadingMore: Boolean = false,
         val hasMoreMessages: Boolean = false,
@@ -170,6 +171,7 @@ class MailboxScreenModel(
                 messages = emptyList(),
                 totalCount = 0,
                 selectedMessage = null,
+                pendingMessageId = null,
                 isListLoading = true,
                 isLoadingMore = false,
                 hasMoreMessages = false,
@@ -237,6 +239,7 @@ class MailboxScreenModel(
         beginMessageRequest(message.id)
         mutableState.value = current.copy(
             selectedMessage = null,
+            pendingMessageId = message.id,
             isMessageLoading = true,
             failure = null,
         )
@@ -258,6 +261,7 @@ class MailboxScreenModel(
             applyMessageResult(generation, requestedId) { latest ->
                 latest.copy(
                     selectedMessage = detail,
+                    pendingMessageId = requestedId,
                     isMessageLoading = false,
                     failure = null,
                 )
@@ -374,6 +378,7 @@ class MailboxScreenModel(
         if (openedGeneration != null && openedGeneration != messageGeneration) return
         messageRequestId = null
         messageGeneration += 1
+        // 保留 pendingMessageId：原生详情页被上一页误清 loading 后，仍能按它重试。
         mutableState.value = current.copy(selectedMessage = null, isMessageLoading = false)
     }
 

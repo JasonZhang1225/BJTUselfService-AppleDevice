@@ -42,7 +42,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -132,14 +131,6 @@ fun MailboxWorkspace(
         // 紧凑端先 push 写信页，再在共享模型中准备草稿；根页不会闪出半成品编辑页。
         onOpenNativeCompose?.invoke()
         scope.launch { model.startCompose(replyToMessageId) }
-    }
-
-    if (nativeDetail) {
-        // 必须记下打开时的代次：上一封详情页的 onDispose 可能在下一封已经 prepare 之后才执行。
-        val openedGeneration = model.currentMessageGeneration()
-        DisposableEffect(model, openedGeneration) {
-            onDispose { model.clearSelectedMessage(openedGeneration) }
-        }
     }
 
     LaunchedEffect(model, nativeDetail) {
@@ -437,6 +428,20 @@ private fun MailboxReadyWorkspace(
     val composeActive = state.compose.isLoading ||
         state.compose.draft != null ||
         state.compose.failure != null
+    LaunchedEffect(
+        nativeDetail,
+        state.pendingMessageId,
+        state.selectedMessage?.id,
+        state.isMessageLoading,
+    ) {
+        if (!nativeDetail) return@LaunchedEffect
+        val pendingId = state.pendingMessageId ?: return@LaunchedEffect
+        if (state.selectedMessage?.id == pendingId || state.isMessageLoading || state.failure != null) {
+            return@LaunchedEffect
+        }
+        val summary = state.messages.firstOrNull { it.id == pendingId } ?: return@LaunchedEffect
+        model.openMessage(summary)
+    }
     // expanded 是导航层给出的布局意图，宽度检查是第二道保险，避免窄窗口硬塞三栏。
     BoxWithConstraints(
         modifier = modifier
@@ -1111,7 +1116,7 @@ private fun MailboxDetailPane(
     val message = state.selectedMessage
     val scrollState = rememberScrollState()
     val waitingForMessage = state.isMessageLoading ||
-        (fullScreen && message == null && state.failure == null)
+        (fullScreen && message == null && state.pendingMessageId != null && state.failure == null)
     Column(
         modifier = modifier
             .verticalScroll(scrollState)
