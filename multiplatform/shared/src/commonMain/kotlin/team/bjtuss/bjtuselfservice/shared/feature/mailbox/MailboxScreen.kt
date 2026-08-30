@@ -135,13 +135,15 @@ fun MailboxWorkspace(
     }
 
     if (nativeDetail) {
-        // 原生详情页退出后，主邮箱页应回到列表而不是保留上一封选中邮件。
-        DisposableEffect(model) {
-            onDispose { model.clearSelectedMessage() }
+        // 必须记下打开时的代次：上一封详情页的 onDispose 可能在下一封已经 prepare 之后才执行。
+        val openedGeneration = model.currentMessageGeneration()
+        DisposableEffect(model, openedGeneration) {
+            onDispose { model.clearSelectedMessage(openedGeneration) }
         }
     }
 
-    LaunchedEffect(model) {
+    LaunchedEffect(model, nativeDetail) {
+        if (nativeDetail) return@LaunchedEffect
         if (model.state.value == MailboxUiState.Idle) {
             // 先让一级页转场完成，再建立邮箱会话，避免页面初次进入时出现跳动。
             delay(450)
@@ -452,7 +454,8 @@ private fun MailboxReadyWorkspace(
         } else if (nativeDetail) {
                 MailboxDetailPane(
                     state = state,
-                    compact = false,
+                    compact = true,
+                    fullScreen = true,
                     onRetry = onRefresh,
                     onRetrySession = onRetrySession,
                     isRetrying = isSessionRetrying,
@@ -503,6 +506,7 @@ private fun MailboxReadyWorkspace(
                 MailboxDetailPane(
                     state = state,
                     compact = false,
+                    fullScreen = false,
                     onRetry = onRefresh,
                     onRetrySession = onRetrySession,
                     isRetrying = isSessionRetrying,
@@ -519,6 +523,7 @@ private fun MailboxReadyWorkspace(
             MailboxDetailPane(
                 state = state,
                 compact = true,
+                fullScreen = true,
                 onRetry = onRefresh,
                 onRetrySession = onRetrySession,
                 isRetrying = isSessionRetrying,
@@ -1095,6 +1100,7 @@ private fun mailboxAvatarLabel(value: String): String {
 private fun MailboxDetailPane(
     state: MailboxUiState.Ready,
     compact: Boolean,
+    fullScreen: Boolean,
     onRetry: () -> Unit,
     onRetrySession: (() -> Unit)?,
     isRetrying: Boolean,
@@ -1104,13 +1110,15 @@ private fun MailboxDetailPane(
 ) {
     val message = state.selectedMessage
     val scrollState = rememberScrollState()
+    val waitingForMessage = state.isMessageLoading ||
+        (fullScreen && message == null && state.failure == null)
     Column(
         modifier = modifier
             .verticalScroll(scrollState)
             .desktopTouchScroll(scrollState)
             .padding(horizontal = if (compact) 18.dp else 28.dp, vertical = 12.dp),
     ) {
-        if (state.isMessageLoading) {
+        if (waitingForMessage) {
             Box(
                 Modifier.fillMaxWidth().padding(top = 150.dp),
                 contentAlignment = Alignment.Center,
@@ -1125,8 +1133,6 @@ private fun MailboxDetailPane(
                     onRetrySession = onRetrySession,
                     isRetrying = isRetrying,
                 )
-            } else {
-                MailboxDetailEmptyState()
             }
         } else {
             MailboxMessageDetail(message = message, onOpenWeb = onOpenWeb, onReply = onReply)
@@ -1439,31 +1445,6 @@ private fun MailboxEmptyState(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),
-        )
-    }
-}
-
-@Composable
-private fun MailboxDetailEmptyState() {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 150.dp, bottom = 40.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        MailboxEnvelopeMark(
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
-            modifier = Modifier.size(48.dp),
-        )
-        Text(
-            "选择一封邮件查看内容",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 14.dp),
-        )
-        Text(
-            "阅读区会在这里展开",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
-            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

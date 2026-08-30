@@ -1,5 +1,7 @@
 package team.bjtuss.bjtuselfservice.shared.feature.mailbox
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import team.bjtuss.bjtuselfservice.shared.data.mailbox.MailboxRemoteDataSource
 import team.bjtuss.bjtuselfservice.shared.domain.mailbox.MailComposeDraft
@@ -14,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class MailboxScreenModelTest {
@@ -224,6 +227,125 @@ class MailboxScreenModelTest {
             assertEquals(listOf(summary), ready.messages)
         }
     }
+
+    @Test
+    fun staleDetailDisposeDoesNotClearANewerMessage() {
+        runBlocking {
+            val first = sampleSummary("message-1", "第一封")
+            val second = sampleSummary("message-2", "第二封")
+            val firstStarted = CompletableDeferred<Unit>()
+            val releaseFirst = CompletableDeferred<Unit>()
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 2, messages = listOf(first, second)),
+                detail = emptyDetail(),
+                details = mapOf(
+                    first.id to first.toDetail(),
+                    second.id to second.toDetail(),
+                ),
+                readBlock = { id ->
+                    if (id == first.id) {
+                        firstStarted.complete(Unit)
+                        releaseFirst.await()
+                    }
+                },
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+            model.initialize()
+
+            model.prepareMessage(first)
+            val firstGeneration = model.currentMessageGeneration()
+            val firstJob = launch { model.openMessage(first) }
+            firstStarted.await()
+
+            model.prepareMessage(second)
+            val secondJob = launch { model.openMessage(second) }
+            secondJob.join()
+
+            model.clearSelectedMessage(openedGeneration = firstGeneration)
+
+            val afterStaleClear = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(second.id, afterStaleClear.selectedMessage?.id)
+            assertFalse(afterStaleClear.isMessageLoading)
+
+            releaseFirst.complete(Unit)
+            firstJob.join()
+
+            val finalState = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(second.id, finalState.selectedMessage?.id)
+            assertEquals("第二封", finalState.selectedMessage?.subject)
+            assertFalse(finalState.isMessageLoading)
+        }
+    }
+
+    @Test
+    fun laterMessageDoesNotWaitBehindAStaleDetailRequest() {
+        runBlocking {
+            val first = sampleSummary("message-1", "第一封")
+            val second = sampleSummary("message-2", "第二封")
+            val firstStarted = CompletableDeferred<Unit>()
+            val releaseFirst = CompletableDeferred<Unit>()
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 2, messages = listOf(first, second)),
+                detail = emptyDetail(),
+                details = mapOf(
+                    first.id to first.toDetail(),
+                    second.id to second.toDetail(),
+                ),
+                readBlock = { id ->
+                    if (id == first.id) {
+                        firstStarted.complete(Unit)
+                        releaseFirst.await()
+                    }
+                },
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+            model.initialize()
+
+            val firstJob = launch { model.openMessage(first) }
+            firstStarted.await()
+            model.openMessage(second)
+
+            val ready = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(second.id, ready.selectedMessage?.id)
+            assertFalse(ready.isMessageLoading)
+
+            releaseFirst.complete(Unit)
+            firstJob.join()
+            val afterStale = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertEquals(second.id, afterStale.selectedMessage?.id)
+        }
+    }
+
+    @Test
+    fun matchingDetailDisposeStillClearsTheCurrentMessage() {
+        runBlocking {
+            val summary = sampleSummary("message-1", "课程通知")
+            val remote = FakeMailboxRemote(
+                page = MailboxPage(totalCount = 1, messages = listOf(summary)),
+                detail = summary.toDetail(),
+            )
+            val model = MailboxScreenModel(
+                transport = CookieTransport(listOf(SchoolSessionCookie("session", "secret"))),
+                remote = remote,
+            )
+            model.initialize()
+            model.prepareMessage(summary)
+            val openedGeneration = model.currentMessageGeneration()
+            model.openMessage(summary)
+
+            model.clearSelectedMessage(openedGeneration = openedGeneration)
+
+            val ready = assertIs<MailboxUiState.Ready>(model.state.value)
+            assertNull(ready.selectedMessage)
+            assertFalse(ready.isMessageLoading)
+        }
+    }
 }
 
 private class CookieTransport(
@@ -244,6 +366,8 @@ private class FakeMailboxRemote(
     private val page: MailboxPage,
     private val detail: MailMessage,
     private val nextPage: MailboxPage? = null,
+    private val details: Map<String, MailMessage> = emptyMap(),
+    private val readBlock: suspend (String) -> Unit = {},
 ) : MailboxRemoteDataSource {
     val requestedFolderIds = mutableListOf<Int>()
     var sentDraft: MailComposeDraft? = null
@@ -258,7 +382,10 @@ private class FakeMailboxRemote(
         return if (start > 0 && nextPage != null) nextPage else page
     }
 
-    override suspend fun readMessage(messageId: String): MailMessage = detail
+    override suspend fun readMessage(messageId: String): MailMessage {
+        readBlock(messageId)
+        return details[messageId] ?: detail
+    }
 
     override suspend fun beginCompose(replyToMessageId: String?): MailComposeDraft =
         MailComposeDraft(
@@ -273,6 +400,32 @@ private class FakeMailboxRemote(
 
     override suspend fun cancelCompose(composeId: String) = Unit
 }
+
+private fun sampleSummary(id: String, subject: String) = MailSummary(
+    id = id,
+    folderId = 1,
+    sender = "teacher@example.test",
+    subject = subject,
+    preview = "摘要",
+    sentAt = "2026-08-29 09:10:00",
+    receivedAt = "2026-08-29 09:10:00",
+    sizeBytes = 128,
+    isRead = true,
+    hasAttachments = false,
+)
+
+private fun MailSummary.toDetail() = MailMessage(
+    id = id,
+    folderId = folderId,
+    from = listOf(sender),
+    to = listOf("student@example.test"),
+    cc = emptyList(),
+    bcc = emptyList(),
+    subject = subject,
+    bodyHtml = "<p>$subject</p>",
+    sentAt = sentAt,
+    attachments = emptyList(),
+)
 
 private fun emptyDetail() = MailMessage(
     id = "detail",

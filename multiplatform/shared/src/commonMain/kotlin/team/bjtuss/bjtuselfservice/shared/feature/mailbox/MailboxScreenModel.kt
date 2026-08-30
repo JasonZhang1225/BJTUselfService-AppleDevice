@@ -109,6 +109,9 @@ class MailboxScreenModel(
     private val operationMutex = Mutex()
     // 详情页可能在上一次读取尚未返回时被退出并重新打开；只允许当前消息的结果落地。
     private var messageRequestId: String? = null
+    // 每次 prepare/open 递增。原生详情页 onDispose 必须带上打开时的代次，
+    // 否则快速返回后再打开下一封时，上一页迟到的 clear 会把新详情打成空页。
+    private var messageGeneration = 0
 
     suspend fun initialize() {
         if (mutableState.value == MailboxUiState.Idle) refresh()
@@ -118,6 +121,7 @@ class MailboxScreenModel(
         operationMutex.withLock {
             val previous = mutableState.value as? MailboxUiState.Ready
             messageRequestId = null
+            messageGeneration += 1
             mutableState.value = MailboxUiState.Preparing
             val cookies = runCatching { transport.sessionCookiesFor(MAILBOX_URL) }
                 .getOrElse {
@@ -173,6 +177,7 @@ class MailboxScreenModel(
                 failure = null,
             )
             messageRequestId = null
+            messageGeneration += 1
             loadMessages(folderId)
         }
     }
@@ -223,10 +228,13 @@ class MailboxScreenModel(
         }
     }
 
-    /** 在原生详情页 push 前同步切到 loading，避免新页面先看到“选择一封邮件”。 */
+    /** 原生详情页打开时的代次；离开时用同一代次调用 [clearSelectedMessage]。 */
+    fun currentMessageGeneration(): Int = messageGeneration
+
+    /** 在原生详情页 push 前同步切到 loading，避免新页面先看到空阅读区。 */
     fun prepareMessage(message: MailSummary) {
         val current = mutableState.value as? MailboxUiState.Ready ?: return
-        messageRequestId = message.id
+        beginMessageRequest(message.id)
         mutableState.value = current.copy(
             selectedMessage = null,
             isMessageLoading = true,
@@ -234,41 +242,41 @@ class MailboxScreenModel(
         )
     }
 
+    /**
+     * 详情读取不占用列表互斥锁。上一封还在请求时再打开下一封，必须立刻开始新请求；
+     * 过期结果靠 [messageRequestId] 和代次丢弃，不能让第 3、4 封卡在队列里。
+     */
     suspend fun openMessage(message: MailSummary) {
-        operationMutex.withLock {
-            val current = mutableState.value as? MailboxUiState.Ready ?: return
-            messageRequestId = message.id
-            mutableState.value = current.copy(
-                selectedMessage = null,
-                isMessageLoading = true,
-                failure = null,
-            )
-            try {
-                val detail = remote.readMessage(message.id)
-                val latest = mutableState.value as? MailboxUiState.Ready ?: return
-                if (messageRequestId == message.id) {
-                    mutableState.value = latest.copy(
-                        selectedMessage = detail,
-                        isMessageLoading = false,
-                        failure = null,
-                    )
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: MailboxRemoteException) {
-                if (messageRequestId == message.id) {
-                    mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
-                        isMessageLoading = false,
-                        failure = error.reason.toUiFailure(),
-                    ) ?: return
-                }
-            } catch (_: Exception) {
-                if (messageRequestId == message.id) {
-                    mutableState.value = (mutableState.value as? MailboxUiState.Ready)?.copy(
-                        isMessageLoading = false,
-                        failure = MailboxFailure.NETWORK,
-                    ) ?: return
-                }
+        val current = mutableState.value as? MailboxUiState.Ready ?: return
+        if (messageRequestId != message.id || !current.isMessageLoading) {
+            prepareMessage(message)
+        }
+        val generation = messageGeneration
+        val requestedId = message.id
+        try {
+            val detail = remote.readMessage(message.id)
+            applyMessageResult(generation, requestedId) { latest ->
+                latest.copy(
+                    selectedMessage = detail,
+                    isMessageLoading = false,
+                    failure = null,
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: MailboxRemoteException) {
+            applyMessageResult(generation, requestedId) { latest ->
+                latest.copy(
+                    isMessageLoading = false,
+                    failure = error.reason.toUiFailure(),
+                )
+            }
+        } catch (_: Exception) {
+            applyMessageResult(generation, requestedId) { latest ->
+                latest.copy(
+                    isMessageLoading = false,
+                    failure = MailboxFailure.NETWORK,
+                )
             }
         }
     }
@@ -357,15 +365,36 @@ class MailboxScreenModel(
         }
     }
 
-    fun clearSelectedMessage() {
+    /**
+     * @param openedGeneration 原生详情页打开时的代次。迟到的上一页 dispose 不得清掉正在看的下一封。
+     * 壳内返回不传代次，总是清当前选中。
+     */
+    fun clearSelectedMessage(openedGeneration: Int? = null) {
         val current = mutableState.value as? MailboxUiState.Ready ?: return
+        if (openedGeneration != null && openedGeneration != messageGeneration) return
         messageRequestId = null
+        messageGeneration += 1
         mutableState.value = current.copy(selectedMessage = null, isMessageLoading = false)
     }
 
     fun dismissFailure() {
         val current = mutableState.value as? MailboxUiState.Ready ?: return
         mutableState.value = current.copy(failure = null)
+    }
+
+    private fun beginMessageRequest(messageId: String) {
+        messageRequestId = messageId
+        messageGeneration += 1
+    }
+
+    private fun applyMessageResult(
+        generation: Int,
+        requestedId: String,
+        transform: (MailboxUiState.Ready) -> MailboxUiState.Ready,
+    ) {
+        if (messageGeneration != generation || messageRequestId != requestedId) return
+        val latest = mutableState.value as? MailboxUiState.Ready ?: return
+        mutableState.value = transform(latest)
     }
 
     private suspend fun loadMessages(folderId: Int) {
