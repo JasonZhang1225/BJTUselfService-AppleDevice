@@ -683,7 +683,8 @@ val finalizeMacDmg by tasks.registering(FinalizeMacDmg::class) {
             "compose/binaries/main/dmg/$desktopPackageName-$desktopPackageVersion.dmg",
         ),
     )
-    volumeIcon.set(project.file("src/main/resources/BJTUselfServiceKMP-v2.icns"))
+    // DMG volume/file icon: installer artwork; keep the app icon unchanged.
+    volumeIcon.set(project.file("src/main/resources/BJTUselfServiceKMP-installer-volume-v2.icns"))
     volumeName.set(macDisplayName)
     sourceAppFileName.set("$desktopPackageName.app")
     displayAppFileName.set("$macDisplayName.app")
