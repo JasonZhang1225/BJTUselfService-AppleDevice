@@ -28,6 +28,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // Non-Android Gradle tasks still configure this project. Only Android builds
+    // need the keystore to exist; desktop/iOS packaging must not depend on it.
+    val androidBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+        taskName.contains(":androidApp:", ignoreCase = true) ||
+            taskName.substringAfterLast(':').let { task ->
+                task.startsWith("assemble", ignoreCase = true) ||
+                    task.startsWith("bundle", ignoreCase = true) ||
+                    task.contains("Android", ignoreCase = true)
+            }
+    }
     // One upload keystore for local and CI, so APKs can overlay-install.
     val uploadKeystore = File(
         providers.environmentVariable("BJTU_ANDROID_KEYSTORE")
@@ -39,9 +49,11 @@ android {
             )
             .get(),
     )
-    require(uploadKeystore.isFile) {
-        "Missing Android upload keystore at ${uploadKeystore.absolutePath}. " +
-            "Copy the shared key to that path, or set BJTU_ANDROID_KEYSTORE."
+    if (androidBuildRequested) {
+        require(uploadKeystore.isFile) {
+            "Missing Android upload keystore at ${uploadKeystore.absolutePath}. " +
+                "Copy the shared key to that path, or set BJTU_ANDROID_KEYSTORE."
+        }
     }
     fun envOrDefault(name: String, default: String): String {
         val value = providers.environmentVariable(name).orNull

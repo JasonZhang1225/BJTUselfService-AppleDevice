@@ -253,7 +253,10 @@ jobs:
           NAME="BJTUSelfService-KMP-${VERSION}-iOS-unsigned.ipa"
           rm -rf ipa-stage
           mkdir -p ipa-stage/Payload
-          cp -R "$APP" ipa-stage/Payload/
+          APP_NAME="BJTUselfServiceKMP.app"
+          cp -R "$APP" "ipa-stage/Payload/$APP_NAME"
+          mv "ipa-stage/Payload/$APP_NAME/交大自由行 KMP" "ipa-stage/Payload/BJTUselfServiceKMP.app/BJTUselfServiceKMP"
+          /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable BJTUselfServiceKMP' "ipa-stage/Payload/$APP_NAME/Info.plist"
           (cd ipa-stage && zip -qry "../$NAME" Payload)
           echo "file=$NAME" >> "$GITHUB_OUTPUT"
           ls -lh "$NAME"
@@ -268,7 +271,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [android, windows, macos, ios]
-    if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') && (needs.android.result == 'success' || needs.windows.result == 'success' || needs.macos.result == 'success' || needs.ios.result == 'success') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && needs.android.result == 'success' && needs.windows.result == 'success' && needs.macos.result == 'success' && needs.ios.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -278,23 +281,31 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Publish pre-release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}：KMP 四端构建
-          prerelease: true
+          name: ${{ github.ref_name }}：交大自由行 KMP 正式版
+          prerelease: false
           fail_on_unmatched_files: false
           files: dist/*
           body: |
             ### 本版更新
 
-            - 新增物理在线：复用 App 内 CAS/Moodle 会话读取课程、作业安排、提交状态、批改信息、评语和已提交文件。
-            - 物理在线作业的开放/截止时间进入首页安排；恰好在次日 `00:00` 截止的作业，首页按前一天标记截止。
-            - 物理在线增加按学号隔离的本地缓存。校园网或认证不可达时继续显示只读缓存，并明确显示“同步失败·正显示缓存”、失败原因和缓存创建时间。
-            - 首页部分同步失败可查看失败模块并主动重试；首页刷新、失败重试和进入物理在线页不会重复触发同一轮自动同步，打开/退出作业详情也不会清掉失败状态。
-            - 移动端物理在线作业详情改为原生二级页面，桌面端保留底部详情弹窗；窄屏布局增加自适应边距和安排控件换行。
-            - 保留 1.7.3-KMP-B 的教学周 `getTimeList.weekCode` 优先与作业解析容错，并统一版本标识为 `1.7.4-KMP`。
+            - 重做邮箱原生前端：宽屏支持文件夹、邮件列表、阅读区三栏布局，紧凑端使用平台原生二级页面。
+            - 邮箱支持多个内置文件夹、分页、刷新、未读状态、附件元数据和结构化 HTML 表格正文显示。
+            - 增加写信和回复首版，支持服务器草稿初始化、回复预填、正文编辑和发送前确认。
+            - 优化物理在线作业状态：按北京时间区分已完成、未完成、逾期未交、逾期提交和截止时间未知，并以详情页明确提交信息为准。
+            - Windows 触摸滚动兼容层收口为 Windows 专用；修复精密触摸板惯性导致课表重复翻页的问题。
+            - 针对小米 HyperOS 高刷新率进行适配，清除错误的应用刷新率覆盖并关闭省电降帧干扰。
+            - Android/iOS 宽屏课表改用跟手横向分页；首页同步失败支持查看模块状态并手动重试，异常作业响应不会覆盖有效缓存。
+            - macOS DMG 保持中文应用/卷名称，并使用独立的安装卷图标资源。
+
+            ### 版本
+
+            - Android `1.7.5-KMP`（versionCode `16`，默认 `arm64-v8a`）
+            - iOS `1.7.5-KMP`（Build `16`，未签名 IPA）
+            - macOS / Windows 数值版本 `1.7.5`
 
             ### 安装说明
 
@@ -313,7 +324,8 @@ jobs:
 
             - 非正式商店签名 / 未公证；iOS unsigned IPA 需自行签名侧载；Mac 版可能需执行 `sudo xattr -r -d com.apple.quarantine /Applications/交大自由行 KMP.app`
             - 物理在线的自动同步依赖校园网，离开校园网时只能读取已有缓存；真实文件提交仍需在可编辑作业上继续验收。
-            - 小组件、系统通知等仍延后
-            - Windows MSI 使用 `1.7.4` 产品版本并沿用升级码；建议直接运行 MSI 覆盖升级，不要先卸载。
+            - 邮箱写信/回复已完成协议和界面接入，但真实发送、删除、移动、转发及附件写操作仍需单独验收。
+            - 小组件、系统通知等仍延后；Android 默认 APK 仅支持 `arm64-v8a`。
+            - Windows MSI 使用同一 UpgradeCode，支持同为 `1.7.5` 的安装包覆盖升级；建议直接运行 MSI，不要先卸载。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
