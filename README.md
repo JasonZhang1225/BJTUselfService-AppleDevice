@@ -1,9 +1,9 @@
 # 🚄 交大自由行 (BJTU Self Service)
 
 > 北京交通大学校园服务客户端 —— 让校园生活触手可及  
-> 本仓库为 **Kotlin Multiplatform 三端刷新版**（Android / iOS / macOS），在原安卓项目功能基线 `v1.7.0` 上迁移与增强。
+> 本仓库为 **Kotlin Multiplatform 多端刷新版**（Android / iOS / macOS / Windows），在原安卓项目功能基线 `v1.7.0` 上迁移与增强。
 
-[![KMP Pre-release](https://img.shields.io/github/v/release/JasonZhang1225/BJTUselfService-KMP-Refreshed?include_prereleases&style=flat-square&label=KMP%20版本)](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases)
+[![KMP Release](https://img.shields.io/github/v/release/JasonZhang1225/BJTUselfService-KMP-Refreshed?include_prereleases&style=flat-square&label=KMP%20版本)](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases)
 [![Upstream](https://img.shields.io/github/v/release/HFDLYS/BJTUselfService?style=flat-square&label=原作者安卓)](https://github.com/HFDLYS/BJTUselfService/releases/latest)
 [![Android](https://img.shields.io/badge/Android-9.0%2B-brightgreen?style=flat-square&logo=android)](https://developer.android.com)
 [![iOS](https://img.shields.io/badge/iOS-侧载/开发构建-000000?style=flat-square&logo=apple)](https://developer.apple.com)
@@ -17,12 +17,15 @@
 
 所有数据解析（包括验证码识别）均在**本地完成**，无需上传至第三方服务器，充分保障用户隐私安全。
 
-本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做三端共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。当前 pre-release 版本号 **1.7.5-KMP**。
+本 fork（[BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed)）在原作者 [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) 安卓版基础上，用 **KMP + Compose Multiplatform** 做多端共享实现；根目录冻结原 Android 工程，**新实现在 `multiplatform/`**。当前正式版本号 **1.7.5-KMP**。
 
 相对原版新增/增强（节选）：
 - **教室占用查询**（教务 `room_view`，原 1.7.0 安卓无）
 - **成绩按课程性质筛选**（必修 / 限选 / 任选 / 体育）
-- 三端统一壳层：「更多」收纳、顶栏同步胶囊、平板/桌面侧栏分屏与比例分栏
+- **物理在线**（CAS/Moodle 会话、课程与作业安排、提交状态、批改信息和按账号隔离缓存）
+- **邮箱原生前端**（宽屏三栏布局、紧凑端原生详情、文件夹切换、分页和 HTML 表格）
+- **Windows 桌面端**（x64 安装包、触摸滚动兼容和桌面端自适应布局）
+- 多端统一壳层：「更多」收纳、顶栏同步胶囊、平板/桌面侧栏分屏与比例分栏
 
 ## ✨ 功能特性
 
@@ -36,9 +39,10 @@
 - **课程表** — 直观的课程表预览界面，支持本科生与研究生
 - **考试日程** — 考试安排一览，变动自动提醒
 - **作业管理** — 查看、筛选、排序作业，支持作业上传与下载
+- **物理在线** — 查看物理在线课程、作业安排、提交状态、批改信息和评语；校园网不可达时显示按账号隔离的本地缓存
 
 ### 📬 信息服务
-- **校内邮箱** — 免登录查看邮箱邮件
+- **校内邮箱** — 复用 MIS 会话查看文件夹、邮件列表和详情，支持 HTML 表格与写信/回复
 - **校园卡余额** — 实时查看一卡通余额
 - **校园网余额** — 网络使用情况一目了然
 
@@ -63,7 +67,7 @@
 ```
 ┌─────────────────────────────────────────────┐
 │              UI（Compose Multiplatform）      │
-│     Android / iOS / macOS 共享 Screen + 壳层  │
+│  Android / iOS / macOS / Windows 共享 Screen + 壳层 │
 ├─────────────────────────────────────────────┤
 │           shared 领域 / 仓库 / 登录协议        │
 │  SQLDelight 缓存 · 平台 Keystore/Keychain     │
@@ -82,7 +86,7 @@
 | 本地缓存 | SQLDelight |
 | 凭据 | Android Keystore / Apple Keychain |
 | 验证码 | Android TorchScript、Apple Core ML |
-| 宿主 | androidApp · iosApp · desktopApp |
+| 宿主 | androidApp · iosApp · desktopApp · windowsApp |
 
 ## 🚀 快速开始
 
@@ -111,8 +115,10 @@ chmod +x gradlew
 ./gradlew :desktopApp:packageDmg
 
 # iOS 请用 Xcode 打开 multiplatform/iosApp，按开发证书签名安装；
-# 或本地打未签名 IPA 后侧载（见 builtapps/README.md）。
+# 或本地打未签名 IPA 后侧载。
 ```
+
+iOS 未签名 IPA 的自签与安装请参考 [iOS 自签与安装指南](docs/iOS-sign-guide.md)。
 
 原作者纯安卓工程仍在仓库根目录，可对照构建：
 
@@ -125,15 +131,16 @@ chmod +x gradlew
 | 仓库 | 说明 |
 |------|------|
 | [HFDLYS/BJTUselfService](https://github.com/HFDLYS/BJTUselfService) | 原作者安卓版与正式 Release |
-| [JasonZhang1225/BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed) | 本 KMP 三端 fork 与 pre-release |
+| [JasonZhang1225/BJTUselfService-KMP-Refreshed](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed) | 本 KMP 多端 fork 与正式 Release |
 
-本 fork 的 1.7.1-KMP 预发布包由本地构建后上传 Release，**不依赖**上游 `v*` 标签自动打包工作流。
+本 fork 的 `1.7.5-KMP` 正式包由 GitHub Actions 远端构建并上传到 [GitHub Release](https://github.com/JasonZhang1225/BJTUselfService-KMP-Refreshed/releases/tag/v1.7.5-KMP)。
 
 ## 📱 支持平台
 
 - **Android**：minSdk 28+，KMP 包名 `team.bjtuss.bjtuselfservice.kmp`（与原版包名不同）
-- **iOS**：开发/侧载构建（未签名 IPA 需自行重签名）
+- **iOS**：开发/侧载构建（未签名 IPA 需自行重签名，参考 [iOS 自签与安装指南](docs/iOS-sign-guide.md)）
 - **macOS**：Apple Silicon 自包含 `.app` / `.dmg`（开发 ad-hoc 签名，未公证）
+- **Windows**：x64 系统级 `.msi` 安装包，支持触摸滚动和同数值版本覆盖升级
 
 ## 🔒 隐私与安全
 
@@ -159,4 +166,4 @@ chmod +x gradlew
   - 提供了自定义壁纸和桌面课程表小组件
 
 - [JasonZhang1225](https://github.com/JasonZhang1225)
-  - KMP 三端迁移（Android / iOS / macOS）与后续壳层、教室占用等增强
+  - KMP 多端迁移（Android / iOS / macOS / Windows）、物理在线与邮箱前端重写，以及后续壳层、教室占用等增强
